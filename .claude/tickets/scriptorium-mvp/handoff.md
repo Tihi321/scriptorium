@@ -6,7 +6,7 @@ Updated 2026-10-08.
 
 Scriptorium is a Windows desktop app where AI agents work as a publishing house and gradually fill a library with books (fiction, non-fiction, children's). You watch them in a pixel-art office. The full design and every decision are in `docs/design.md`. It was worked out with the user over two sessions (2026-10-07 and 2026-10-08) in `C:\projects\Cowork\Computer\ideas\` and moved here when the repository was created.
 
-**No code exists yet, and there is no `plan.md` yet.** This ticket folder only holds this handoff.
+**No code exists yet.** The MVP plan is in `.claude/tickets/SCP-02-scriptorium-mvp-milestone-1-text-only/plan.md`.
 
 ## Repository state
 
@@ -47,7 +47,7 @@ Scriptorium is a Windows desktop app where AI agents work as a publishing house 
 
 ## Unresolved
 
-- **No implementation plan yet.** That's the next step.
+- The MVP implementation plan is written (see the SCP-02 ticket folder). Next: implement it.
 - Small choices that can be made during implementation:
   - The search API order (proposal: Tavily, then Brave).
   - Starting default models (proposal: DeepSeek for writing and editing, the local `nail-qwen3.6-35b-a3b-mtp` for summaries and checks, nomic for embeddings).

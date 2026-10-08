@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{title}}</title>
+<style>
+  /* Cover template. The engine fills {{title}}, {{author}}, {{genre}} and {{year}}, and sets the genre class below.
+     Colours and fonts per genre are in the .g-* rules. Only system fonts are used: no downloads. */
+  html, body { margin: 0; padding: 0; width: 1600px; height: 2560px; overflow: hidden; }
+  body {
+    --bg: #2f3e46; --fg: #f4efe6; --accent: #d9b44a; --font: Georgia, "Times New Roman", serif;
+    background: var(--bg); color: var(--fg); font-family: var(--font);
+  }
+  .g-fantasy   { --bg: #2b2250; --fg: #f3ecd8; --accent: #e0b84c; --font: "Palatino Linotype", Palatino, Georgia, serif; }
+  .g-mystery   { --bg: #1d2a33; --fg: #e8e6df; --accent: #c8553d; --font: Georgia, "Times New Roman", serif; }
+  .g-scifi     { --bg: #07142b; --fg: #e6f3ff; --accent: #4fd1c5; --font: "Trebuchet MS", Verdana, sans-serif; }
+  .g-romance   { --bg: #6b2737; --fg: #fff1ee; --accent: #f2b5a7; --font: "Palatino Linotype", Palatino, Georgia, serif; }
+  .g-horror    { --bg: #120f12; --fg: #e9e2e2; --accent: #a4161a; --font: Georgia, "Times New Roman", serif; }
+  .g-historical{ --bg: #4a3728; --fg: #f4ead7; --accent: #c9a227; --font: "Palatino Linotype", Palatino, Georgia, serif; }
+  .g-adventure { --bg: #144552; --fg: #fdf6e3; --accent: #f2a541; --font: "Trebuchet MS", Verdana, sans-serif; }
+  .g-literary  { --bg: #e9e3d6; --fg: #23252a; --accent: #8a4b2a; --font: Georgia, "Times New Roman", serif; }
+  .g-humor     { --bg: #ffd166; --fg: #25212b; --accent: #ef476f; --font: "Comic Sans MS", "Trebuchet MS", sans-serif; }
+  .g-bedtime   { --bg: #1b2a5c; --fg: #fff8e1; --accent: #ffd966; --font: "Trebuchet MS", Verdana, sans-serif; }
+  .g-children  { --bg: #2a9d8f; --fg: #fffdf5; --accent: #ffe066; --font: "Trebuchet MS", Verdana, sans-serif; }
+  .g-nonfiction{ --bg: #264653; --fg: #f1faee; --accent: #e9c46a; --font: "Segoe UI", Verdana, sans-serif; }
+  .frame { position: absolute; inset: 90px; border: 6px solid var(--accent); box-sizing: border-box; }
+  .pattern { position: absolute; inset: 0; opacity: 0.18;
+    background:
+      radial-gradient(circle at 20% 15%, var(--accent) 0 8px, transparent 9px) 0 0 / 160px 160px,
+      radial-gradient(circle at 70% 60%, var(--fg) 0 5px, transparent 6px) 0 0 / 240px 240px; }
+  .genre { position: absolute; top: 230px; left: 0; right: 0; text-align: center; letter-spacing: 12px;
+    text-transform: uppercase; font-size: 56px; color: var(--accent); }
+  .middle { position: absolute; top: 560px; bottom: 560px; left: 160px; right: 160px; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center; }
+  .title { font-size: 170px; line-height: 1.1; font-weight: bold; }
+  .rule { flex: none; width: 480px; height: 8px; background: var(--accent); margin: 90px 0; }
+  .author { font-size: 96px; }
+  .ai { position: absolute; bottom: 190px; left: 0; right: 0; text-align: center; font-size: 40px; opacity: 0.8; }
+</style>
+</head>
+<body class="{{genre_class}}">
+  <div class="pattern"></div>
+  <div class="frame"></div>
+  <div class="genre">{{genre}}</div>
+  <div class="middle">
+    <div class="title">{{title}}</div>
+    <div class="rule"></div>
+    <div class="author">{{author}}</div>
+  </div>
+  <div class="ai">AI-written &middot; {{year}}</div>
+</body>
+</html>

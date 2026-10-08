@@ -1,0 +1,34 @@
+# Windows installer (NSIS, per user, x64). Build it with `npm run dist`; the unpacked app alone with `npm run dist:dir`.
+appId: com.tihi321.scriptorium
+productName: Scriptorium
+copyright: Scriptorium
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - '!out/**/*.map'
+# No asar archive. sqlite-vec's loadable vec0.dll and the keyring .node file cannot be used from inside an archive,
+# and the engine (a separate process) resolves sqlite-vec with require.resolve, which returns an `app.asar` path
+# that SQLite cannot open. Without the archive every path is a real file path. (With asar, the engine's
+# `getLoadablePath()` result would need `app.asar` replaced by `app.asar.unpacked`, plus asarUnpack for
+# node_modules/sqlite-vec-windows-x64 and node_modules/@napi-rs/keyring-win32-x64-msvc.)
+asar: false
+extraResources:
+  # The first-run data folder is copied from here (main passes --seed to the engine).
+  - from: seed
+    to: seed
+  - from: build/icon.png
+    to: icon.png
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: Scriptorium-Setup-${version}.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
