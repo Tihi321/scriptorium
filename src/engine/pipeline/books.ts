@@ -283,6 +283,7 @@ export class BookStore {
       author: d.author ?? 'Unknown',
       blurb: typeof d.blurb === 'string' ? d.blurb : undefined,
       year: Number(d.year ?? new Date().getFullYear()),
+      genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
       chapters: [...chapters.map((c) => ({ title: c.title, body: c.body })), ...(refs ? [refs] : [])],
       coverPngPath: await fs.access(cover).then(() => cover, () => undefined)
     })
@@ -316,6 +317,7 @@ export class BookStore {
       description: typeof d.blurb === 'string' ? d.blurb : '',
       year: Number(d.year ?? new Date().getFullYear()),
       modified: new Date(),
+      genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
       chapters: [...chapters.map((c) => ({ title: c.title, body: c.body })), ...(refs ? [refs] : [])],
       coverPng
     })

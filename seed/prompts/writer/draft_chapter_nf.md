@@ -19,5 +19,5 @@ Rules for a non-fiction chapter:
 - After every sentence that states a fact taken from a source, put the number of that source in square brackets, for example [2] or [2][3]. Use only the numbers in the list of numbered sources. A claim that has no number is a claim without a source, and it will be sent back.
 - Put the facts in your own words. Never copy sentences from the notes.
 - Explain clearly: define a term when it first appears, one idea at a time, with concrete examples. Keep the argument of the book moving, and keep the terms used the same way as in the earlier text.
-- Write in plain prose in paragraphs. You may use a line with only --- between larger parts. Do not write a title, chapter heading, bullet lists, notes or a summary of what you did.
+- Write in plain prose in paragraphs. You may use a line with only --- between larger parts. Do not write a title, chapter heading, bullet lists, notes or a summary of what you did. Answer with the chapter text only, never as JSON or with field names.
 - Do not invent people, quotes, studies or anecdotes.

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { atomicWrite } from '../store/atomic'
+import { coverAuthorSize, coverPatternSvg, coverTitleSize } from './art'
 import { escapeXml } from './xhtml'
 
 export const COVER_WIDTH = 1600
@@ -38,7 +39,10 @@ export function fillCover(template: string, vars: { title: string; author: strin
     author: escapeXml(vars.author),
     genre: escapeXml(vars.genre),
     year: String(vars.year),
-    genre_class: vars.genreClass
+    genre_class: vars.genreClass,
+    pattern_svg: coverPatternSvg(vars.title),
+    title_size: String(coverTitleSize(vars.title)),
+    author_size: String(coverAuthorSize(vars.author))
   }
   return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k: string) => map[k] ?? '')
 }

@@ -6,7 +6,7 @@ Updated 2026-10-08.
 
 Scriptorium is a Windows desktop app where AI agents work as a publishing house and gradually fill a library with books (fiction, non-fiction, children's). You watch them in a pixel-art office. The full design and every decision are in `docs/design.md`. It was worked out with the user over two sessions (2026-10-07 and 2026-10-08) in `C:\projects\Cowork\Computer\ideas\` and moved here when the repository was created.
 
-**No code exists yet.** The MVP plan is in `.claude/tickets/SCP-02-scriptorium-mvp-milestone-1-text-only/plan.md`.
+**Superseded.** This is the design-session handoff. The MVP has since been built (2026-10-08 to 2026-10-09): see `.claude/tickets/SCP-02-scriptorium-mvp-milestone-1-text-only/` for the plan, `changelog.md` and the current `handoff.md`. The sections below describe the state before any code existed.
 
 ## Repository state
 

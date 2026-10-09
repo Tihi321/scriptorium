@@ -8,6 +8,7 @@ import type { BookState } from '../src/engine/pipeline/advance'
 import { FactBase, buildReferences, citedNumbers, numberedNoteText } from '../src/engine/memory/factbase'
 import { BookStore } from '../src/engine/pipeline/books'
 import { candidateFacts } from '../src/engine/pipeline/nfcontext'
+import { cleanProse } from '../src/engine/pipeline/llm'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
 import { parseMd } from '../src/shared/md'
 import { parseTopics } from '../src/engine/store/topics'
@@ -91,6 +92,16 @@ describe('the fact base', () => {
       { fact: 'The press used metal type', sources: [1] },
       { fact: 'Another one', sources: [2] }
     ])
+  })
+
+  it('takes the prose out of a reply that a model wrapped in a JSON object (seen in the real run)', () => {
+    const prose = 'The creation of movable type was a long struggle. '.repeat(8).trim()
+    const wrapped = JSON.stringify({ chapter: 2, title: 'Mainz', content: prose }, null, 2)
+    expect(cleanProse(wrapped)).toBe(prose)
+    expect(cleanProse('```json\n' + wrapped + '\n```')).toBe(prose)
+    expect(cleanProse(prose)).toBe(prose)
+    expect(cleanProse('{ not json } at all')).toBe('{ not json } at all')
+    expect(cleanProse('{"content": "short"}')).toBe('{"content": "short"}')
   })
 
   it('references list only the sources the chapters cite, in number order', async () => {
@@ -239,12 +250,70 @@ describe('a failed fact check sends the chapter back', () => {
     // only chapter 2 was rewritten, and the writer got the claims
     expect(parseMd(await readFile(dirOf('book.md'), 'utf8')).data.rewrite_chapters).toEqual([2])
     expect(rewriteNotes.map((x) => x.chapter)).toEqual([2])
-    expect(rewriteNotes[0]!.text).toContain('From the fact checker')
-    expect(rewriteNotes[0]!.text).toContain('The first press was built in 1440')
+    expect(rewriteNotes[0]!.text).toContain('From the fact-checker, chapter 2 has 2 flagged claim(s)')
+    expect(rewriteNotes[0]!.text).toContain('1. "The first press was built in 1440 by a goldsmith" (unsourced')
+    expect(rewriteNotes[0]!.text).toContain('2. "Printing began in Europe" (contradicted')
+    // the instruction: cite an existing note, correct, remove or soften, and add no new uncited claim
+    expect(rewriteNotes[0]!.text).toMatch(/cite the number of a source/)
+    expect(rewriteNotes[0]!.text).toMatch(/remove it, or soften it/)
+    expect(rewriteNotes[0]!.text).toMatch(/Do not add any new claim that has no source number/)
+    // the claims are not repeated as the generic review notes
+    expect(rewriteNotes[0]!.text).not.toContain('From the fact checker:')
     const r1 = parseMd(await readFile(dirOf('reviews', 'book-fact-checker-r1.md'), 'utf8'))
     expect(r1.data).toMatchObject({ verdict: 'pass', round: 1 })
     const chapter = parseMd(await readFile(dirOf('chapters', 'ch-02.md'), 'utf8'))
     expect(chapter.data.round).toBe(1)
+  }, 150000)
+})
+
+describe('a fact check cut off at the token limit', () => {
+  let env: Env
+  afterAll(async () => {
+    await env?.cleanup()
+  })
+
+  it('is asked again once for a short answer inside the same job, and the book goes on', async () => {
+    let calls = 0
+    const prompts: string[] = []
+    const run = await runBook({}, (e) => {
+      e.mock.on({ task: 'fact_check' }, (req) => {
+        calls++
+        prompts.push(req.messages.filter((m) => m.role === 'user').pop()!.content)
+        if (calls === 1) throw new Error('the model stopped at its token limit without an answer (10000 tokens in, 14000 out)')
+        return JSON.stringify({ verdict: 'pass', scores: { accuracy: 9 }, notes: 'Every claim is sourced.', claims: [], research_questions: [] })
+      })
+    })
+    env = run.env
+    const book = await finished(env, run.slug)
+    expect(book.stage).toBe('published')
+    expect(calls).toBe(2)
+    expect(prompts[1]).toContain('Reply now with the JSON object only')
+    // one job, no scheduler retry: the log has no failed fact_check job
+    expect(existsSync(path.join(env.dir, 'jobs', 'failed', `${run.slug}--review--fact-checker--r0.md`))).toBe(false)
+  }, 150000)
+
+  it('fails the job with a clear reason when it is cut off twice', async () => {
+    const run = await runBook({}, (e) => {
+      e.mock.on({ task: 'fact_check' }, () => {
+        throw new Error('the model stopped at its token limit without an answer (10000 tokens in, 14000 out)')
+      })
+    })
+    env = run.env
+    await waitFor(async () => {
+      const dir = path.join(env.dir, 'jobs')
+      for (const sub of ['failed', 'done', 'queue', 'running']) {
+        try {
+          for (const f of await readdir(path.join(dir, sub))) {
+            if (f.includes('fact-checker') && sub === 'failed') {
+              return (await readFile(path.join(dir, sub, f), 'utf8')).includes('could not finish: the model hit the token limit twice')
+            }
+          }
+        } catch {
+          /* folder missing */
+        }
+      }
+      return false
+    }, 120000)
   }, 150000)
 })
 

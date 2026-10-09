@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { ORNAMENT_CSS, ornamentHtml, ornamentSvg } from './art'
 import { escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
 
 export interface EpubChapter {
@@ -19,6 +20,8 @@ export interface EpubBook {
   chapters: EpubChapter[]
   /** PNG bytes. When present the cover page uses the image and the OPF marks it as cover-image. */
   coverPng?: Uint8Array
+  /** Genre class (`g-fantasy` ...) that picks the chapter ornament. */
+  genreClass?: string
   /** Extra subjects (keywords). */
   subjects?: string[]
 }
@@ -34,7 +37,7 @@ blockquote { margin: 1em 2em; font-style: italic; }
 .titlepage .author { font-size: 1.2em; margin-top: 1.5em; }
 .titlepage .ai { font-size: 0.8em; margin-top: 3em; color: #555; }
 .cover img { width: 100%; height: auto; }
-`
+${ORNAMENT_CSS}`
 
 const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z')
 
@@ -56,12 +59,14 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
 `
   )
   put('OEBPS/style.css', BOOK_CSS)
+  put('OEBPS/images/ornament.svg', ornamentSvg(book.genreClass ?? ''))
 
   const manifest: string[] = [
     '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
     '<item id="css" href="style.css" media-type="text/css"/>',
     '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>',
-    '<item id="titlepage" href="title.xhtml" media-type="application/xhtml+xml"/>'
+    '<item id="titlepage" href="title.xhtml" media-type="application/xhtml+xml"/>',
+    '<item id="ornament" href="images/ornament.svg" media-type="image/svg+xml"/>'
   ]
   const spine: string[] = ['<itemref idref="cover"/>', '<itemref idref="titlepage"/>']
 
@@ -97,7 +102,7 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
   book.chapters.forEach((c, i) => {
     const n = String(i + 1).padStart(2, '0')
     const file = `chapter-${n}.xhtml`
-    const heading = single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`
+    const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
     put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body)}`, { epubType: 'chapter' }))
     manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
     spine.push(`<itemref idref="ch${n}"/>`)

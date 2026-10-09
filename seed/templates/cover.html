@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>{{title}}</title>
 <style>
-  /* Cover template. The engine fills {{title}}, {{author}}, {{genre}} and {{year}}, and sets the genre class below.
+  /* Cover template. The engine fills {{title}}, {{author}}, {{genre}}, {{year}}, {{pattern_svg}}, {{title_size}} and {{author_size}}, and sets the genre class below.
      Colours and fonts per genre are in the .g-* rules. Only system fonts are used: no downloads. */
   html, body { margin: 0; padding: 0; width: 1600px; height: 2560px; overflow: hidden; }
   body {
@@ -24,29 +24,33 @@
   .g-children  { --bg: #2a9d8f; --fg: #fffdf5; --accent: #ffe066; --font: "Trebuchet MS", Verdana, sans-serif; }
   .g-nonfiction{ --bg: #264653; --fg: #f1faee; --accent: #e9c46a; --font: "Segoe UI", Verdana, sans-serif; }
   .frame { position: absolute; inset: 90px; border: 6px solid var(--accent); box-sizing: border-box; }
-  .pattern { position: absolute; inset: 0; opacity: 0.18;
-    background:
-      radial-gradient(circle at 20% 15%, var(--accent) 0 8px, transparent 9px) 0 0 / 160px 160px,
-      radial-gradient(circle at 70% 60%, var(--fg) 0 5px, transparent 6px) 0 0 / 240px 240px; }
-  .genre { position: absolute; top: 230px; left: 0; right: 0; text-align: center; letter-spacing: 12px;
-    text-transform: uppercase; font-size: 56px; color: var(--accent); }
-  .middle { position: absolute; top: 560px; bottom: 560px; left: 160px; right: 160px; display: flex; flex-direction: column;
-    justify-content: center; align-items: center; text-align: center; }
-  .title { font-size: 170px; line-height: 1.1; font-weight: bold; }
-  .rule { flex: none; width: 480px; height: 8px; background: var(--accent); margin: 90px 0; }
-  .author { font-size: 96px; }
-  .ai { position: absolute; bottom: 190px; left: 0; right: 0; text-align: center; font-size: 40px; opacity: 0.8; }
+  /* {{pattern_svg}} is drawn by code from a hash of the title: stripes, waves, dots or shapes, in the genre colours. */
+  .pattern { position: absolute; left: 0; top: 0; width: 1600px; height: 2560px; }
+  /* the panel keeps the pattern off the text */
+  .panel { position: absolute; top: 500px; bottom: 500px; left: 120px; right: 120px; background: var(--bg); opacity: 0.9; border-radius: 24px; }
+  .genre { position: absolute; top: 230px; left: 160px; right: 160px; text-align: center; letter-spacing: 12px;
+    text-transform: uppercase; font-size: 56px; color: var(--fg); }
+  .genre span { background: var(--bg); padding: 10px 36px; border-radius: 12px; }
+  /* title, rule and author flow in one column inside the panel, so they cannot overlap; the title size is set from its length */
+  .middle { position: absolute; top: 540px; bottom: 540px; left: 180px; right: 180px; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center; overflow: hidden; }
+  .title { font-size: {{title_size}}px; line-height: 1.12; font-weight: bold; overflow-wrap: anywhere; flex: 0 1 auto; }
+  .rule { flex: none; width: 480px; height: 8px; background: var(--accent); margin: 70px 0; }
+  .author { font-size: {{author_size}}px; line-height: 1.15; flex: none; overflow-wrap: anywhere; }
+  .ai { position: absolute; bottom: 190px; left: 160px; right: 160px; text-align: center; font-size: 40px; color: var(--fg); }
+  .ai span { background: var(--bg); padding: 8px 28px; border-radius: 10px; }
 </style>
 </head>
 <body class="{{genre_class}}">
-  <div class="pattern"></div>
+  {{pattern_svg}}
+  <div class="panel"></div>
   <div class="frame"></div>
-  <div class="genre">{{genre}}</div>
+  <div class="genre"><span>{{genre}}</span></div>
   <div class="middle">
     <div class="title">{{title}}</div>
     <div class="rule"></div>
     <div class="author">{{author}}</div>
   </div>
-  <div class="ai">AI-written &middot; {{year}}</div>
+  <div class="ai"><span>AI-written &middot; {{year}}</span></div>
 </body>
 </html>

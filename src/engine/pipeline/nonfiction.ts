@@ -7,6 +7,7 @@ import type { Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
 import { askFromReview, clamp, recordMade, Run, unitNumber } from './handlers'
 import type { PipelineDeps } from './handlers'
+import type { ChatMessage } from '../models/types'
 import { chatJson } from './llm'
 import { candidateFacts, chapterNotes, numberedNotes } from './nfcontext'
 import { buildMessages } from './prompts'
@@ -31,6 +32,13 @@ export interface Claim {
 }
 
 /** Handlers of the non-fiction variant: the archivist's fact step per chapter and the fact-checker. */
+const FACT_CHECK_MAX_TOKENS = 14000
+const FACT_CHECK_MIN_TOKENS = 4000
+
+function isTokenLimit(err: unknown): boolean {
+  return /token limit/i.test((err as Error)?.message ?? '')
+}
+
 export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): void {
   const made = (slug: string, run: Run) => recordMade(d, slug, run)
 
@@ -167,7 +175,25 @@ export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): v
         claims: z.array(z.object({ chapter: z.number(), claim: z.string(), problem: z.string().default('unsourced'), detail: z.string().default('') })).default([]),
         research_questions: z.array(z.string()).default([])
       })
-      const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2 })
+      // the answer budget is what the window leaves after the prompt (a thinking model spends part of it on reasoning), at most 14000
+      const promptTokens = Math.round(messages.reduce((s, m) => s + m.content.length, 0) / 4)
+      const room = window ? Math.min(FACT_CHECK_MAX_TOKENS, window - promptTokens - 1000) : FACT_CHECK_MAX_TOKENS
+      const answerTokens = Math.max(FACT_CHECK_MIN_TOKENS, room)
+      let r: Awaited<ReturnType<typeof chatJson<z.infer<typeof schema>>>>
+      try {
+        r = await chatJson(ctx, messages, schema, { maxTokens: answerTokens, temperature: 0.2 })
+      } catch (err) {
+        if (!isTokenLimit(err)) throw err
+        // cut off at the limit with no answer: ask once more for the shortest possible reply
+        ctx.log(`the fact-check reply hit the token limit (${answerTokens}); asking again for a short answer`)
+        const short: ChatMessage[] = [...messages, { role: 'user', content: 'Reply now with the JSON object only: no reasoning, at most 5 claims, each detail under 12 words.' }]
+        try {
+          r = await chatJson(ctx, short, schema, { maxTokens: answerTokens, temperature: 0.2 })
+        } catch (err2) {
+          if (!isTokenLimit(err2)) throw err2
+          throw new Error(`the fact-check could not finish: the model hit the token limit twice (budget ${answerTokens} tokens, prompt about ${promptTokens}). Load the fact-checker model with a larger context or a non-thinking mode.`, { cause: err2 })
+        }
+      }
       run.addJson(r.cost, r.chat.model)
 
       const inBook = new Set(chapters.map((c) => c.n))

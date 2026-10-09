@@ -622,12 +622,14 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         ? `From the continuity checker: ${checkNotes ? parseMd(checkNotes).body.trim() : '(no notes)'}`
         : reviews
           .filter((r) => r.verdict === 'revise')
-          .map((r) => `- From the ${r.role.replace(/-/g, ' ')}: ${r.notes.trim()}`)
+          .map((r) => (r.role === 'fact-checker' && fmt.nonfiction ? null : `- From the ${r.role.replace(/-/g, ' ')}: ${r.notes.trim()}`))
+          .filter((x): x is string => x !== null)
           .join('\n')
     // a chapter in a flat tension stretch is rewritten to raise the tension (the developmental editor's tension report)
     const flat = !isLength && !isCheck && Array.isArray(book.tension_rewrite) && (book.tension_rewrite as unknown[]).map(Number).includes(n)
     const tensionNote = flat ? `- Raise tension: this chapter is part of a flat stretch in the tension report (the developmental editor scored it ${(await readTensionOf(d, slug, n)) ?? 'low'} out of 10). Raise the stakes: add a sharper problem, a ticking clock, a loss or a hard choice, and end the chapter on a turn.` : ''
-    const allNotes = [notes, tensionNote].filter(Boolean).join('\n')
+    const claimNote = fmt.nonfiction && !isLength && !isCheck ? await factClaimNote(d, slug, round - 1, n) : ''
+    const allNotes = [claimNote, notes, tensionNote].filter(Boolean).join('\n')
     let bibleText: string
     let researchText: string
     if (fmt.nonfiction) {
@@ -802,6 +804,24 @@ export async function loadReviews(d: { books: BookStore }, slug: string, round: 
     scores: Object.fromEntries([...e.scores.entries()].map(([dim, v]) => [dim, Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(2))])),
     notes: e.notes.join('\n\n')
   }))
+}
+
+/**
+ * The fact-checker's flagged claims for one chapter, as an instruction to the writer: fix each one by citing a note that
+ * supports it, correct it to agree with the notes, or remove or soften it, and add no new uncited claim.
+ */
+export async function factClaimNote(d: { books: BookStore }, slug: string, round: number, n: number): Promise<string> {
+  const text = await d.books.readText(slug, 'reviews', `book-fact-checker-r${round}.md`)
+  if (!text) return ''
+  const doc = parseMd(text)
+  if (doc.data.verdict !== 'revise') return ''
+  const claims = (Array.isArray(doc.data.claims) ? (doc.data.claims as Array<Record<string, unknown>>) : []).filter((c) => Number(c.chapter) === n)
+  if (!claims.length) return ''
+  const lines = claims.map((c, i) => `  ${i + 1}. "${String(c.claim)}" (${String(c.problem ?? 'unsourced')}${c.detail ? `: ${String(c.detail)}` : ''})`)
+  return [
+    `- From the fact-checker, chapter ${n} has ${claims.length} flagged claim(s). Fix every one of them: cite the number of a source from the list whose note really says it, or correct it to agree with the notes, or remove it, or soften it to a general statement. Do not add any new claim that has no source number.`,
+    ...lines
+  ].join('\n')
 }
 
 /** The developmental editor's tension score for a chapter, from reports/tension.md. */

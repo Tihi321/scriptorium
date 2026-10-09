@@ -16,6 +16,26 @@ export function cleanProse(text: string): string {
   let t = stripThinking(text).trim()
   const fence = /^```[a-z]*\n([\s\S]*?)\n```$/i.exec(t)
   if (fence) t = fence[1]!.trim()
+  return unwrapJsonProse(t)
+}
+
+/**
+ * Some models answer a plain-text request with a JSON object such as {"chapter": 1, "content": "..."}.
+ * When the whole reply is one such object with a long text field, the prose is that field.
+ */
+export function unwrapJsonProse(t: string): string {
+  if (!t.startsWith('{') || !t.endsWith('}')) return t
+  try {
+    const o: unknown = JSON.parse(t)
+    if (o && typeof o === 'object' && !Array.isArray(o)) {
+      for (const key of ['content', 'text', 'body', 'chapter_text', 'prose']) {
+        const v = (o as Record<string, unknown>)[key]
+        if (typeof v === 'string' && v.trim().length >= 200) return v.trim()
+      }
+    }
+  } catch {
+    /* not JSON: it is prose that happens to start with a brace */
+  }
   return t
 }
 
@@ -63,7 +83,7 @@ export async function chatJson<T>(
   try {
     reply = await ask(messages, true)
   } catch (err) {
-    if (ctx.signal.aborted || (err as Error).name === 'AbortError' || (err as Error).name === 'BudgetError') throw err
+    if (ctx.signal.aborted || (err as Error).name === 'AbortError' || (err as Error).name === 'BudgetError' || /token limit/i.test((err as Error).message)) throw err
     reply = await ask(messages, false)
   }
   const tryParse = (text: string): { ok: true; value: T } | { ok: false; error: string } => {

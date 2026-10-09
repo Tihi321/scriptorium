@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { ornamentHtml, ornamentSvg } from './art'
 import { BOOK_CSS } from './epub'
 import { escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
 
@@ -9,6 +10,8 @@ export interface ReaderBook {
   blurb?: string
   year: number
   chapters: { title: string; body: string }[]
+  /** Genre class (`g-fantasy` ...) that picks the chapter ornament. */
+  genreClass?: string
   /** Path of cover.png, when it exists. */
   coverPngPath?: string
 }
@@ -22,6 +25,7 @@ export async function writeReaderDir(dir: string, book: ReaderBook): Promise<voi
   await fs.mkdir(path.join(dir, 'images'), { recursive: true })
   const write = (name: string, text: string) => fs.writeFile(path.join(dir, name), text, 'utf8')
   await write('style.css', BOOK_CSS + '\nnav.toc ol { list-style: none; padding: 0; }\nnav.toc li { margin: 0.4em 0; }\n')
+  await fs.writeFile(path.join(dir, 'images', 'ornament.svg'), ornamentSvg(book.genreClass ?? ''), 'utf8')
   let cover = `<div class="titlepage"><h1>${escapeXml(book.title)}</h1><p class="author">${escapeXml(book.author)}</p></div>`
   if (book.coverPngPath) {
     try {
@@ -44,7 +48,8 @@ export async function writeReaderDir(dir: string, book: ReaderBook): Promise<voi
   for (const [i, c] of book.chapters.entries()) {
     const file = `chapter-${String(i + 1).padStart(2, '0')}.xhtml`
     const next = i + 1 < book.chapters.length ? `<p class="next"><a href="chapter-${String(i + 2).padStart(2, '0')}.xhtml">Next chapter</a></p>` : ''
-    await write(file, xhtmlPage(c.title, `<h2>${escapeXml(single ? book.title : c.title)}</h2>\n${markdownToXhtml(c.body)}\n${next}<p><a href="index.html">Contents</a></p>`))
+    await write(file, xhtmlPage(c.title, `${ornamentHtml()}
+<h2>${escapeXml(single ? book.title : c.title)}</h2>\n${markdownToXhtml(c.body)}\n${next}<p><a href="index.html">Contents</a></p>`))
     links.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)
   }
   await write(
