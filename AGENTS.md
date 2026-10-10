@@ -12,5 +12,4 @@
 - Node is only available through fnm (v24.14.0 is the default) and is not on PATH in non-interactive shells. Run `fnm env --use-on-cd | Out-String | Invoke-Expression` (PowerShell) first, or call the fnm Node directly.
 - Git 2.55 with `core.autocrlf=true`. `gh` is not installed. Python 3.13 (`py`) is available.
 - LM Studio is installed (CLI `~\.lmstudio\bin\lms.exe`, server is OpenAI-compatible). `lms ls` lists its models. The model table is in the design doc under "Model layer". Ollama is not installed.
-- Strata (`D:\Strata`) is a local Qwen3.8-Flash-Next server with an OpenAI-compatible API on port 8080. Start it with `run-iq3_s.bat`, check `curl http://127.0.0.1:8080/health` for `loaded: true`. It uses about 84 GB, so keep only the nomic model loaded in LM Studio while it runs.
 - 128 GB unified memory; Windows sees 32 GB, so about 96 GB is left for models.

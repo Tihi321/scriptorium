@@ -107,7 +107,7 @@ export function modelNameOf(model: string | null | undefined): string {
   return i > 0 ? model.slice(i + 1) : model
 }
 
-const PROVIDER_LABELS: Record<string, string> = { deepseek: 'DeepSeek', lmstudio: 'LM Studio', anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', mock: 'Mock' }
+const PROVIDER_LABELS: Record<string, string> = { deepseek: 'DeepSeek', lmstudio: 'LM Studio', strata: 'Strata', anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', mock: 'Mock' }
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? (provider === 'default' ? 'default' : provider)
 }
@@ -116,6 +116,7 @@ export function providerLabel(provider: string): string {
 export const PROVIDER_COLORS: Record<string, string> = {
   deepseek: '#4d7cff',
   lmstudio: '#3fb27f',
+  strata: '#d4a017',
   anthropic: '#e8803a',
   openai: '#10a37f',
   gemini: '#a070e8',

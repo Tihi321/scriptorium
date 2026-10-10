@@ -42,6 +42,9 @@ describe('seed configs', () => {
     expect(registry.providers.get('deepseek')?.unavailableReason).toMatch(/no key/)
     expect(registry.providers.get('lmstudio')?.available).toBe(true)
     expect(registry.providers.get('ollama')?.available).toBe(false)
+    expect(registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
+    expect(isPaidModel(registry.getModel('strata/qwen3.8-flash-next')!)).toBe(false)
+    expect(new ModelRouter(registry, undefined).candidates('line-editor')[0]?.ref).toBe('strata/qwen3.8-flash-next')
     const flash = registry.getModel('deepseek/deepseek-v4-flash')!
     expect(flash).toMatchObject({ priceIn: 0.14, priceOut: 0.28, priceCachedIn: 0.0028, family: 'deepseek' })
     expect(isPaidModel(flash)).toBe(true)
@@ -220,6 +223,24 @@ describe('HTTP clients against fake servers', () => {
     expect(r.usage).toEqual({ inputTokens: 100, cachedInputTokens: 60, outputTokens: 7 })
     expect(lastBody).toMatchObject({ model: 'm', stream: true, stream_options: { include_usage: true }, thinking: false, max_tokens: 50 })
     expect(lastHeaders.authorization).toBe('Bearer sk-test')
+  })
+
+  it('OpenAI-compatible: sends the JSON schema as response_format unless jsonSchema is false; reasoning_content is not text', async () => {
+    handler = (_u, res) =>
+      sse(res, [
+        'data: {"choices":[{"delta":{"reasoning_content":"hmm"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"{}"}}]}\n\n',
+        'data: [DONE]\n\n'
+      ])
+    const schema = { type: 'object' }
+    const messages = [{ role: 'user' as const, content: 'hi' }]
+    const on = new OpenAiCompatClient({ id: 'x', baseUrl: base + '/v1' })
+    await collect(on.chat({ model: 'm', messages, schema }))
+    expect(lastBody.response_format).toMatchObject({ type: 'json_schema', json_schema: { schema } })
+    const off = new OpenAiCompatClient({ id: 'x', baseUrl: base + '/v1', jsonSchema: false })
+    const r = await collect(off.chat({ model: 'm', messages, schema }))
+    expect(lastBody).not.toHaveProperty('response_format')
+    expect(r.text).toBe('{}')
   })
 
   it('OpenAI-compatible: 429 becomes a retryable error, 400 does not; embeddings and model list work', async () => {

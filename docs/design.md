@@ -69,6 +69,7 @@ This is the design document for Scriptorium: everything decided so far, worked o
 | Simple images (built) | Phase 9. Cover pattern (stripes, waves, dots or shapes) as inline SVG seeded from a hash of the title, coloured by genre, and one ornament per genre above each chapter heading (`images/ornament.svg` in the EPUB and the reader). Code-drawn only. Topic icons, character cards, diagrams and maps are not built | 2026-10-09 |
 | Packaging | electron-builder NSIS installer, per user, x64, `asar: false` (sqlite-vec's `vec0.dll` and the keyring `.node` file can't load from inside an archive). `seed/` ships as `resources/seed`, and main passes `--seed` to the engine. Not code-signed | 2026-10-09 |
 | Stage | MVP built (Phases 0-9), packaging done; overnight/reboot run and cloud models still to verify. Overrides the earlier Stage rows | 2026-10-09 |
+| Strata (local provider) | Strata, a local server for Qwen3.8-Flash-Next at `127.0.0.1:8080/v1` (OpenAI-compatible, no key), is a provider in `config/providers.md` and the default local model in every role that used LM Studio: editors and reviewers use `strata/qwen3.8-flash-next` (thinking off), checks, researcher and archivist use `strata/qwen3.8-flash-next-low`, with LM Studio and then DeepSeek as fallbacks. DeepSeek stays first for the writer, architect, editor-in-chief, idea generator and publisher, with Strata next. LM Studio stays for nomic embeddings and as fallback. You start Strata (`D:\Strata\run-iq3_s.bat`), Scriptorium only connects. A new provider field `json_schema: false` stops the engine sending `response_format`, because Strata fails a bad JSON answer with a 502 that would be retried and then sent to a paid model. Overrides Provider list and Starting models where they differ | 2026-10-10 |
 
 ## The idea, restated
 
@@ -131,7 +132,7 @@ The factory stays local because it needs LM Studio and later ComfyUI, which run 
 
 | Kind | Providers | How |
 |---|---|---|
-| Local | LM Studio, Ollama | OpenAI-compatible |
+| Local | LM Studio, Strata, Ollama | OpenAI-compatible |
 | Cloud, OpenAI-compatible | DeepSeek, OpenAI, Mistral, Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM) | OpenAI-compatible |
 | Gateways | OpenRouter (one key, hundreds of models) | OpenAI-compatible |
 | Cloud, own API | Anthropic (Claude), Google (Gemini) | Native adapter. Both also offer OpenAI-compatible endpoints, but the native APIs support more features |
@@ -162,6 +163,7 @@ The factory stays local because it needs LM Studio and later ComfyUI, which run 
 | `tiel-coder-35b-a3b-mtp` | 35B MoE, coding model | 23.7 GB | Made for code. Probably not useful for books |
 | `text-embedding-nomic-embed-text-v1.5` | Embedding model | 84 MB | **Exactly what the RAG index needs.** Free and local |
 
+- **Strata (added 2026-10-10):** it serves one Qwen3.8-Flash-Next model per process (not in `lms ls`). The IQ3_S quant takes about 84 GB, so it does not fit beside the 27B and 35B models. Only nomic (84 MB) fits beside it, so keep just nomic loaded in LM Studio while Strata runs.
 - **Memory:** everything except Laguna fits in memory at the same time. Laguna fits together with the small models. Long contexts also use memory, so leave some headroom.
 - **Model bake-off:** to make choosing easier, the factory can write the same test scene with each model (and with DeepSeek), and you pick the winner. This could be a small built-in tool.
 - **Ollama:** its data folder exists, but Ollama isn't installed and has no models. It stays supported in the provider registry, for when it's installed.
@@ -665,3 +667,4 @@ None blocking. Everything needed for a plan is decided. Smaller choices that can
 - 2026-10-09: Phase 8, topics in full and the non-fiction variant: topic list at 448 rows with a "Law & Politics" section, a Topics screen (tick box, emptiest first, done/target, filter), the `nonfiction-short` format, research per chapter, a fact base instead of a story bible, `[n]` citations, a must-pass `fact_check` by the fact-checker and a References chapter in the EPUB and reader. Mock e2e green. Real runs on local models (Wikipedia only): attempt 1 published but stored chapters as raw JSON (fixed: `cleanProse` unwraps JSON replies, prompts say plain text); attempt 2 had clean prose and was rejected by the fact-checker after its one rewrite round. Fixes: a bigger and compact fact-check answer with a clean second ask when cut off, and a rewrite request that names the flagged claims. Attempt 3 published "The Movable Type Revolution" (score 7.53, 2 rewrite rounds, fact-check r2 pass, 16 Wikipedia references in the EPUB), so the real gate is met; see the plan.
 - 2026-10-08: Phases 4, 5 and 10: the pixel-art office (Phaser 3, 2dPig CC0 tiles, rooms per role, state icons, task bubbles, model badges, handover lines), the status bar, whiteboard, budget meter, stop and pause-all buttons, the agent panel with the model picker and hire dialog, the live terminal per agent and per book, the library room with shelves per topic, book cards, the in-app reader, Send to Kindle and ratings, tray, power-save blocker and start with Windows. Packaged as an NSIS installer (`asar: false`).
 - 2026-10-09: Phase 9, simple images: a cover pattern seeded from the title's hash and coloured by genre, a cover layout where a long title can't overlap the author, and a genre ornament above each chapter heading in the EPUB and the reader. MVP phases 0 to 9 are built; the changelog is in the SCP-02 ticket folder.
+- 2026-10-10: Strata added as a local provider (SCP-03): `config/providers.md` entry at `127.0.0.1:8080/v1` with a `json_schema: false` field that skips `response_format`, Strata first in the roles that used LM Studio (LM Studio and DeepSeek as fallbacks), user-started, memory note added to the local models. The plan is in the SCP-03 ticket folder.

@@ -85,6 +85,23 @@ providers:
       - id: text-embedding-nomic-embed-text-v1.5
         family: nomic
         embedding: true
+  - id: strata
+    kind: openai-compat
+    local: true
+    base_url: http://127.0.0.1:8080/v1
+    api_key_env: STRATA_API_KEY   # optional: only sent if set
+    concurrency: 1
+    discover: false               # Strata answers any model name, so fixed ids keep roles.md the same across quants
+    json_schema: false
+    models:
+      - id: qwen3.8-flash-next
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: none }
+      - id: qwen3.8-flash-next-low
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: low }
   - id: ollama
     kind: openai-compat
     enabled: false
@@ -159,9 +176,21 @@ Prices were checked 2026-10-08 from third-party listings. Verify them at api-doc
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing and never count against the caps. Their tokens and time are still recorded.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
-- `concurrency`: how many requests may run at once. LM Studio is 1 because all its requests share one GPU.
+- `concurrency`: how many requests may run at once. LM Studio and Strata are 1 because all their requests share one GPU.
 - `rpm`, `tpm`: optional rate limits (requests and tokens per minute). Only `rpm` is enforced for now.
 - `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here.
+- `json_schema`: `true` (the default) sends the JSON schema of a structured answer as `response_format`. Set `false` for a server that answers a bad JSON reply with an error instead of constraining it. The prompt then asks for the JSON shape and the engine checks it and repairs it.
+
+## Strata
+
+Strata (`D:\Strata`) is a fast local server for Qwen3.8-Flash-Next with an OpenAI-style API. It is the first choice in the roles that used LM Studio. Scriptorium only connects to it, you start it:
+
+- Run `D:\Strata\run-iq3_s.bat` (or `run-iq2_xs.bat`). Loading the model takes 1 to 3 minutes. Check `curl http://127.0.0.1:8080/health` and wait for `loaded: true`. Until then requests fail, and the router falls back to the next model in the role.
+- It serves one model per process, and every quant uses port 8080. It ignores the `model` field of a request, so the two ids above (no thinking, and thinking on `low`) only differ in `extra_body`. They stand in for the 27B editors and the 35B checks.
+- The IQ3_S quant takes about 84 GB, so it does not fit beside the big LM Studio models. Keep only the nomic embedding model loaded in LM Studio while Strata runs.
+- `context` must match `--max-context` in the run config (131072).
+- `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. That would be retried and then sent to a paid model, while the engine's own parse-and-repair step already copes with a loose JSON answer.
+- No key is needed. `STRATA_API_KEY` is only sent if you set it.
 
 ## Search providers (`kind: search`)
 

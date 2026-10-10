@@ -119,7 +119,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     provider: ref.split('/')[0]!,
     model: ref.split('/')[1]!,
     family: ref.split('/')[0]!,
-    local: ref.startsWith('lmstudio'),
+    local: ref.startsWith('lmstudio') || ref.startsWith('strata'),
     enabled: !ref.startsWith('anthropic')
   }))
   const roleDefaults: Record<string, string> = Object.fromEntries(STAFF.map(([role, , , model]) => [role, model]))
