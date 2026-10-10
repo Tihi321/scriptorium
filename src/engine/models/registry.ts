@@ -21,6 +21,8 @@ export interface ProviderInfo {
   concurrency: number
   rpm?: number
   discover: boolean
+  /** Send the JSON schema as `response_format` (`openai-compat`). */
+  jsonSchema: boolean
   /** `kind: search`: the service (tavily, wikipedia ...) and the price of one request. */
   searchEngine?: string
   pricePerRequest: number
@@ -102,6 +104,7 @@ export class ModelRegistry {
         concurrency: p.concurrency,
         rpm: p.rpm,
         discover: p.discover,
+        jsonSchema: p.json_schema,
         searchEngine: p.engine ?? p.id,
         pricePerRequest: p.price_per_request,
         available: false
@@ -175,6 +178,7 @@ export class ModelRegistry {
         baseUrl: info.baseUrl,
         apiKey,
         fetchImpl,
+        jsonSchema: info.jsonSchema,
         embedPrefixes: info.local ? { document: 'search_document: ', query: 'search_query: ' } : undefined
       })
     } else if (info.kind === 'anthropic') {

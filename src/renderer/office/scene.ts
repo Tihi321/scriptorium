@@ -293,6 +293,7 @@ function badgeLabel(model: string | null): string {
   const provider = providerOf(model)
   if (!model) return providerLabel(provider)
   if (provider === 'lmstudio') return 'LM Studio local'
+  if (provider === 'strata') return 'Strata local'
   const name = modelNameOf(model).replace(new RegExp(`^${provider}-?`), '')
   return clip(`${providerLabel(provider)} ${name}`, 20)
 }
