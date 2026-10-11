@@ -19,6 +19,8 @@ export interface ProviderInfo {
   baseUrl?: string
   apiKeyEnv?: string
   concurrency: number
+  /** `concurrency: auto`: `concurrency` follows the server's own slot count (see `syncServerSlots`). */
+  concurrencyAuto: boolean
   rpm?: number
   discover: boolean
   /** Send the JSON schema as `response_format` (`openai-compat`). */
@@ -74,6 +76,8 @@ export class ModelRegistry {
   /** `search_order` of providers.md: the ids of the search providers, in the order the researcher tries them. */
   searchOrder: string[] = []
   readonly mock: MockProvider
+  /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
+  private serverSlots = new Map<string, number>()
 
   constructor(
     private readonly dataDir: string,
@@ -101,7 +105,8 @@ export class ModelRegistry {
         local: p.local,
         baseUrl: p.base_url,
         apiKeyEnv: p.api_key_env,
-        concurrency: p.concurrency,
+        concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : p.concurrency,
+        concurrencyAuto: p.concurrency === 'auto',
         rpm: p.rpm,
         discover: p.discover,
         jsonSchema: p.json_schema,
@@ -224,6 +229,35 @@ export class ModelRegistry {
       }
     }
     return out
+  }
+
+  /**
+   * Asks every `concurrency: auto` provider how many requests it serves at once (`GET <base_url>/status`,
+   * `concurrency.serving`, as Strata reports it) and sets its `concurrency`. A server that can't be asked counts as 1.
+   * Returns the providers whose concurrency changed.
+   */
+  async syncServerSlots(signal?: AbortSignal): Promise<{ provider: ProviderInfo; from: number; to: number }[]> {
+    const changed: { provider: ProviderInfo; from: number; to: number }[] = []
+    for (const p of this.providers.values()) {
+      if (!p.concurrencyAuto || !p.available || !p.baseUrl) continue
+      let slots = 1
+      try {
+        const res = await (this.opts.fetchImpl ?? fetch)(`${p.baseUrl.replace(/\/+$/, '')}/status`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
+        if (res.ok) {
+          const body = (await res.json()) as { loaded?: boolean; concurrency?: { serving?: unknown } }
+          const n = Number(body.concurrency?.serving)
+          if (Number.isInteger(n) && n >= 1) slots = Math.min(n, 16)
+        }
+      } catch {
+        /* the server is down or restarting: one at a time until it answers */
+      }
+      this.serverSlots.set(p.id, slots)
+      if (p.concurrency !== slots) {
+        changed.push({ provider: p, from: p.concurrency, to: slots })
+        p.concurrency = slots
+      }
+    }
+    return changed
   }
 
   getModel(ref: string): ModelInfo | undefined {

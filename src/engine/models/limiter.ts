@@ -52,6 +52,13 @@ export class ProviderLimiter {
     next?.()
   }
 
+  /** Wakes every request waiting for a slot of this provider, after its concurrency went up. Those that still don't fit wait again. */
+  wakeAll(p: ProviderInfo): void {
+    const list = this.waiters.get(p.id) ?? []
+    this.waiters.set(p.id, [])
+    for (const w of list) w()
+  }
+
   /** Milliseconds to wait before another request fits in the rpm window. 0 when it fits now. */
   rpmWaitMs(p: ProviderInfo): number {
     if (!p.rpm) return 0

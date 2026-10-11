@@ -44,8 +44,11 @@ export const providerEntrySchema = z.looseObject({
   local: z.boolean().default(false),
   base_url: z.string().optional(),
   api_key_env: z.string().optional(),
-  /** How many requests may run at once. */
-  concurrency: z.number().int().positive().default(4),
+  /**
+   * How many requests may run at once. `auto`: as many as the server says it serves (`concurrency.serving` of
+   * `GET <base_url>/status`, the Strata status), checked every few seconds; 1 while the server can't be asked.
+   */
+  concurrency: z.union([z.number().int().positive(), z.literal('auto')]).default(4),
   /** `kind: search` only: which search service this entry talks to (tavily, wikipedia, brave, serpapi, serphouse, duckduckgo). Defaults to the id. */
   engine: z.string().optional(),
   /** `kind: search` only: USD per request, logged to the spend files. */

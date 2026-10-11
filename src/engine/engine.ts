@@ -47,6 +47,9 @@ export interface EngineOptions {
   search?: Pick<SearchServiceOptions, 'providers' | 'fetchPage' | 'fetchImpl'>
 }
 
+/** How often `concurrency: auto` providers are asked for their slot count. */
+const SLOT_SYNC_MS = 10_000
+
 /** The engine core: config, models, budget, agents, jobs and the scheduler, plus the command handler. */
 export class Engine {
   readonly registry: ModelRegistry
@@ -69,6 +72,7 @@ export class Engine {
   formats: FormatEntry[] = []
   settings: SettingsConfig = settingsSchema.parse({ kind: 'settings' })
   private knownAgents = new Set<string>()
+  private slotTimer: ReturnType<typeof setInterval> | undefined
   private readonly startedAt = Date.now()
   private readonly log: (m: string) => void
   private readonly emit: (e: EngineEvent) => void
@@ -157,6 +161,11 @@ export class Engine {
         this.scheduler.kick()
       })
     }
+    // providers with `concurrency: auto` (Strata) follow the slot count their server reports: asked now and every few seconds,
+    // so starting Strata with a "4 at once" or a "one at a time" script needs no change in providers.md
+    await this.syncSlots()
+    this.slotTimer = setInterval(() => void this.syncSlots(), SLOT_SYNC_MS)
+    this.slotTimer.unref?.()
     await this.budget.load()
     const rec = await this.jobs.recoverRunning()
     if (rec.requeued.length || rec.dropped.length) {
@@ -169,7 +178,24 @@ export class Engine {
     await this.budget.writeSummary().catch(() => undefined)
   }
 
+  /** Asks `concurrency: auto` servers for their slot count; a higher count frees waiting requests at once. */
+  private async syncSlots(): Promise<void> {
+    let changed
+    try {
+      changed = await this.registry.syncServerSlots()
+    } catch (err) {
+      this.log(`could not ask the servers for their slots: ${(err as Error).message}`)
+      return
+    }
+    for (const c of changed) {
+      this.log(`models: ${c.provider.id} runs ${c.to} request(s) at once (was ${c.from}), as the server reports`)
+      if (c.to > c.from) this.router.limiter.wakeAll(c.provider)
+    }
+    if (changed.length) this.scheduler.kick()
+  }
+
   async stop(): Promise<void> {
+    if (this.slotTimer) clearInterval(this.slotTimer)
     await this.pipeline.stop()
     await this.scheduler.stop()
     await this.logs.flush()

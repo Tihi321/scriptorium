@@ -54,6 +54,39 @@ describe('seed configs', () => {
     expect(registry.embeddingModel()?.embedding).toBe(true)
   })
 
+  it('concurrency: auto follows the slots the Strata server reports, and a raise frees waiting requests', async () => {
+    let answer: (() => Response) | null = () => new Response(JSON.stringify({ loaded: true, concurrency: { serving: 4, requested: 4 } }))
+    const asked: string[] = []
+    const fetchImpl = (async (url: string) => {
+      asked.push(String(url))
+      if (!answer) throw new Error('connection refused')
+      return answer()
+    }) as unknown as typeof fetch
+    const registry = new ModelRegistry(dir, { keys: () => undefined, fetchImpl })
+    await registry.load()
+    const strata = () => registry.providers.get('strata')!
+    expect(strata()).toMatchObject({ concurrencyAuto: true, concurrency: 1 })
+    expect(registry.providers.get('lmstudio')!.concurrencyAuto).toBe(false)
+    expect(await registry.syncServerSlots()).toEqual([{ provider: strata(), from: 1, to: 4 }])
+    expect(asked).toEqual(['http://127.0.0.1:8080/v1/status'])
+    await registry.load() // a config reload keeps what the server said
+    expect(strata().concurrency).toBe(4)
+    expect(await registry.syncServerSlots()).toEqual([])
+    answer = null // Strata is restarting with a solo script
+    expect((await registry.syncServerSlots())[0]).toMatchObject({ from: 4, to: 1 })
+    // one slot taken, a second request waits; the server comes back with 2 slots and the waiting request goes
+    const router = new ModelRouter(registry, undefined)
+    expect(router.limiter.tryAcquire(strata())).toBe(true)
+    let got = false
+    const waiting = router.limiter.acquire(strata()).then(() => (got = true))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(got).toBe(false)
+    answer = () => new Response(JSON.stringify({ concurrency: { serving: 2 } }))
+    for (const c of await registry.syncServerSlots()) router.limiter.wakeAll(c.provider)
+    await waiting
+    expect(router.limiter.inFlight('strata')).toBe(2)
+  })
+
   it('a key from the resolver makes a provider available', async () => {
     const registry = new ModelRegistry(dir, { keys: (n) => (n === 'DEEPSEEK_API_KEY' ? 'k' : undefined) })
     await registry.load()
