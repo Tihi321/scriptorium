@@ -64,8 +64,9 @@ providers:
     kind: openai-compat
     local: true
     base_url: http://localhost:1234/v1
-    concurrency: 1
+    concurrency: auto             # the sum of `parallel` over the loaded chat models (lms load --parallel <n>), 1 when none is loaded
     discover: true
+    load_models: true             # load a model that isn't loaded yet with lmstudio_parallel, lmstudio_context and lmstudio_ttl_minutes from settings.md
     models:
       - id: ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
         family: qwen
@@ -81,6 +82,9 @@ providers:
         extra_body: { reasoning_effort: none }
       - id: tiel-coder-35b-a3b-mtp
         family: qwen
+        extra_body: { reasoning_effort: none }
+      - id: google/gemma-4-e4b
+        family: gemma
         extra_body: { reasoning_effort: none }
       - id: text-embedding-nomic-embed-text-v1.5
         family: nomic
@@ -176,7 +180,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing and never count against the caps. Their tokens and time are still recorded.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
-- `concurrency`: how many requests may run at once. LM Studio is 1 because all its requests share one GPU. `auto` (Strata): as many as the server says it serves at once (`concurrency.serving` of `<base_url>/status`), asked at start and every 10 seconds, 1 while the server is down. So it follows the script you started: 4 with a `-parallel` script, 1 with a `-solo` one, and nothing in this file changes when you switch.
+- `concurrency`: how many requests may run at once. `auto`: as many as the server says it serves at once, asked at start and every 10 seconds, 1 while the server is down. Strata reports it as `concurrency.serving` of `<base_url>/status`, so it follows the script you started: 4 with a `-parallel` script, 1 with a `-solo` one, and nothing in this file changes when you switch. For LM Studio it is the sum of `parallel` over the loaded chat models (from LM Studio's `/api/v1/models`): load a model with `--parallel 4` and four requests go to it at once. Requests in parallel share the GPU, so each one is slower, but the total is higher.
 - `rpm`, `tpm`: optional rate limits (requests and tokens per minute). Only `rpm` is enforced for now.
 - `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here.
 - `json_schema`: `true` (the default) sends the JSON schema of a structured answer as `response_format`. Set `false` for a server that answers a bad JSON reply with an error instead of constraining it. The prompt then asks for the JSON shape and the engine checks it and repairs it.
@@ -208,5 +212,6 @@ Set a key with `npm run key:set TAVILY_API_KEY` (or the environment variable). N
 - `id`, `family` (used so reviewers can avoid the writer's family), `context`, `max_output`.
 - `price_in`, `price_out`, `price_cached_in`: USD per 1M tokens. Cached input falls back to `price_in` when missing.
 - `embedding: true` marks an embedding model.
-- LM Studio models load with a small context window (8192 tokens) unless you change it. Long books need more: the engine reads the loaded window from LM Studio and keeps its prompts within it, but a window of 8192 makes long-book prompts fail. Load the models you use with 32768 or more, for example `lms load nail-qwen3.6-35b-a3b-mtp -c 32768 --parallel 1 --ttl 28800 -y`, or set it in LM Studio's model settings.
+- LM Studio models load with a small context window (8192 tokens) unless you change it. Long books need more: the engine reads the loaded window from LM Studio and keeps its prompts within it, but a window of 8192 makes long-book prompts fail. Load the models you use with 32768 or more, for example `lms load nail-qwen3.6-35b-a3b-mtp -c 32768 --parallel 1 --ttl 28800 -y`, or set it in LM Studio's model settings. With `--parallel <n>` the requests running at once share that window, so give it more room when several long requests run together, for example `lms load google/gemma-4-e4b -c 131072 --parallel 4 --ttl 28800 -y`.
+- `load_models: true` (LM Studio): before a request to a model that isn't loaded, the engine loads it with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes` from `config/settings.md`, using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is, so one you loaded yourself keeps your settings. A model LM Studio doesn't have fails at once and the next model in the role's list is tried.
 - `extra_body`: optional JSON fields merged into the request body. The LM Studio chat models here send `reasoning_effort: none`, which turns thinking off (checked 2026-10-08 on the Qwen models: a 500-word story took 25 s instead of 3.5 minutes, because the model otherwise spends thousands of hidden tokens thinking). The Qwen 35B MoE (used for review) uses `low` so its verdicts are steadier. Remove it, or set `low` or `medium`, if you want thinking back for the other models. DeepSeek V4 has thinking on by default and bills it as output. `deepseek-flash` sends `thinking: { type: disabled }` (checked 2026-10-11: with thinking on, a 15k-token continuity check spent all 6000 answer tokens thinking and returned nothing). `deepseek-v4-pro` keeps thinking on. Empty means nothing extra is sent.

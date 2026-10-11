@@ -1,7 +1,9 @@
+import { existsSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { parseMdWith } from '../../shared/md'
-import { providersSchema, rolesSchema } from '../../shared/schemas'
-import type { ProviderEntry, RolesConfig } from '../../shared/schemas'
+import { providersSchema, rolesSchema, settingsSchema } from '../../shared/schemas'
+import type { ProviderEntry, RolesConfig, SettingsConfig } from '../../shared/schemas'
 import { promises as fs } from 'node:fs'
 import { AnthropicClient } from './anthropic'
 import { GeminiClient } from './gemini'
@@ -25,6 +27,8 @@ export interface ProviderInfo {
   discover: boolean
   /** Send the JSON schema as `response_format` (`openai-compat`). */
   jsonSchema: boolean
+  /** LM Studio: the engine loads a model that isn't loaded yet, with `lmLoad` (see `setDefaults`). */
+  loadModels: boolean
   /** `kind: search`: the service (tavily, wikipedia ...) and the price of one request. */
   searchEngine?: string
   pricePerRequest: number
@@ -56,6 +60,13 @@ export interface RegistryOptions {
   fetchImpl?: typeof fetch
   /** Reuse a mock provider so tests can script it. */
   mock?: MockProvider
+  /** LM Studio's `lms` command line, used to load models. Default: `~/.lmstudio/bin/lms(.exe)` when it exists. `null`: use the REST API. */
+  lmsPath?: string | null
+}
+
+function defaultLmsPath(): string | undefined {
+  const p = path.join(os.homedir(), '.lmstudio', 'bin', process.platform === 'win32' ? 'lms.exe' : 'lms')
+  return existsSync(p) ? p : undefined
 }
 
 /** A model that costs money: not local and with a price. */
@@ -69,6 +80,20 @@ export function computeCost(m: Pick<ModelInfo, 'priceIn' | 'priceOut' | 'priceCa
   return (uncached * m.priceIn + u.cachedInputTokens * m.priceCachedIn + u.outputTokens * m.priceOut) / 1_000_000
 }
 
+/** Role aliases (`paid`, `strata`, `lmstudio`) -> `provider/model`, and how LM Studio models are loaded. From config/settings.md. */
+export interface ModelDefaults {
+  aliases: Record<string, string>
+  lmLoad: { parallel: number; context: number; ttlMinutes: number }
+}
+
+/** The aliases and LM Studio load settings of a settings.md. */
+export function modelDefaultsOf(s: SettingsConfig): ModelDefaults {
+  return {
+    aliases: { paid: s.default_paid_model, strata: s.default_strata_model, lmstudio: s.default_lmstudio_model },
+    lmLoad: { parallel: s.lmstudio_parallel, context: s.lmstudio_context, ttlMinutes: s.lmstudio_ttl_minutes }
+  }
+}
+
 export class ModelRegistry {
   providers = new Map<string, ProviderInfo>()
   models = new Map<string, ModelInfo>()
@@ -78,6 +103,8 @@ export class ModelRegistry {
   readonly mock: MockProvider
   /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
   private serverSlots = new Map<string, number>()
+  /** Until settings.md is read: the defaults it has when it says nothing. */
+  private defaults: ModelDefaults = modelDefaultsOf(settingsSchema.parse({ kind: 'settings' }))
 
   constructor(
     private readonly dataDir: string,
@@ -110,6 +137,7 @@ export class ModelRegistry {
         rpm: p.rpm,
         discover: p.discover,
         jsonSchema: p.json_schema,
+        loadModels: p.load_models,
         searchEngine: p.engine ?? p.id,
         pricePerRequest: p.price_per_request,
         available: false
@@ -123,7 +151,8 @@ export class ModelRegistry {
           provider: info,
           id: m.id,
           family: m.family,
-          context: m.context,
+          // a model the engine loads itself gets the context window it loads it with
+          context: p.load_models ? Math.min(m.context ?? Infinity, this.defaults.lmLoad.context) : m.context,
           maxOutput: m.max_output,
           priceIn: m.price_in,
           priceOut: m.price_out,
@@ -184,6 +213,8 @@ export class ModelRegistry {
         apiKey,
         fetchImpl,
         jsonSchema: info.jsonSchema,
+        loadConfig: info.loadModels ? () => this.defaults.lmLoad : undefined,
+        lmsPath: info.loadModels ? (this.opts.lmsPath === null ? undefined : (this.opts.lmsPath ?? defaultLmsPath())) : undefined,
         embedPrefixes: info.local ? { document: 'search_document: ', query: 'search_query: ' } : undefined
       })
     } else if (info.kind === 'anthropic') {
@@ -218,10 +249,10 @@ export class ModelRegistry {
             discovered: true
           })
         }
-        // the context the model is loaded with, unless providers.md says otherwise
+        // the context the model is loaded with, unless providers.md says otherwise (a model already loaded counts as it is)
         for (const [id, len] of ctxLen) {
           const m = this.models.get(`${p.id}/${id}`)
-          if (m && m.context === undefined) m.context = len
+          if (m && (m.context === undefined || p.loadModels)) m.context = len
         }
         out.push({ provider: p.id, found: ids.length })
       } catch (err) {
@@ -232,21 +263,38 @@ export class ModelRegistry {
   }
 
   /**
-   * Asks every `concurrency: auto` provider how many requests it serves at once (`GET <base_url>/status`,
-   * `concurrency.serving`, as Strata reports it) and sets its `concurrency`. A server that can't be asked counts as 1.
-   * Returns the providers whose concurrency changed.
+   * Asks every `concurrency: auto` provider how many requests it serves at once and sets its `concurrency`:
+   * Strata reports it as `concurrency.serving` of `GET <base_url>/status`; for LM Studio it is the sum of `parallel`
+   * over the loaded chat models (`GET /api/v1/models`, set with `lms load --parallel <n>`).
+   * A server that can't be asked counts as 1. Returns the providers whose concurrency changed.
    */
   async syncServerSlots(signal?: AbortSignal): Promise<{ provider: ProviderInfo; from: number; to: number }[]> {
     const changed: { provider: ProviderInfo; from: number; to: number }[] = []
     for (const p of this.providers.values()) {
       if (!p.concurrencyAuto || !p.available || !p.baseUrl) continue
+      const base = p.baseUrl.replace(/\/+$/, '')
+      const get = async (url: string) => {
+        const res = await (this.opts.fetchImpl ?? fetch)(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
+        return res.ok ? ((await res.json()) as Record<string, unknown>) : null
+      }
       let slots = 1
       try {
-        const res = await (this.opts.fetchImpl ?? fetch)(`${p.baseUrl.replace(/\/+$/, '')}/status`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
-        if (res.ok) {
-          const body = (await res.json()) as { loaded?: boolean; concurrency?: { serving?: unknown } }
-          const n = Number(body.concurrency?.serving)
-          if (Number.isInteger(n) && n >= 1) slots = Math.min(n, 16)
+        const status = await get(`${base}/status`).catch(() => null)
+        const n = Number((status?.concurrency as { serving?: unknown } | undefined)?.serving)
+        if (Number.isInteger(n) && n >= 1) slots = Math.min(n, 16)
+        else {
+          // LM Studio: its native API sits next to the OpenAI-compatible /v1
+          const lm = await get(`${base.replace(/\/v1$/, '')}/api/v1/models`)
+          const models = (lm?.models ?? []) as { type?: string; loaded_instances?: { config?: { parallel?: unknown } }[] }[]
+          let sum = 0
+          for (const m of models) {
+            if (m.type !== 'llm') continue
+            for (const i of m.loaded_instances ?? []) {
+              const par = Number(i.config?.parallel)
+              sum += Number.isInteger(par) && par >= 1 ? par : 1
+            }
+          }
+          if (sum >= 1) slots = Math.min(sum, 16)
         }
       } catch {
         /* the server is down or restarting: one at a time until it answers */
@@ -264,9 +312,19 @@ export class ModelRegistry {
     return this.models.get(ref)
   }
 
-  /** Model refs in the roles file for a role, in order. */
+  /** Sets the role aliases and the LM Studio load settings. Call `load()` after it so model context windows follow. */
+  setDefaults(d: ModelDefaults): void {
+    this.defaults = d
+  }
+
+  /** A `provider/model`, or an alias (`paid`, `strata`, `lmstudio`) resolved to its default. */
+  resolve(ref: string): string {
+    return ref.includes('/') ? ref : (this.defaults.aliases[ref] ?? ref)
+  }
+
+  /** Model refs in the roles file for a role, in order, with aliases resolved. */
   roleModelRefs(role: string): string[] {
-    return this.roles.roles[role]?.models ?? []
+    return (this.roles.roles[role]?.models ?? []).map((r) => this.resolve(r))
   }
 
   embeddingModel(): ModelInfo | undefined {

@@ -104,6 +104,14 @@ describe('commands', () => {
     expect(md.data).toMatchObject({ kind: 'settings', kindle_address: 'me_1@kindle.com', from_address: 'me@example.com', smtp_host: 'smtp.example.com', smtp_port: 465, smtp_user: 'me', smtp_secure: true })
     expect(md.body).toContain('Sending books to your Kindle')
     expect((await env.engine.snapshot()).settings).toMatchObject({ kindleAddress: 'me_1@kindle.com', smtpPort: 465, smtpSecure: true })
+    // the model defaults: left out they keep their values, sent they are written and the registry follows
+    expect(md.data).toMatchObject({ default_paid_model: 'deepseek/deepseek-flash', default_lmstudio_model: 'lmstudio/google/gemma-4-e4b', lmstudio_parallel: 4, lmstudio_context: 32768, lmstudio_ttl_minutes: 60 })
+    await env.engine.handleCommand({ type: 'saveSettings', kindleAddress: 'me_1@kindle.com', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-v4-pro', defaultStrataModel: 'strata/qwen3.8-flash-next-low', defaultLmstudioModel: 'lmstudio/nail-qwen3.6-35b-a3b-mtp', lmstudioParallel: 2, lmstudioContext: 65536, lmstudioTtlMinutes: 30 })
+    const md2 = parseMd(await readFile(path.join(env.dir, 'config', 'settings.md'), 'utf8'))
+    expect(md2.data).toMatchObject({ default_paid_model: 'deepseek/deepseek-v4-pro', default_strata_model: 'strata/qwen3.8-flash-next-low', default_lmstudio_model: 'lmstudio/nail-qwen3.6-35b-a3b-mtp', lmstudio_parallel: 2, lmstudio_context: 65536, lmstudio_ttl_minutes: 30 })
+    expect(env.engine.registry.resolve('paid')).toBe('deepseek/deepseek-v4-pro')
+    expect(env.engine.registry.resolve('lmstudio')).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
+    expect(last('snapshot')).toMatchObject({ settings: { lmstudioParallel: 2 } })
   })
 
   it('setSecret only accepts the allowlist and never logs a value', async () => {
@@ -121,8 +129,15 @@ describe('commands', () => {
     const agent = (await env.engine.snapshot()).agents.find((a) => a.role === 'writer')!
     await env.engine.handleCommand({ type: 'setModel', agent: agent.id, model: 'r/review-model' })
     expect((await env.engine.snapshot()).agents.find((a) => a.id === agent.id)).toMatchObject({ model: 'r/review-model', resolvedModel: 'r/review-model' })
+    // the UI hears about it at once, so the picker keeps the new model
+    expect(last('agent.updated')).toMatchObject({ agent: { id: agent.id, model: 'r/review-model', resolvedModel: 'r/review-model' } })
     await env.engine.handleCommand({ type: 'setModel', agent: agent.id, model: null })
     expect((await env.engine.snapshot()).agents.find((a) => a.id === agent.id)).toMatchObject({ model: null, resolvedModel: 'w/writer-model' })
+    expect(last('agent.updated')).toMatchObject({ agent: { id: agent.id, model: null } })
+    // a new role default goes out with a snapshot, for the pickers
+    await env.engine.handleCommand({ type: 'setModel', role: 'writer', model: 'r/review-model' })
+    expect(last('snapshot')).toMatchObject({ roleDefaults: { writer: 'r/review-model' } })
+    await env.engine.handleCommand({ type: 'setModel', role: 'writer', model: 'w/writer-model' }) // back, the next tests share this engine
   })
 
   it('hire, fire and pause all send agent.hired, agent.removed and factory.paused', async () => {

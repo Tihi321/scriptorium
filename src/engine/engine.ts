@@ -8,7 +8,7 @@ import { AgentStore } from './agents/agents'
 import { Budget } from './budget/spend'
 import { LogWriter } from './logs/logs'
 import { resolveKey, setStoredKey } from './models/keys'
-import { ModelRegistry } from './models/registry'
+import { ModelRegistry, modelDefaultsOf } from './models/registry'
 import type { RegistryOptions } from './models/registry'
 import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
@@ -264,19 +264,27 @@ export class Engine {
   async handleWatch(e: WatchEvent): Promise<void> {
     try {
       if (e.kind === 'agent') {
-        await this.agents.reloadFile(path.basename(e.rel, '.md'))
+        const id = path.basename(e.rel, '.md')
+        await this.agents.reloadFile(id)
         this.syncAgents()
+        this.emitAgentUpdated(id)
       } else if (e.kind === 'topics') {
         await this.emitTopics()
       } else if (e.kind === 'config') {
         const name = path.basename(e.rel, '.md')
-        if (name === 'providers' || name === 'roles') await this.registry.load()
+        if (name === 'providers' || name === 'roles') {
+          await this.registry.load()
+          this.emit(await this.snapshot()) // the pickers show the models and role defaults
+        }
         else if (name === 'budget') await this.budget.loadCaps()
         else if (name === 'factory') {
           const before = this.factory.paused
           await this.loadFactory()
           if (before !== this.factory.paused) this.emit({ type: 'factory.paused', paused: this.factory.paused })
-        } else if (name === 'settings') await this.loadSettings()
+        } else if (name === 'settings') {
+          await this.loadSettings()
+          await this.registry.load() // the role aliases and the LM Studio context may have changed
+        }
         else if (name === 'quality' || name === 'formats') await this.loadQualityAndFormats()
       }
     } catch (err) {
@@ -298,6 +306,7 @@ export class Engine {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.log(`config/settings.md: ${(err as Error).message}`)
     }
+    this.registry.setDefaults(modelDefaultsOf(this.settings))
   }
 
   settingsSummary(): SettingsSummary {
@@ -308,7 +317,13 @@ export class Engine {
       smtpHost: s.smtp_host,
       smtpPort: s.smtp_port,
       smtpUser: s.smtp_user,
-      smtpSecure: s.smtp_secure
+      smtpSecure: s.smtp_secure,
+      defaultPaidModel: s.default_paid_model,
+      defaultStrataModel: s.default_strata_model,
+      defaultLmstudioModel: s.default_lmstudio_model,
+      lmstudioParallel: s.lmstudio_parallel,
+      lmstudioContext: s.lmstudio_context,
+      lmstudioTtlMinutes: s.lmstudio_ttl_minutes
     }
   }
 
@@ -321,6 +336,12 @@ export class Engine {
 
   secretsSet(): string[] {
     return this.allowedSecrets().filter((n) => !!resolveKey(n))
+  }
+
+  /** Tells the UI that an agent's file changed (model override, paused). */
+  emitAgentUpdated(id: string): void {
+    const def = this.agents.get(id)
+    if (def && this.knownAgents.has(id)) this.emit({ type: 'agent.updated', agent: agentSummary(def, this.scheduler, this.router) })
   }
 
   /** Emits agent.hired / agent.removed for the differences since the last time. */
@@ -398,10 +419,12 @@ export class Engine {
         return
       case 'pause':
         await this.agents.patch(cmd.agent, { paused: true })
+        this.emitAgentUpdated(cmd.agent)
         this.scheduler.kick()
         return
       case 'resume':
         await this.agents.patch(cmd.agent, { paused: false })
+        this.emitAgentUpdated(cmd.agent)
         this.scheduler.kick()
         return
       case 'stop':
@@ -424,8 +447,13 @@ export class Engine {
           this.log(`setModel: unknown model ${cmd.model}`)
           return
         }
-        if (cmd.agent) await this.agents.patch(cmd.agent, { model: cmd.model })
-        else if (cmd.role && cmd.model !== null) await this.setRoleModel(cmd.role, cmd.model)
+        if (cmd.agent) {
+          await this.agents.patch(cmd.agent, { model: cmd.model })
+          this.emitAgentUpdated(cmd.agent)
+        } else if (cmd.role && cmd.model !== null) {
+          await this.setRoleModel(cmd.role, cmd.model)
+          this.emit(await this.snapshot()) // the new role default for the pickers
+        }
         this.scheduler.kick()
         return
       }
@@ -478,6 +506,7 @@ export class Engine {
           doc = { data: { kind: 'settings' } as Record<string, unknown>, body: '' }
         }
         const port = Number.isFinite(cmd.smtpPort) && cmd.smtpPort > 0 ? Math.round(cmd.smtpPort) : 587
+        const s = this.settings
         await writeMd(
           file,
           {
@@ -488,11 +517,20 @@ export class Engine {
             smtp_host: cmd.smtpHost.trim(),
             smtp_port: port,
             smtp_user: cmd.smtpUser.trim(),
-            smtp_secure: !!cmd.smtpSecure
+            smtp_secure: !!cmd.smtpSecure,
+            default_paid_model: cmd.defaultPaidModel?.trim() || s.default_paid_model,
+            default_strata_model: cmd.defaultStrataModel?.trim() || s.default_strata_model,
+            default_lmstudio_model: cmd.defaultLmstudioModel?.trim() || s.default_lmstudio_model,
+            lmstudio_parallel: Math.min(16, Math.max(1, Math.round(cmd.lmstudioParallel ?? s.lmstudio_parallel) || 1)),
+            lmstudio_context: Math.max(2048, Math.round(cmd.lmstudioContext ?? s.lmstudio_context) || 32768),
+            lmstudio_ttl_minutes: Math.max(1, Math.round(cmd.lmstudioTtlMinutes ?? s.lmstudio_ttl_minutes) || 60)
           },
           doc.body
         )
         await this.loadSettings()
+        await this.registry.load()
+        this.scheduler.kick()
+        this.emit(await this.snapshot()) // the role defaults shown in the pickers follow the new aliases
         return
       }
       case 'setSecret': {

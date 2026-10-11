@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getStartWithWindows, sendCommand, setStartWithWindows } from '../api'
 import { useOffice } from '../store/hooks'
 import { officeStore } from '../store/store'
+import type { SettingsSummary } from '../../shared/protocol'
 
 const SMTP_PASSWORD = 'SCRIPTORIUM_SMTP_PASSWORD'
 /** Provider key variables the engine usually knows. The engine refuses names that are not in providers.md. */
@@ -11,7 +12,21 @@ export function SettingsDialog() {
   const open = useOffice((s) => s.settingsOpen)
   const settings = useOffice((s) => s.settings)
   const secretsSet = useOffice((s) => s.secretsSet)
-  const [form, setForm] = useState({ kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false })
+  const models = useOffice((s) => s.models)
+  const [form, setForm] = useState<SettingsSummary>({
+    kindleAddress: '',
+    fromAddress: '',
+    smtpHost: '',
+    smtpPort: 587,
+    smtpUser: '',
+    smtpSecure: false,
+    defaultPaidModel: '',
+    defaultStrataModel: '',
+    defaultLmstudioModel: '',
+    lmstudioParallel: 4,
+    lmstudioContext: 32768,
+    lmstudioTtlMinutes: 60
+  })
   const [password, setPassword] = useState('')
   const [keyName, setKeyName] = useState(KEY_NAMES[0]!)
   const [keyValue, setKeyValue] = useState('')
@@ -36,11 +51,45 @@ export function SettingsDialog() {
       <input type={type} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} data-testid={`set-${key}`} />
     </>
   )
+  /** A model picker for one alias: the provider's models (or every paid one), plus the current value if it isn't in the list. */
+  const modelSelect = (label: string, key: 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel', pick: (m: (typeof models)[number]) => boolean) => {
+    const refs = models.filter(pick).map((m) => m.ref)
+    if (form[key] && !refs.includes(form[key])) refs.unshift(form[key])
+    return (
+      <>
+        <label>{label}</label>
+        <select value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} data-testid={`set-${key}`}>
+          {refs.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </>
+    )
+  }
+  const num = (label: string, key: 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes') => (
+    <div style={{ flex: 1 }}>
+      <label>{label}</label>
+      <input type="number" value={form[key]} onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })} data-testid={`set-${key}`} />
+    </div>
+  )
   const keySet = secretsSet.includes(keyName)
   return (
     <div className="dialog-backdrop" onClick={close}>
       <div className="dialog settings" onClick={(e) => e.stopPropagation()} data-testid="settings-dialog">
         <div className="panel-title">Settings</div>
+        <div className="dim">Default models (the aliases paid, strata and lmstudio in roles.md)</div>
+        {modelSelect('Paid API', 'defaultPaidModel', (m) => !m.local)}
+        {modelSelect('Strata', 'defaultStrataModel', (m) => m.provider === 'strata')}
+        {modelSelect('LM Studio', 'defaultLmstudioModel', (m) => m.provider === 'lmstudio')}
+        <div className="dim" style={{ marginTop: 6 }}>Loading LM Studio models</div>
+        <div className="row">
+          {num('Requests at once', 'lmstudioParallel')}
+          {num('Context window', 'lmstudioContext')}
+          {num('Unload after idle min', 'lmstudioTtlMinutes')}
+        </div>
+        <hr />
         <div className="dim">Send to Kindle</div>
         {field('Kindle address', 'kindleAddress')}
         {field('From address (on your Amazon approved list)', 'fromAddress')}

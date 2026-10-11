@@ -190,6 +190,10 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         agentOrder: prev ? s.agentOrder : [...s.agentOrder, e.agent.id]
       }
     }
+    case 'agent.updated': {
+      const prev = s.agents[e.agent.id]
+      return prev ? { agents: { ...s.agents, [e.agent.id]: agentFromSummary(e.agent, prev, now) } } : {}
+    }
     case 'agent.removed': {
       const { [e.agent]: _gone, ...rest } = s.agents
       return {

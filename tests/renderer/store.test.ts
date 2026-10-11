@@ -63,7 +63,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     roleDefaults: {},
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },
     running: [],
-    settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false },
+    settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/google/gemma-4-e4b', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60 },
     secretsSet: [],
     at: 'now',
     ...extra
@@ -314,6 +314,11 @@ describe('library and protocol events', () => {
     expect(store.getState().agentOrder).toContain('w3')
     expect(store.getState().agents.w3?.model).toBe('deepseek/deepseek-flash')
     expect(store.getState().agents.w3?.override).toBeNull()
+    // a changed model or pause comes as agent.updated; an unknown agent is ignored
+    store.getState().applyEvent({ type: 'agent.updated', agent: agentSummary('w3', 'Nina', 'writer', { model: 'strata/qwen3.8-flash-next', resolvedModel: 'strata/qwen3.8-flash-next' }) }, T0)
+    expect(store.getState().agents.w3).toMatchObject({ override: 'strata/qwen3.8-flash-next', model: 'strata/qwen3.8-flash-next' })
+    store.getState().applyEvent({ type: 'agent.updated', agent: agentSummary('ghost', 'Ghost', 'writer') }, T0)
+    expect(store.getState().agents.ghost).toBeUndefined()
     store.getState().selectAgent('w3')
     store.getState().applyEvent({ type: 'agent.removed', agent: 'w3' }, T0)
     expect(store.getState().agents.w3).toBeUndefined()

@@ -78,7 +78,17 @@ export interface SettingsSummary {
   smtpPort: number
   smtpUser: string
   smtpSecure: boolean
+  /** `provider/model` behind the role aliases `paid`, `strata` and `lmstudio`. */
+  defaultPaidModel: string
+  defaultStrataModel: string
+  defaultLmstudioModel: string
+  /** How the engine loads LM Studio models: requests at once, context window, idle minutes before unloading. */
+  lmstudioParallel: number
+  lmstudioContext: number
+  lmstudioTtlMinutes: number
 }
+
+export type ModelSettingKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes'
 
 export interface SnapshotEvent {
   type: 'snapshot'
@@ -112,6 +122,8 @@ export type EngineEvent =
   | { type: 'agent.state'; agent: string; role: string; state: AgentState; jobId?: string; task?: string; book?: string }
   | { type: 'agent.hired'; agent: AgentSummary }
   | { type: 'agent.removed'; agent: string }
+  /** An agent's file changed (its model, paused, ...). */
+  | { type: 'agent.updated'; agent: AgentSummary }
   | { type: 'factory.paused'; paused: boolean }
   | { type: 'job.started'; jobId: string; agent: string; task: string; book?: string; model?: string }
   | { type: 'job.token'; jobId: string; agent: string; text: string }
@@ -162,7 +174,8 @@ export type Command =
   | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
   /** Creates an idea file in ideas/. */
   | { type: 'addIdea'; text: string; topic?: string }
-  | ({ type: 'saveSettings' } & SettingsSummary)
+  /** The model defaults and LM Studio fields may be left out: they keep their value. */
+  | ({ type: 'saveSettings' } & Omit<SettingsSummary, ModelSettingKey> & Partial<Pick<SettingsSummary, ModelSettingKey>>)
   /** Stores a secret in the Windows credential store. Only the SMTP password and the provider key variables are allowed. */
   | { type: 'setSecret'; name: string; value: string }
   | { type: 'snapshot' }

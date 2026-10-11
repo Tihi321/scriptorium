@@ -49,7 +49,19 @@ describe('seed configs', () => {
     expect(flash).toMatchObject({ priceIn: 0.3, priceOut: 1.2, priceCachedIn: 0.006, family: 'deepseek' })
     expect(isPaidModel(flash)).toBe(true)
     expect(isPaidModel(registry.getModel('lmstudio/nvidia/nemotron-3-nano-4b')!)).toBe(false)
-    for (const refs of Object.values(registry.roles.roles)) for (const ref of refs.models) expect(registry.getModel(ref), ref).toBeTruthy()
+    for (const role of Object.keys(registry.roles.roles)) for (const ref of registry.roleModelRefs(role)) expect(registry.getModel(ref), ref).toBeTruthy()
+    // the seed roles use the aliases, resolved to the settings defaults
+    expect(registry.roles.roles.writer?.models).toEqual(['paid', 'strata', 'lmstudio'])
+    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/google/gemma-4-e4b'])
+    expect(registry.roleModelRefs('continuity-checker')).toEqual(['strata/qwen3.8-flash-next-low', 'lmstudio/google/gemma-4-e4b', 'deepseek/deepseek-flash'])
+    expect(registry.providers.get('lmstudio')?.loadModels).toBe(true)
+    expect(registry.getModel('lmstudio/google/gemma-4-e4b')?.context).toBe(32768) // loaded with the settings' window
+    // another default in the settings: the roles follow, and an agent override may be an alias too
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-pro', strata: 'strata/qwen3.8-flash-next', lmstudio: 'lmstudio/nail-qwen3.6-35b-a3b-mtp' }, lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
+    await registry.load()
+    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'])
+    expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(16384)
+    expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
     expect(Object.keys(registry.roles.roles)).toHaveLength(16)
     expect(registry.embeddingModel()?.embedding).toBe(true)
   })
@@ -58,6 +70,7 @@ describe('seed configs', () => {
     let answer: (() => Response) | null = () => new Response(JSON.stringify({ loaded: true, concurrency: { serving: 4, requested: 4 } }))
     const asked: string[] = []
     const fetchImpl = (async (url: string) => {
+      if (!String(url).includes(':8080')) throw new Error('LM Studio is not running') // only Strata in this test
       asked.push(String(url))
       if (!answer) throw new Error('connection refused')
       return answer()
@@ -66,7 +79,7 @@ describe('seed configs', () => {
     await registry.load()
     const strata = () => registry.providers.get('strata')!
     expect(strata()).toMatchObject({ concurrencyAuto: true, concurrency: 1 })
-    expect(registry.providers.get('lmstudio')!.concurrencyAuto).toBe(false)
+    expect(registry.providers.get('lmstudio')!).toMatchObject({ concurrencyAuto: true, concurrency: 1 })
     expect(await registry.syncServerSlots()).toEqual([{ provider: strata(), from: 1, to: 4 }])
     expect(asked).toEqual(['http://127.0.0.1:8080/v1/status'])
     await registry.load() // a config reload keeps what the server said
@@ -85,6 +98,31 @@ describe('seed configs', () => {
     for (const c of await registry.syncServerSlots()) router.limiter.wakeAll(c.provider)
     await waiting
     expect(router.limiter.inFlight('strata')).toBe(2)
+  })
+
+  it('concurrency: auto for LM Studio adds up `parallel` of the loaded chat models', async () => {
+    let loaded: { type: string; loaded_instances: { config: { parallel?: number } }[] }[] = []
+    const asked: string[] = []
+    const fetchImpl = (async (url: string) => {
+      const u = String(url)
+      if (!u.startsWith('http://localhost:1234')) throw new Error('not running')
+      asked.push(u)
+      // LM Studio answers unknown endpoints with 200 and an error message
+      if (u.endsWith('/v1/status')) return new Response(JSON.stringify({ error: 'Unexpected endpoint or method. (GET /v1/status)' }))
+      return new Response(JSON.stringify({ models: loaded }))
+    }) as unknown as typeof fetch
+    const registry = new ModelRegistry(dir, { keys: () => undefined, fetchImpl })
+    await registry.load()
+    const lm = () => registry.providers.get('lmstudio')!
+    expect(await registry.syncServerSlots()).toEqual([]) // nothing loaded: 1
+    expect(asked).toEqual(['http://localhost:1234/v1/status', 'http://localhost:1234/api/v1/models'])
+    loaded = [
+      { type: 'llm', loaded_instances: [{ config: { parallel: 4 } }] },
+      { type: 'llm', loaded_instances: [{ config: {} }] }, // no parallel reported: 1
+      { type: 'embedding', loaded_instances: [{ config: {} }] }
+    ]
+    expect(await registry.syncServerSlots()).toEqual([{ provider: lm(), from: 1, to: 5 }])
+    expect(lm().concurrency).toBe(5)
   })
 
   it('a key from the resolver makes a provider available', async () => {
@@ -339,6 +377,32 @@ describe('HTTP clients against fake servers', () => {
       res.end('{"data":[{"id":"a","loaded_context_length":32768},{"id":"b","state":"not-loaded"}]}')
     }
     expect([...(await c.contextLengths()).entries()]).toEqual([['a', 32768]])
+  })
+
+  it('LM Studio: a model that is not loaded is loaded first with the settings, once for parallel requests', async () => {
+    const loaded = new Set<string>(['already'])
+    const calls: string[] = []
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      const u = String(url)
+      calls.push(`${init?.method ?? 'GET'} ${u.replace('http://lm.test', '')}${init?.method === 'POST' && u.endsWith('/load') ? ' ' + String(init.body) : ''}`)
+      if (u.endsWith('/api/v1/models')) {
+        return new Response(JSON.stringify({ models: ['already', 'cold'].map((key) => ({ key, type: 'llm', loaded_instances: loaded.has(key) ? [{ id: key }] : [] })) }))
+      }
+      if (u.endsWith('/api/v1/models/load')) {
+        await new Promise((r) => setTimeout(r, 20))
+        loaded.add(JSON.parse(String(init!.body)).model)
+        return new Response(JSON.stringify({ status: 'loaded' }))
+      }
+      return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+    }) as unknown as typeof fetch
+    const c = new OpenAiCompatClient({ id: 'lm', baseUrl: 'http://lm.test/v1', fetchImpl, loadConfig: () => ({ parallel: 4, context: 32768, ttlMinutes: 60 }) })
+    expect((await collect(c.chat({ model: 'already', messages: [] }))).text).toBe('ok')
+    expect(calls.filter((x) => x.startsWith('POST') && x.includes('/load'))).toEqual([])
+    calls.length = 0
+    const both = await Promise.all([collect(c.chat({ model: 'cold', messages: [] })), collect(c.chat({ model: 'cold', messages: [] }))])
+    expect(both.map((b) => b.text)).toEqual(['ok', 'ok'])
+    expect(calls.filter((x) => x.includes('/load'))).toEqual(['POST /api/v1/models/load {"model":"cold","context_length":32768,"parallel":4}'])
+    await expect(collect(c.chat({ model: 'missing', messages: [] }))).rejects.toMatchObject({ retryable: false, message: expect.stringMatching(/LM Studio has no model "missing": download it first/) })
   })
 
   it('OpenAI-compatible: nomic prefixes', async () => {

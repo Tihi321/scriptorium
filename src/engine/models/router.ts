@@ -70,7 +70,7 @@ export class ModelRouter {
 
   /** Ordered models for a job: the agent's override, then the role's list. Unavailable providers are dropped. */
   candidates(role: string, o: CandidateOptions = {}): ModelInfo[] {
-    const refs = [...(o.agentModel ? [o.agentModel] : []), ...this.registry.roleModelRefs(role)]
+    const refs = [...(o.agentModel ? [this.registry.resolve(o.agentModel)] : []), ...this.registry.roleModelRefs(role)]
     const seen = new Set<string>()
     const list: ModelInfo[] = []
     for (const ref of refs) {

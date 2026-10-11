@@ -59,6 +59,8 @@ export const providerEntrySchema = z.looseObject({
   discover: z.boolean().default(false),
   /** Send the JSON schema as `response_format`. Set false for servers that reject a bad JSON answer (502) instead of constraining it: the prompt and the repair step handle the JSON then. */
   json_schema: z.boolean().default(true),
+  /** LM Studio: the engine loads a model that isn't loaded yet itself, with the parallel, context and idle time from config/settings.md. */
+  load_models: z.boolean().default(false),
   models: z.array(providerModelSchema).default([])
 })
 
@@ -71,7 +73,7 @@ export const providersSchema = configBase('providers').extend({
 // ---- roles ----
 
 export const rolesSchema = configBase('roles').extend({
-  /** Per role: ordered model list, `provider/model`. The first one is the default, the rest are fallbacks. */
+  /** Per role: ordered model list, `provider/model` or an alias (`paid`, `strata`, `lmstudio`: the defaults in config/settings.md). The first one is the default, the rest are fallbacks. */
   roles: z.record(z.string(), z.looseObject({ models: z.array(z.string()).default([]) })).default({}),
   /** `provider/model` used for embeddings. */
   embeddings: z.string().optional()
@@ -163,7 +165,15 @@ export const settingsSchema = configBase('settings').extend({
   smtp_host: z.string().default(''),
   smtp_port: z.number().int().default(587),
   smtp_user: z.string().default(''),
-  smtp_secure: z.boolean().default(false)
+  smtp_secure: z.boolean().default(false),
+  /** What the role aliases in roles.md stand for: `paid`, `strata` and `lmstudio` (each a `provider/model`). */
+  default_paid_model: z.string().default('deepseek/deepseek-flash'),
+  default_strata_model: z.string().default('strata/qwen3.8-flash-next'),
+  default_lmstudio_model: z.string().default('lmstudio/google/gemma-4-e4b'),
+  /** How the engine loads LM Studio models that aren't loaded yet: requests at once, context window, idle minutes before LM Studio unloads it. */
+  lmstudio_parallel: z.number().int().min(1).max(16).default(4),
+  lmstudio_context: z.number().int().min(2048).default(32768),
+  lmstudio_ttl_minutes: z.number().int().min(1).default(60)
 })
 export const topicsSchema = configBase('topics')
 
