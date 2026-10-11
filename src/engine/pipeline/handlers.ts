@@ -367,6 +367,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     run.version = version
     // a story with choices: the architect plans a map of chapters with choices and endings
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
+    appendToPrompt(messages, await ownerNotesSection(d, slug))
     const schema = z.object({
       chapters: z
         .array(
@@ -388,8 +389,27 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       audience: z.string().default(''),
       terms: z.array(z.object({ term: z.string(), definition: z.string() })).default([])
     })
-    const r = await chatJson(ctx, messages, schema, { maxTokens: fmt.long ? 12000 : 6000 })
+    let r = await chatJson(ctx, messages, schema, { maxTokens: fmt.long ? 12000 : 6000 })
     run.addJson(r.cost, r.chat.model)
+    // too few chapters: ask once more with the count, instead of starting over (models often stop a chapter or two short)
+    if (r.value.chapters.length < fmt.chapters[0]) {
+      const short = r.value.chapters.length
+      const more = await chatJson(
+        ctx,
+        [
+          ...messages,
+          { role: 'assistant', content: JSON.stringify(r.value).slice(0, 40000) },
+          {
+            role: 'user',
+            content: `This outline has ${short} chapter(s), but this format needs ${fmt.chapters[0]} to ${fmt.chapters[1]}. Reply with the whole outline again as one JSON object in the same format, with at least ${fmt.chapters[0]} chapters: split the longest chapters, or add the steps the story skips. Keep the rest as it is.`
+          }
+        ],
+        schema,
+        { maxTokens: fmt.long ? 12000 : 6000 }
+      )
+      run.addJson(more.cost, more.chat.model)
+      if (more.value.chapters.length > short) r = more
+    }
     let chapters = r.value.chapters
     if (chapters.length > fmt.chapters[1]) chapters = chapters.slice(0, fmt.chapters[1])
     if (chapters.length < fmt.chapters[0]) throw new Error(`the outline has ${chapters.length} chapter(s), the format needs ${fmt.chapters[0]} to ${fmt.chapters[1]}`)
@@ -483,6 +503,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     })
     run.version = version
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'draft', chapterPlace(outline.chapters, n)))
+    appendToPrompt(messages, await ownerNotesSection(d, slug, n))
     let r = await run.chat({ messages, maxTokens: Math.max(4000, perChapter * 6) })
     let body = stripLeadingHeading(cleanProse(r.text))
     if (countWords(body) < 20) throw new Error(`chapter ${n} came back too short (${countWords(body)} words, ${r.usage.outputTokens} tokens used: a thinking model may have run out of tokens)`)
@@ -637,10 +658,14 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     if (!current) throw new Error(`chapter ${n} does not exist`)
     const isLength = ctx.job.id.endsWith('--len')
     const isCheck = ctx.job.id.endsWith('--chk')
+    // your note from the draft reader, with "rewrite this chapter": the note is the job body
+    const isNote = /--note\d+$/.test(ctx.job.id)
     const checkNotes = isCheck ? await d.books.readText(slug, 'reviews', `ch-${String(n).padStart(2, '0')}-check.md`) : null
-    const reviews = isLength || isCheck ? [] : await loadReviews(d, slug, round - 1)
+    const reviews = isLength || isCheck || isNote ? [] : await loadReviews(d, slug, round - 1)
     const notes = isLength
       ? ctx.jobBody.trim()
+      : isNote
+        ? `From the book's owner, who read the draft (this comes first): ${ctx.jobBody.trim()}`
       : isCheck
         ? `From the continuity checker: ${checkNotes ? parseMd(checkNotes).body.trim() : '(no notes)'}`
         : reviews
@@ -649,9 +674,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           .filter((x): x is string => x !== null)
           .join('\n')
     // a chapter in a flat tension stretch is rewritten to raise the tension (the developmental editor's tension report)
-    const flat = !isLength && !isCheck && Array.isArray(book.tension_rewrite) && (book.tension_rewrite as unknown[]).map(Number).includes(n)
+    const flat = !isLength && !isCheck && !isNote && Array.isArray(book.tension_rewrite) && (book.tension_rewrite as unknown[]).map(Number).includes(n)
     const tensionNote = flat ? `- Raise tension: this chapter is part of a flat stretch in the tension report (the developmental editor scored it ${(await readTensionOf(d, slug, n)) ?? 'low'} out of 10). Raise the stakes: add a sharper problem, a ticking clock, a loss or a hard choice, and end the chapter on a turn.` : ''
-    const claimNote = fmt.nonfiction && !isLength && !isCheck ? await factClaimNote(d, slug, round - 1, n) : ''
+    const claimNote = fmt.nonfiction && !isLength && !isCheck && !isNote ? await factClaimNote(d, slug, round - 1, n) : ''
     const allNotes = [claimNote, notes, tensionNote].filter(Boolean).join('\n')
     let bibleText: string
     let researchText: string
@@ -691,6 +716,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     })
     run.version = version
     if (branches) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n)))
+    if (!isNote) appendToPrompt(messages, await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6) })
     const body = stripMarkers(stripLeadingHeading(cleanProse(r.text)))
     if (countWords(body) < 20) throw new Error(`the rewrite of chapter ${n} came back too short`)
@@ -882,4 +908,12 @@ export async function askFromReview(d: Pick<PipelineDeps, 'research'>, agent: st
     if (a.id && (a.status === 'created' || a.status === 'exists')) ids.push(a.id)
   }
   return ids
+}
+
+/** Your notes from the draft reader (books/<slug>/notes.md), for the writers. Empty when there are none. */
+export async function ownerNotesSection(d: { books: BookStore }, slug: string, chapter?: number): Promise<string> {
+  const notes = await d.books.ownerNotes(slug)
+  if (!notes) return ''
+  const about = chapter ? ` A note marked "(chapter ${chapter})" is about the chapter you are writing now.` : ''
+  return `## Notes from the book's owner\n\nThe owner read the draft and left these notes. Follow them: where they conflict with the outline or other notes, the owner's notes win.${about}\n\n${notes}`
 }

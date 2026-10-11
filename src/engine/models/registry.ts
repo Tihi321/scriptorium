@@ -53,6 +53,9 @@ export interface ModelInfo {
   embedding: boolean
   extraBody: Record<string, unknown> | null
   discovered: boolean
+  /** LM Studio: this model's own load settings (`load_context`, `load_parallel`), over the settings' ones. */
+  loadContext?: number
+  loadParallel?: number
 }
 
 export interface RegistryOptions {
@@ -152,7 +155,9 @@ export class ModelRegistry {
           id: m.id,
           family: m.family,
           // a model the engine loads itself gets the context window it loads it with
-          context: p.load_models ? Math.min(m.context ?? Infinity, this.defaults.lmLoad.context) : m.context,
+          context: p.load_models ? Math.min(m.context ?? Infinity, m.load_context ?? this.defaults.lmLoad.context) : m.context,
+          loadContext: m.load_context,
+          loadParallel: m.load_parallel,
           maxOutput: m.max_output,
           priceIn: m.price_in,
           priceOut: m.price_out,
@@ -213,7 +218,7 @@ export class ModelRegistry {
         apiKey,
         fetchImpl,
         jsonSchema: info.jsonSchema,
-        loadConfig: info.loadModels ? () => this.defaults.lmLoad : undefined,
+        loadConfig: info.loadModels ? (model) => this.loadConfigFor(info.id, model) : undefined,
         lmsPath: info.loadModels ? (this.opts.lmsPath === null ? undefined : (this.opts.lmsPath ?? defaultLmsPath())) : undefined,
         embedPrefixes: info.local ? { document: 'search_document: ', query: 'search_query: ' } : undefined
       })
@@ -310,6 +315,13 @@ export class ModelRegistry {
 
   getModel(ref: string): ModelInfo | undefined {
     return this.models.get(ref)
+  }
+
+  /** How a `load_models` provider loads `model`: the settings, with the model's own `load_context` / `load_parallel` over them. */
+  loadConfigFor(provider: string, model: string): ModelDefaults['lmLoad'] {
+    const m = this.models.get(`${provider}/${model}`)
+    const d = this.defaults.lmLoad
+    return { parallel: m?.loadParallel ?? d.parallel, context: m?.loadContext ?? d.context, ttlMinutes: d.ttlMinutes }
   }
 
   /** Sets the role aliases and the LM Studio load settings. Call `load()` after it so model context windows follow. */

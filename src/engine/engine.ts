@@ -82,7 +82,12 @@ export class Engine {
     this.emit = (e) => {
       opts.emit(e)
       if (e.type === 'book.stage') void this.emitBookUpdated(e.book)
-      if (e.type === 'job.done') this.pipeline.kick()
+      if (e.type === 'job.done') {
+        this.pipeline.kick()
+        // a book's job ids start with its slug: the book card shows chapters and words as they grow
+        const slug = e.jobId.split('--')[0]
+        if (slug && e.jobId.includes('--')) void this.books.read(slug).then((b) => (b ? this.emitBookUpdated(slug) : undefined))
+      }
     }
     this.log = opts.log ?? (() => undefined)
     const dir = opts.dataDir
@@ -338,6 +343,17 @@ export class Engine {
     return this.allowedSecrets().filter((n) => !!resolveKey(n))
   }
 
+  /** Builds the draft reader of a book and sends `draft.ready`. */
+  async emitDraft(slug: string): Promise<void> {
+    try {
+      const dir = await this.books.buildDraft(slug)
+      const chapters = (await this.books.chapters(slug)).map((c) => ({ n: c.n, title: c.title, words: c.words }))
+      this.emit({ type: 'draft.ready', book: slug, dir, notes: await this.books.ownerNotes(slug), chapters, at: Date.now() })
+    } catch (err) {
+      this.log(`readDraft ${slug}: ${(err as Error).message}`)
+    }
+  }
+
   /** Tells the UI that an agent's file changed (model override, paused). */
   emitAgentUpdated(id: string): void {
     const def = this.agents.get(id)
@@ -465,6 +481,33 @@ export class Engine {
         }
         await this.books.update(cmd.book, () => ({ rating, rating_note: cmd.note?.trim() || null }))
         await this.emitBookUpdated(cmd.book)
+        return
+      }
+      case 'readDraft':
+        await this.emitDraft(cmd.book)
+        return
+      case 'addBookNote': {
+        const text = cmd.text.trim()
+        const book = await this.books.read(cmd.book)
+        if (!text || !book) {
+          this.log(`addBookNote: no book "${cmd.book}" or an empty note`)
+          return
+        }
+        await this.books.addOwnerNote(cmd.book, text, cmd.chapter ?? null)
+        if (cmd.rewrite && cmd.chapter) {
+          const ch = (await this.books.chapters(cmd.book)).find((c) => c.n === cmd.chapter)
+          if (ch) {
+            const unit = `ch${String(ch.n).padStart(2, '0')}`
+            // the round stays the chapter's own, so the pipeline's view of the book doesn't change
+            await this.jobs.enqueue(
+              { id: `${cmd.book}--rewrite--${unit}--note${Date.now()}`, task: 'rewrite_chapter', role: 'writer', book: cmd.book, unit, round: ch.round, agent_hint: book.data.writer_agent, requested_by: 'you' },
+              text
+            )
+            this.log(`book ${cmd.book}: chapter ${ch.n} will be rewritten with your note`)
+            this.scheduler.kick()
+          }
+        }
+        await this.emitDraft(cmd.book)
         return
       }
       case 'pauseBook':

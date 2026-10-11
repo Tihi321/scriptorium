@@ -9,6 +9,7 @@ export interface FakeBook {
   rating: number | null
   note: string | null
   paused?: boolean
+  notes?: string
 }
 
 export interface FakeTopic {
@@ -76,6 +77,13 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     format: t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
     stage: b.stage,
     paused: !!b.paused,
+    chaptersWritten: published ? 3 : 1,
+    chaptersPlanned: 3,
+    targetWords: 1500,
+    round: 0,
+    reasons: [],
+    team: [{ agent: 'writer-mara-quill', role: 'writer', jobs: 3, models: ['deepseek/deepseek-flash'], costUsd: 0.003 }],
+    steps: [{ task: 'draft_chapter', unit: 'ch01', agent: 'writer-mara-quill', model: 'deepseek/deepseek-flash' }],
     words: 450 + b.slug.length * 120,
     year: 2026,
     score: published ? 7.8 : null,

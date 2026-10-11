@@ -55,12 +55,16 @@ describe('seed configs', () => {
     expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/google/gemma-4-e4b'])
     expect(registry.roleModelRefs('continuity-checker')).toEqual(['strata/qwen3.8-flash-next-low', 'lmstudio/google/gemma-4-e4b', 'deepseek/deepseek-flash'])
     expect(registry.providers.get('lmstudio')?.loadModels).toBe(true)
-    expect(registry.getModel('lmstudio/google/gemma-4-e4b')?.context).toBe(32768) // loaded with the settings' window
+    expect(registry.getModel('lmstudio/google/gemma-4-e4b')?.context).toBe(131072) // loaded with the settings' window
+    // the big Qwen models have their own load settings in providers.md
+    expect(registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp')).toEqual({ parallel: 2, context: 65536, ttlMinutes: 60 })
+    expect(registry.loadConfigFor('lmstudio', 'google/gemma-4-e4b')).toEqual({ parallel: 4, context: 131072, ttlMinutes: 60 })
     // another default in the settings: the roles follow, and an agent override may be an alias too
     registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-pro', strata: 'strata/qwen3.8-flash-next', lmstudio: 'lmstudio/nail-qwen3.6-35b-a3b-mtp' }, lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
     await registry.load()
     expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'])
-    expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(16384)
+    expect(registry.getModel('lmstudio/google/gemma-4-e4b')?.context).toBe(16384)
+    expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(65536) // its own load_context wins
     expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
     expect(Object.keys(registry.roles.roles)).toHaveLength(16)
     expect(registry.embeddingModel()?.embedding).toBe(true)

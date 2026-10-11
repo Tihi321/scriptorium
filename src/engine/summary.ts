@@ -37,6 +37,12 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     format: d.format,
     stage: d.stage,
     paused: d.paused === true,
+    chaptersWritten: chapters.length,
+    chaptersPlanned: (await books.outline(slug))?.chapters.length ?? null,
+    targetWords: d.target_words,
+    round: d.round,
+    reasons: d.reasons,
+    ...teamOf(await books.readMade(slug)),
     words: chapters.reduce((s, c) => s + c.words, 0),
     year: typeof d.year === 'number' ? d.year : null,
     score: typeof d.score === 'number' ? d.score : null,
@@ -79,4 +85,22 @@ export function roleDefaults(registry: ModelRegistry): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [role, v] of Object.entries(registry.roles.roles)) if (v.models[0]) out[role] = v.models[0]
   return out
+}
+
+/** Who worked on a book and its last steps, from the rows of made.md. */
+export function teamOf(rows: Record<string, string>[]): Pick<BookSummary, 'team' | 'steps'> {
+  const team = new Map<string, BookSummary['team'][number]>()
+  for (const r of rows) {
+    if (!r.agent) continue
+    const t = team.get(r.agent) ?? { agent: r.agent, role: r.role ?? '', jobs: 0, models: [], costUsd: 0 }
+    t.jobs++
+    if (r.model && !t.models.includes(r.model)) t.models.push(r.model)
+    t.costUsd += Number(r.cost_usd) || 0
+    team.set(r.agent, t)
+  }
+  const steps = rows
+    .slice(-6)
+    .reverse()
+    .map((r) => ({ task: r.task ?? '', unit: r.unit ?? '', agent: r.agent ?? '', model: r.model ?? '' }))
+  return { team: [...team.values()].sort((a, b) => b.jobs - a.jobs), steps }
 }

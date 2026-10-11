@@ -4,6 +4,7 @@ import { useOffice } from './store/hooks'
 import { AgentPanel, HireDialog, RoleDefaults } from './ui/AgentPanel'
 import { AddIdea } from './ui/AddIdea'
 import { BookCard } from './ui/BookCard'
+import { DraftReader } from './ui/DraftReader'
 import { LibraryView } from './ui/Library'
 import { SettingsDialog } from './ui/Settings'
 import { officeStore } from './store/store'
@@ -60,6 +61,7 @@ export function App() {
       </div>
       <Terminal />
       <BookCard />
+      <DraftReader />
       <SettingsDialog />
       {hiring && <HireDialog onClose={() => setHiring(false)} />}
     </div>

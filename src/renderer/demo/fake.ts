@@ -372,6 +372,15 @@ export function installFakeEngine(params: URLSearchParams): void {
           }
           break
         }
+        case 'readDraft':
+        case 'addBookNote': {
+          const b = books.find((x) => x.slug === command.book)
+          if (b) {
+            if (command.type === 'addBookNote') b.notes = `${b.notes ?? ''}- ${command.chapter ? `(chapter ${command.chapter}) ` : ''}${command.text}\n`
+            emit({ type: 'draft.ready', book: b.slug, dir: `books/${b.slug}/out/reader`, notes: b.notes ?? '', chapters: [{ n: 1, title: 'Chapter 1', words: 450 }], at: Date.now() })
+          }
+          break
+        }
         case 'pauseBook': {
           const b = books.find((x) => x.slug === command.book)
           if (b) {

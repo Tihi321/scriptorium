@@ -15,7 +15,7 @@ export interface OpenAiCompatOptions {
   /** Prefixes added to embedding inputs (nomic wants these). */
   embedPrefixes?: { document: string; query: string }
   /** LM Studio: before a chat request, load the model if it isn't loaded yet, with these settings. */
-  loadConfig?: () => { parallel: number; context: number; ttlMinutes: number }
+  loadConfig?: (model: string) => { parallel: number; context: number; ttlMinutes: number }
   /** LM Studio's `lms` command line. It loads with an idle time (`--ttl`), which the REST load can't; without it the REST API is used. */
   lmsPath?: string
 }
@@ -121,7 +121,7 @@ export class OpenAiCompatClient implements ProviderClient {
   private async ensureLoaded(model: string, signal?: AbortSignal): Promise<void> {
     let p = this.loading.get(model)
     if (!p) {
-      p = this.loadIfNeeded(model, this.opts.loadConfig!()).finally(() => this.loading.delete(model))
+      p = this.loadIfNeeded(model, this.opts.loadConfig!(model)).finally(() => this.loading.delete(model))
       this.loading.set(model, p)
     }
     try {

@@ -178,6 +178,59 @@ describe('bedtime story, mock e2e', () => {
     await waitFor(async () => (await bookMd(e, slug)).data.stage === 'published', 60000, 'the retried book published')
   }, 120000)
 
+  it('an outline one chapter short is asked for again with the count, not failed', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-chapter-books-everyday-adventures'], format: 'chapter-book', shortOutline: true })
+    const e = env
+    const slug = (await waitFor(async () => {
+      for (const s of await readdir(path.join(e.dir, 'books'))) if (existsSync(path.join(e.dir, 'books', s, 'outline.md'))) return s
+      return null
+    }, 60000, 'an outline'))!
+    const outline = await parseMdFile(path.join(e.dir, 'books', slug, 'outline.md'))
+    expect((outline.data.chapters as unknown[]).length).toBe(6)
+    const doneFile = path.join(e.dir, 'jobs', 'done', `${slug}--outline--book--r0.md`)
+    await waitFor(() => existsSync(doneFile), 20000, 'the outline job done')
+    const job = await readFile(doneFile, 'utf8')
+    expect(job).toContain('This outline has 5 chapter(s), but this format needs 6 to 10')
+  }, 90000)
+
+  it('a draft can be read while it is written; your notes reach the writers, and a note can rewrite a chapter', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-chapter-books-everyday-adventures'], format: 'chapter-book' })
+    const e = env
+    const slug = (await waitFor(async () => {
+      for (const s of await readdir(path.join(e.dir, 'books'))) if (existsSync(path.join(e.dir, 'books', s, 'chapters', 'ch-01.md'))) return s
+      return null
+    }, 60000, 'chapter 1'))!
+    // stop writing: the book's jobs wait, running ones finish
+    await e.engine.handleCommand({ type: 'pauseBook', book: slug, paused: true })
+    await waitFor(() => e.engine.scheduler.runningJobs().every((j) => !j.jobId.startsWith(`${slug}--`)), 20000, 'the book idle')
+    const summary = [...e.events].reverse().find((x) => x.type === 'book.updated' && x.book.slug === slug)
+    expect(summary).toMatchObject({ book: { chaptersPlanned: 6, targetWords: expect.any(Number), paused: true } })
+    expect((summary as Extract<typeof summary, { type: 'book.updated' }>)!.book.team.length).toBeGreaterThan(0)
+
+    await e.engine.handleCommand({ type: 'readDraft', book: slug })
+    const ready = [...e.events].reverse().find((x) => x.type === 'draft.ready')
+    expect(ready).toMatchObject({ book: slug, dir: `books/${slug}/out/draft`, notes: '' })
+    const index = await readFile(path.join(e.dir, 'books', slug, 'out', 'draft', 'index.html'), 'utf8')
+    expect(index).toContain('Still to come')
+
+    await e.engine.handleCommand({ type: 'addBookNote', book: slug, text: 'More owls, please.', chapter: 1, rewrite: true })
+    expect(await readFile(path.join(e.dir, 'books', slug, 'notes.md'), 'utf8')).toMatch(/\(chapter 1\): More owls, please\./)
+    const noteJob = (await readdir(path.join(e.dir, 'jobs', 'queued'))).find((f) => /--rewrite--ch01--note\d+\.md$/.test(f))!
+    expect(noteJob).toBeTruthy()
+    expect([...e.events].reverse().find((x) => x.type === 'draft.ready')).toMatchObject({ notes: expect.stringContaining('More owls') })
+    await sleep(300)
+    expect(existsSync(path.join(e.dir, 'jobs', 'queued', noteJob))).toBe(true) // still waiting: the book is paused
+
+    await e.engine.handleCommand({ type: 'pauseBook', book: slug, paused: false })
+    await waitFor(() => existsSync(path.join(e.dir, 'jobs', 'done', noteJob)), 30000, 'the note rewrite')
+    expect(await readFile(path.join(e.dir, 'jobs', 'done', noteJob), 'utf8')).toContain("From the book's owner, who read the draft (this comes first): More owls, please.")
+    // chapters drafted after the note see it
+    await waitStage(e, 'published', 90000)
+    const drafts = (await readdir(path.join(e.dir, 'jobs', 'done'))).filter((f) => f.startsWith(`${slug}--draft--`))
+    const texts = await Promise.all(drafts.map((f) => readFile(path.join(e.dir, 'jobs', 'done', f), 'utf8')))
+    expect(texts.some((t) => t.includes("## Notes from the book's owner") && t.includes('More owls, please.'))).toBe(true)
+  }, 150000)
+
   it('a chapter book gets several chapters, all in the EPUB', async () => {
     env = await makePipelineEnv({ activate: ['jfic-chapter-books-everyday-adventures'], format: 'chapter-book' })
     const slug = (await waitStage(env, 'published'))!

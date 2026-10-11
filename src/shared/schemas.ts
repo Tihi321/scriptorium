@@ -34,7 +34,10 @@ export const providerModelSchema = z.looseObject({
   price_cached_in: z.number().nonnegative().optional(),
   embedding: z.boolean().default(false),
   /** Extra JSON fields merged into the request body for this model (for example to switch thinking off). */
-  extra_body: z.record(z.string(), z.unknown()).nullable().optional()
+  extra_body: z.record(z.string(), z.unknown()).nullable().optional(),
+  /** `load_models` providers (LM Studio): load this model with this context window and parallel count instead of the settings' ones. */
+  load_context: z.number().int().min(2048).optional(),
+  load_parallel: z.number().int().min(1).max(16).optional()
 })
 
 export const providerEntrySchema = z.looseObject({
@@ -172,7 +175,7 @@ export const settingsSchema = configBase('settings').extend({
   default_lmstudio_model: z.string().default('lmstudio/google/gemma-4-e4b'),
   /** How the engine loads LM Studio models that aren't loaded yet: requests at once, context window, idle minutes before LM Studio unloads it. */
   lmstudio_parallel: z.number().int().min(1).max(16).default(4),
-  lmstudio_context: z.number().int().min(2048).default(32768),
+  lmstudio_context: z.number().int().min(2048).default(131072),
   lmstudio_ttl_minutes: z.number().int().min(1).default(60)
 })
 export const topicsSchema = configBase('topics')

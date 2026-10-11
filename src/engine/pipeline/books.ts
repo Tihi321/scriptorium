@@ -324,6 +324,57 @@ export class BookStore {
     return dir
   }
 
+  /**
+   * Writes books/<slug>/out/draft/ for reading a book that isn't finished: the chapters written so far, then a page
+   * with the chapters the outline still plans, and your notes. Returns the folder relative to the data folder.
+   */
+  async buildDraft(slug: string): Promise<string> {
+    const book = await this.read(slug)
+    if (!book) throw new Error(`no book ${slug}`)
+    const d = book.data
+    const chapters = await this.chapters(slug)
+    const outline = await this.outline(slug)
+    const written = new Set(chapters.map((c) => c.n))
+    const todo = (outline?.chapters ?? []).filter((c) => !written.has(c.n))
+    const words = chapters.reduce((s, c) => s + c.words, 0)
+    const planned = outline ? `${chapters.length} of ${outline.chapters.length} chapters` : `${chapters.length} chapter(s), no outline yet`
+    const extra: { title: string; body: string }[] = []
+    if (todo.length) extra.push({ title: 'Still to come', body: todo.map((c) => `**Chapter ${c.n}: ${c.title}**\n\n${c.summary}`).join('\n\n') })
+    const notes = await this.ownerNotes(slug)
+    if (notes) extra.push({ title: 'Your notes', body: notes })
+    await writeReaderDir(this.file(slug, 'out', 'draft'), {
+      title: d.title,
+      author: d.author ?? 'Unknown',
+      blurb: `Draft: ${planned}, ${words} words. Stage: ${d.stage}${d.round ? `, round ${d.round}` : ''}.`,
+      year: new Date().getFullYear(),
+      genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
+      chapters: [...chapters.map((c) => ({ title: `${c.title} (${c.words} words${c.round ? `, rewrite ${c.round}` : ''})`, body: c.body })), ...extra]
+    })
+    return ['books', slug, 'out', 'draft'].join('/')
+  }
+
+  /** Your notes for this book (the body of notes.md), oldest first. Writers follow them. */
+  async ownerNotes(slug: string): Promise<string> {
+    const t = await this.readText(slug, 'notes.md')
+    return t === null ? '' : parseMd(t).body.trim()
+  }
+
+  /** Adds one of your notes to notes.md, with the date and the chapter it is about. */
+  addOwnerNote(slug: string, text: string, chapter?: number | null): Promise<void> {
+    return this.withLock(slug, async () => {
+      const file = this.file(slug, 'notes.md')
+      let doc: { data: Record<string, unknown>; body: string }
+      try {
+        doc = await readMd(file)
+      } catch {
+        doc = { data: { kind: 'book-notes', book: slug }, body: '' }
+      }
+      const when = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const line = `- ${when}${chapter ? ` (chapter ${chapter})` : ''}: ${text.trim().replace(/\r?\n/g, '\n  ')}`
+      await writeMd(file, doc.data, `${doc.body.trimEnd()}${doc.body.trim() ? '\n' : ''}${line}\n`)
+    })
+  }
+
   /** Builds out/<slug>.epub from the files, with out/cover.png when it exists. */
   async buildEpubFile(slug: string): Promise<string> {
     const book = await this.read(slug)

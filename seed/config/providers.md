@@ -71,9 +71,13 @@ providers:
       - id: ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
         family: qwen
         extra_body: { reasoning_effort: none }
+        load_context: 65536
+        load_parallel: 2
       - id: nail-qwen3.6-35b-a3b-mtp
         family: qwen
         extra_body: { reasoning_effort: low }
+        load_context: 65536
+        load_parallel: 2
       - id: nvidia/nemotron-3-nano-4b
         family: nemotron
         extra_body: { reasoning_effort: none }
@@ -213,5 +217,5 @@ Set a key with `npm run key:set TAVILY_API_KEY` (or the environment variable). N
 - `price_in`, `price_out`, `price_cached_in`: USD per 1M tokens. Cached input falls back to `price_in` when missing.
 - `embedding: true` marks an embedding model.
 - LM Studio models load with a small context window (8192 tokens) unless you change it. Long books need more: the engine reads the loaded window from LM Studio and keeps its prompts within it, but a window of 8192 makes long-book prompts fail. Load the models you use with 32768 or more, for example `lms load nail-qwen3.6-35b-a3b-mtp -c 32768 --parallel 1 --ttl 28800 -y`, or set it in LM Studio's model settings. With `--parallel <n>` the requests running at once share that window, so give it more room when several long requests run together, for example `lms load google/gemma-4-e4b -c 131072 --parallel 4 --ttl 28800 -y`.
-- `load_models: true` (LM Studio): before a request to a model that isn't loaded, the engine loads it with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes` from `config/settings.md`, using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is, so one you loaded yourself keeps your settings. A model LM Studio doesn't have fails at once and the next model in the role's list is tried.
+- `load_models: true` (LM Studio): before a request to a model that isn't loaded, the engine loads it with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes` from `config/settings.md`, using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is, so one you loaded yourself keeps your settings. A model entry can override the context and parallel count with `load_context` and `load_parallel` (the big Qwen models use 65536 and 2: their context cache takes far more memory than Gemma's). A model LM Studio doesn't have fails at once and the next model in the role's list is tried.
 - `extra_body`: optional JSON fields merged into the request body. The LM Studio chat models here send `reasoning_effort: none`, which turns thinking off (checked 2026-10-08 on the Qwen models: a 500-word story took 25 s instead of 3.5 minutes, because the model otherwise spends thousands of hidden tokens thinking). The Qwen 35B MoE (used for review) uses `low` so its verdicts are steadier. Remove it, or set `low` or `medium`, if you want thinking back for the other models. DeepSeek V4 has thinking on by default and bills it as output. `deepseek-flash` sends `thinking: { type: disabled }` (checked 2026-10-11: with thinking on, a 15k-token continuity check spent all 6000 answer tokens thinking and returned nothing). `deepseek-v4-pro` keeps thinking on. Empty means nothing extra is sent.

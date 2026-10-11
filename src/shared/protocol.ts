@@ -43,6 +43,18 @@ export interface BookSummary {
   stage: string
   /** Paused on its own: its jobs wait. */
   paused: boolean
+  /** Chapters written so far, and how many the outline plans (null before the outline). */
+  chaptersWritten: number
+  chaptersPlanned: number | null
+  targetWords: number
+  /** Review round (0 before the first rewrite). */
+  round: number
+  /** Why it failed or was rejected. */
+  reasons: string[]
+  /** Who worked on it (from made.md): per agent, its role, finished jobs, the models it used and what it cost. */
+  team: { agent: string; role: string; jobs: number; models: string[]; costUsd: number }[]
+  /** The last finished jobs, newest first. */
+  steps: { task: string; unit: string; agent: string; model: string }[]
   words: number
   year: number | null
   /** Weighted overall score (1-10), or null before the publisher scored it. */
@@ -122,6 +134,8 @@ export type EngineEvent =
   | { type: 'agent.state'; agent: string; role: string; state: AgentState; jobId?: string; task?: string; book?: string }
   | { type: 'agent.hired'; agent: AgentSummary }
   | { type: 'agent.removed'; agent: string }
+  /** The draft reader of a book is ready: `dir` is relative to the data folder. */
+  | { type: 'draft.ready'; book: string; dir: string; notes: string; chapters: { n: number; title: string; words: number }[]; at: number }
   /** An agent's file changed (its model, paused, ...). */
   | { type: 'agent.updated'; agent: AgentSummary }
   | { type: 'factory.paused'; paused: boolean }
@@ -163,6 +177,10 @@ export type Command =
   | { type: 'askResearcher'; question: string; book?: string; idea?: string }
   /** Writes `rating` (1-5) and `rating_note` to the book's book.md and answers with `book.updated`. */
   | { type: 'rate'; book: string; rating: number; note?: string }
+  /** Builds the draft reader of a book that isn't finished (books/<slug>/out/draft/). Answers with `draft.ready`. */
+  | { type: 'readDraft'; book: string }
+  /** Adds your note to the book's notes.md (the writers follow it). With `rewrite` and a written `chapter`, that chapter is rewritten with the note. Answers with `draft.ready`. */
+  | { type: 'addBookNote'; book: string; text: string; chapter?: number | null; rewrite?: boolean }
   /** Pauses or resumes one book (`paused` in its book.md): its jobs wait, so the agents work on the other books. */
   | { type: 'pauseBook'; book: string; paused: boolean }
   /** Puts a failed book's failed jobs back in the queue and continues the book from the stage it failed in. */

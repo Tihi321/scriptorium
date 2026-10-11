@@ -39,6 +39,9 @@ export interface OfficeState {
   openBook: string | null
   reading: boolean
   settingsOpen: boolean
+  /** The book whose draft reader is open, and the last draft the engine built for it. */
+  draftBook: string | null
+  draft: Extract<EngineEvent, { type: 'draft.ready' }> | null
   /** The agent whose panel is open. */
   selectedAgent: string | null
   /** The book highlighted on the whiteboard. Everyone not on it is dimmed. */
@@ -58,6 +61,8 @@ export interface OfficeActions {
   applyEvents(events: EngineEvent[], now?: number): void
   selectAgent(id: string | null): void
   toggleHighlightBook(slug: string | null): void
+  /** Opens (or with null closes) the draft reader of a book. The component asks the engine to build it. */
+  openDraft(slug: string | null): void
   setTerminal(open: boolean, mode?: 'agent' | 'book'): void
   setView(view: 'office' | 'library'): void
   openBookCard(slug: string | null, reading?: boolean): void
@@ -92,6 +97,8 @@ function initial(): OfficeState {
     openBook: null,
     reading: false,
     settingsOpen: false,
+    draftBook: null,
+    draft: null,
     selectedAgent: null,
     highlightBook: null,
     terminalOpen: false,
@@ -190,6 +197,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         agentOrder: prev ? s.agentOrder : [...s.agentOrder, e.agent.id]
       }
     }
+    case 'draft.ready':
+      return s.draftBook === e.book ? { draft: e } : {}
     case 'agent.updated': {
       const prev = s.agents[e.agent.id]
       return prev ? { agents: { ...s.agents, [e.agent.id]: agentFromSummary(e.agent, prev, now) } } : {}
@@ -326,6 +335,9 @@ export function createOfficeStore() {
     },
     setSettingsOpen(open) {
       set({ settingsOpen: open })
+    },
+    openDraft(slug) {
+      set({ draftBook: slug, draft: get().draft?.book === slug ? get().draft : null })
     },
     markKindleSending(slug) {
       set({ kindle: { ...get().kindle, [slug]: { state: 'sending' } } })

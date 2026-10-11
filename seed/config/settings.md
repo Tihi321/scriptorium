@@ -10,7 +10,7 @@ default_paid_model: deepseek/deepseek-flash
 default_strata_model: strata/qwen3.8-flash-next
 default_lmstudio_model: lmstudio/google/gemma-4-e4b
 lmstudio_parallel: 4
-lmstudio_context: 32768
+lmstudio_context: 131072
 lmstudio_ttl_minutes: 60
 ---
 # Settings
@@ -35,5 +35,5 @@ The role lists in `roles.md` can name these aliases instead of a model: `paid`, 
 When a request goes to an LM Studio model that isn't loaded, the engine loads it first with these settings (through `lms load`, or LM Studio's API when the `lms` command isn't installed). A model that is already loaded is used as it is.
 
 - `lmstudio_parallel`: how many requests the model serves at once (`--parallel`). 1 means one at a time.
-- `lmstudio_context`: the context window (`-c`). The parallel requests share it.
+- `lmstudio_context`: the context window (`-c`). The parallel requests share it: one request may use all of it (checked 2026-10-11). A long-book check takes about 23,000 tokens with its answer, so plan about 25,000 per request that runs at once: 131072 suits Gemma 4 E4B with 4 at once. A model in `providers.md` can have its own `load_context` and `load_parallel` (the big Qwen models use 65536 and 2).
 - `lmstudio_ttl_minutes`: LM Studio unloads the model after this many idle minutes (`--ttl`).

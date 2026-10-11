@@ -168,6 +168,8 @@ export interface PipelineEnvOptions {
   extraArchivist?: boolean
   /** The mock writer's first drafts are far too short (60 words); rewrites have the right length. */
   shortDrafts?: boolean
+  /** The first outline comes back one chapter short of the format's minimum. */
+  shortOutline?: boolean
   /** Format the mock editor-in-chief picks. */
   format?: string
   /** Which topics.md edits to make before the engine starts. */
@@ -349,8 +351,11 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     bump('outline')
     const text = lastUser(req)
     const id = /Format id: ([\w-]+)/.exec(text)?.[1] ?? ''
-    const [min] = (/Number of chapters: (\d+) to (\d+)/.exec(text) ?? []).slice(1).map(Number)
-    const n = id.startsWith('bedtime') ? 1 : (min ?? 3)
+    // the engine's second request when the outline came back too short
+    const repair = /but this format needs (\d+) to/.exec(text)
+    const [min] = repair ? [Number(repair[1])] : (/Number of chapters: (\d+) to (\d+)/.exec(text) ?? []).slice(1).map(Number)
+    let n = id.startsWith('bedtime') ? 1 : (min ?? 3)
+    if (o.shortOutline && !repair && n > 1) n-- // one chapter short, as models often are
     // a story with choices: a binary tree, chapter k leads to 2k and 2k+1, the leaves are endings
     const branching = text.includes('This book is a story with choices')
     const choices = (k: number) => [2 * k, 2 * k + 1].filter((to) => to <= n).map((to) => ({ text: `Go the way of part ${to}`, to }))
