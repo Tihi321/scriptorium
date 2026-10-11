@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { advance } from '../src/engine/pipeline/advance'
 import type { BookState, ReviewSummary } from '../src/engine/pipeline/advance'
 import { decide, weightedScore } from '../src/engine/pipeline/scoring'
-import { markdownToXhtml } from '../src/engine/publish/xhtml'
+import { markdownToXhtml, scriptToXhtml } from '../src/engine/publish/xhtml'
+import { writeMd } from '../src/engine/store/atomic'
 import { parseTopics } from '../src/engine/store/topics'
 import { parseMd } from '../src/shared/md'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
@@ -189,6 +190,32 @@ describe('bedtime story, mock e2e', () => {
     expect(Date.parse(String(review.created))).toBeGreaterThanOrEqual(Date.parse(rewritten) - 5)
   }, 90000)
 
+  it('a visual novel topic is written as a script and laid out as one in the EPUB', async () => {
+    env = await makePipelineEnv({
+      activate: ['vn-mystery'],
+      format: 'visual-novel',
+      beforeStart: async (dir) => {
+        const file = path.join(dir, 'config', 'formats.md')
+        const doc = parseMd(await readFile(file, 'utf8'))
+        const formats = (doc.data.formats as { id: string }[]).map((f) => (f.id === 'visual-novel' ? { ...f, words: [1200, 4000], chapters: [4, 4] } : f))
+        await writeMd(file, { ...doc.data, formats }, doc.body)
+      }
+    })
+    const slug = (await waitStage(env, 'published'))!
+    const { data } = await bookMd(env, slug)
+    expect(data).toMatchObject({ format: 'visual-novel', topic: 'vn-mystery', script: true })
+    // the writer got the script prompt, the line editor its visual novel review
+    const draft = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', `${slug}--draft--ch01--r0.md`), 'utf8'))
+    expect(draft.body).toContain('visual novel script')
+    expect(draft.body).toContain('ON SCREEN:')
+    const review = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', `${slug}--review--line-editor--r0.md`), 'utf8'))
+    expect(review.body).toContain('line editor of a visual novel')
+    const zip = await JSZip.loadAsync(await readFile(path.join(env.dir, 'books', slug, 'out', `${slug}.epub`)))
+    const ch = await zip.file(Object.keys(zip.files).find((f) => /chapter-?0*1\.xhtml$/.test(f))!)!.async('string')
+    expect(ch).toContain('class="vn-')
+    expect(await readFile(path.join(env.dir, 'books', slug, 'out', 'reader', 'chapter-01.xhtml'), 'utf8')).toContain('class="vn-')
+  }, 90000)
+
   it('a forced must-pass failure (child safety) ends in rejected, with the reasons and no EPUB', async () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', revise: { 'child-safety-reviewer': [0, 1, 2] } })
     const slug = (await waitStage(env, 'rejected'))!
@@ -369,6 +396,34 @@ describe('pure parts', () => {
     expect(gate.reasons[0]).toMatch(/must-pass gate failed: child-safety-reviewer/)
   })
 
+  it('a visual novel script becomes scene headings, cast lines, speaker lines and narration', () => {
+    const script = [
+      'SCENE: The harbour wall, dusk',
+      'Rain needles the grey water.',
+      'ON SCREEN: Mara (soaked raincoat, worried), Tomas',
+      'MARA (worried): You came back. *Finally.*',
+      "TOMAS: I said I would, didn't I?",
+      '**ZOË O\'NEIL** (quietly): Both of you <inside>.',
+      '',
+      '---',
+      '## The lighthouse',
+      'Note: this is narration, not a speaker.'
+    ].join('\n')
+    expect(scriptToXhtml(script).split('\n')).toEqual([
+      '<h3 class="vn-scene">The harbour wall, dusk</h3>',
+      '<p class="vn-narration">Rain needles the grey water.</p>',
+      '<p class="vn-cast"><span class="vn-label">On screen:</span> Mara (soaked raincoat, worried), Tomas</p>',
+      '<p class="vn-line"><span class="vn-speaker">MARA</span> <span class="vn-how">(worried)</span> You came back. <em>Finally.</em></p>',
+      "<p class=\"vn-line\"><span class=\"vn-speaker\">TOMAS</span> I said I would, didn't I?</p>",
+      '<p class="vn-line"><span class="vn-speaker">ZOË O\'NEIL</span> <span class="vn-how">(quietly)</span> Both of you &lt;inside&gt;.</p>',
+      '<hr class="scene-break"/>',
+      '<h3 class="vn-scene">The lighthouse</h3>',
+      '<p class="vn-narration">Note: this is narration, not a speaker.</p>'
+    ])
+    expect(markdownToXhtml('MARA: Hi.', { script: true })).toContain('vn-speaker')
+    expect(markdownToXhtml('MARA: Hi.')).toBe('<p>MARA: Hi.</p>')
+  })
+
   it('markdown to XHTML escapes, closes tags and handles scene breaks', () => {
     const html = markdownToXhtml('One *soft* & **big** day.\nNext line.\n\n---\n\n"Hi," said <Fox>.')
     expect(html).toBe('<p>One <em>soft</em> &amp; <strong>big</strong> day.<br/>Next line.</p>\n<hr class="scene-break"/>\n<p>&quot;Hi,&quot; said &lt;Fox&gt;.</p>')
@@ -468,14 +523,14 @@ b-one | Beta | nonfiction | yes |  |  |
     }
   })
 
-  it('the seed list has 250 to 450 rows, all inactive, with unique ids and the expected kinds', async () => {
+  it('the seed list has 250 to 500 rows, all inactive, with unique ids and the expected kinds', async () => {
     const rows = parseTopics(await readFile(path.resolve(__dirname, '../seed/topics.md'), 'utf8'))
     expect(rows.length).toBeGreaterThanOrEqual(250)
-    expect(rows.length).toBeLessThanOrEqual(450)
+    expect(rows.length).toBeLessThanOrEqual(500)
     expect(rows.every((r) => !r.active)).toBe(true)
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length)
     expect(new Set(rows.map((r) => r.topic.toLowerCase())).size).toBe(rows.length) // names are unique too, they show in the UI
-    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(['fiction', 'juvenile-fiction', 'juvenile-nonfiction', 'nonfiction']))
+    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(['fiction', 'juvenile-fiction', 'juvenile-nonfiction', 'nonfiction', 'visual-novel']))
     for (const id of ['jfic-bedtime-and-dreams', 'jfic-chapter-books-everyday-adventures', 'jfic-bedtime-moon-and-stars']) expect(rows.some((r) => r.id === id), id).toBe(true)
   })
 })

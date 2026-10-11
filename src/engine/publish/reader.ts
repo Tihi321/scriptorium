@@ -9,7 +9,7 @@ export interface ReaderBook {
   author: string
   blurb?: string
   year: number
-  chapters: { title: string; body: string }[]
+  chapters: { title: string; body: string; script?: boolean }[]
   /** Genre class (`g-fantasy` ...) that picks the chapter ornament. */
   genreClass?: string
   /** Path of cover.png, when it exists. */
@@ -49,7 +49,7 @@ export async function writeReaderDir(dir: string, book: ReaderBook): Promise<voi
     const file = `chapter-${String(i + 1).padStart(2, '0')}.xhtml`
     const next = i + 1 < book.chapters.length ? `<p class="next"><a href="chapter-${String(i + 2).padStart(2, '0')}.xhtml">Next chapter</a></p>` : ''
     await write(file, xhtmlPage(c.title, `${ornamentHtml()}
-<h2>${escapeXml(single ? book.title : c.title)}</h2>\n${markdownToXhtml(c.body)}\n${next}<p><a href="index.html">Contents</a></p>`))
+<h2>${escapeXml(single ? book.title : c.title)}</h2>\n${markdownToXhtml(c.body, { script: c.script })}\n${next}<p><a href="index.html">Contents</a></p>`))
     links.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)
   }
   await write(

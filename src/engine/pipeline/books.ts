@@ -276,6 +276,7 @@ export class BookStore {
     const d = book.data
     const chapters = [...(await this.chapters(slug))]
     const refs = await this.references(slug)
+    const script = d.script === true
     const cover = this.file(slug, 'out', 'cover.png')
     const dir = this.file(slug, 'out', 'reader')
     await writeReaderDir(dir, {
@@ -284,7 +285,7 @@ export class BookStore {
       blurb: typeof d.blurb === 'string' ? d.blurb : undefined,
       year: Number(d.year ?? new Date().getFullYear()),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script })), ...(refs ? [refs] : [])],
       coverPngPath: await fs.access(cover).then(() => cover, () => undefined)
     })
     return dir
@@ -318,7 +319,7 @@ export class BookStore {
       year: Number(d.year ?? new Date().getFullYear()),
       modified: new Date(),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true })), ...(refs ? [refs] : [])],
       coverPng
     })
     const out = this.file(slug, 'out', `${slug}.epub`)

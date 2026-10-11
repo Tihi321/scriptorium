@@ -10,7 +10,7 @@ How to edit:
 - `target`: how many books you want in this topic. Empty or 0 means no limit.
 - `done` and `in progress`: kept by the engine. Don't edit them. Everything else in the file is kept exactly as written, including the column alignment.
 - Add your own rows anywhere, in any table with the same columns. `id` must be unique.
-- `kind` is `fiction`, `nonfiction`, `juvenile-fiction` or `juvenile-nonfiction`.
+- `kind` is `fiction`, `nonfiction`, `juvenile-fiction`, `juvenile-nonfiction` or `visual-novel`. A `visual-novel` topic is written as a visual novel script (scenes, who is on screen, and who says what), in the genre the topic names.
 
 This list is our own, written by hand for this project. It is modelled on how libraries and shops group books, but it is not the BISAC list and doesn't copy its wording. Fiction, juvenile fiction, non-fiction and juvenile non-fiction all have a pipeline. Non-fiction topics use the non-fiction variant: research for every chapter, a fact base, a fact-checker that must pass and a references section.
 
@@ -582,3 +582,16 @@ This list is our own, written by hand for this project. It is modelled on how li
 | law-civics-basics | Civics Basics | nonfiction | no | 5 |  |  |
 | law-how-laws-are-made | How Laws Are Made | nonfiction | no | 5 |  |  |
 | law-political-ideas | Political Ideas | nonfiction | no | 5 |  |  |
+
+## Visual Novels
+
+| id                      | topic                        | kind         | active | target | done | in progress |
+| ----------------------- | ---------------------------- | ------------ | ------ | ------ | ---- | ----------- |
+| vn-romance              | Romance Visual Novel         | visual-novel | no     | 5      |      |             |
+| vn-mystery              | Mystery Visual Novel         | visual-novel | no     | 5      |      |             |
+| vn-fantasy              | Fantasy Visual Novel         | visual-novel | no     | 5      |      |             |
+| vn-science-fiction      | Science Fiction Visual Novel | visual-novel | no     | 5      |      |             |
+| vn-slice-of-life        | Slice of Life Visual Novel   | visual-novel | no     | 5      |      |             |
+| vn-school-life          | School Life Visual Novel     | visual-novel | no     | 5      |      |             |
+| vn-horror               | Horror Visual Novel          | visual-novel | no     | 5      |      |             |
+| vn-comedy               | Comedy Visual Novel          | visual-novel | no     | 5      |      |             |

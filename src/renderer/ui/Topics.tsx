@@ -7,7 +7,8 @@ const KINDS = [
   ['fiction', 'Fiction'],
   ['juvenile-fiction', 'Children, fiction'],
   ['nonfiction', 'Non-fiction'],
-  ['juvenile-nonfiction', 'Children, non-fiction']
+  ['juvenile-nonfiction', 'Children, non-fiction'],
+  ['visual-novel', 'Visual novel']
 ] as const
 
 /** One line to add your own topic: a row in the "My topics" table of `topics.md`, switched on. */

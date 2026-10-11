@@ -132,6 +132,11 @@ export const formatEntrySchema = z.looseObject({
    * the fact-checker as a reviewer (in place of the continuity checker) and a references section at the end.
    */
   nonfiction: z.boolean().default(false),
+  /**
+   * A visual novel script instead of prose: scene headings, who is on screen, and speaker lines. The writer and the
+   * line editor use the `_vn` prompts, and the EPUB lays the chapters out as a script.
+   */
+  script: z.boolean().default(false),
   /** Rewrite rounds for this format. Falls back to quality.max_rounds. */
   max_rounds: z.number().int().nonnegative().optional(),
   /** Overrides the default reviewer list. */

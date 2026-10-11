@@ -357,9 +357,11 @@ describe('seed files of the non-fiction variant', () => {
     expect(roles['fact-checker']).toBeTruthy()
   })
 
-  it('the topic list covers all four kinds, with sections for each', async () => {
+  it('the topic list covers all kinds, with sections for each', async () => {
     const rows = parseTopics(await readFile(path.resolve(__dirname, '../seed/topics.md'), 'utf8'))
     for (const kind of ['fiction', 'juvenile-fiction', 'nonfiction', 'juvenile-nonfiction']) expect(rows.filter((r) => r.kind === kind).length, kind).toBeGreaterThanOrEqual(40)
     expect(rows.find((r) => r.id === 'his-books-and-printing')).toMatchObject({ kind: 'nonfiction', section: 'History' })
+    expect(rows.filter((r) => r.kind === 'visual-novel').every((r) => r.section === 'Visual Novels')).toBe(true)
+    expect(rows.filter((r) => r.kind === 'visual-novel').length).toBeGreaterThanOrEqual(5)
   })
 })

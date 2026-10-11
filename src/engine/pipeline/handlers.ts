@@ -271,6 +271,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         genre: r.value.genre || topic?.topic || fmt.name,
         age_band: fmt.age_band,
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
+        ...(fmt.script ? { script: true } : {}),
         target_words: target,
         idea: idea?.slug ?? null,
         created: new Date().toISOString(),
@@ -297,7 +298,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     let similarityNote = ''
     let text: string
     for (let attempt = 0; ; attempt++) {
-      const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', fmt.nonfiction ? 'pitch_nf' : 'pitch', {
+      const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', variant(fmt, 'pitch'), {
         title: book.title,
         topic: book.topic_name ?? book.genre,
         genre: book.genre,
@@ -350,7 +351,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const planned = planText && Array.isArray(parseMd(planText).data.questions) ? (parseMd(planText).data.questions as { question: string }[]).map((q) => q.question) : []
     const planNotes = planned.length ? await researchNotesForQuestions(d, slug, planned) : []
     if (planNotes.length) ctx.context(planNotes.map((i) => ({ name: i.name, tokens: Math.round(i.text.length / 4) })))
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', fmt.nonfiction ? 'outline_nf' : 'outline', {
+    const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', variant(fmt, 'outline'), {
       research: planNotes.length ? `${researchBlock(planNotes)}
 
 Build the outline on these facts: the period, places, jobs, distances and durations must agree with them.` : '',
@@ -404,7 +405,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
-        (r.value.characters.length ? r.value.characters.map((c) => `- **${c.name}**: ${c.description}`).join('\n') : '(see the pitch)') +
+        (r.value.characters.length ? r.value.characters.map((c) => `- **${c.name}**: ${c.description}${fmt.script && c.voice ? ` Voice: ${c.voice}` : ''}`).join('\n') : '(see the pitch)') +
+        // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
+        (fmt.script && r.value.places.length ? `\n\n## Places\n${r.value.places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
@@ -450,7 +453,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         ...research.map((r) => ({ name: r.name, tokens: Math.round(r.text.length / 4) }))
       ])
     }
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', fmt.nonfiction ? 'draft_chapter_nf' : 'draft_chapter', {
+    const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'draft_chapter'), {
       title: book.title,
       story_so_far: storySoFar,
       chapter_n: n,
@@ -544,7 +547,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         bookText = await d.books.fullText(slug)
         bible = await bibleFor(d, slug, fmt.nonfiction)
       }
-      const { messages, version } = await buildMessages(d.dataDir, ctx, role, fmt.nonfiction ? 'review_nf' : 'review', {
+      const { messages, version } = await buildMessages(d.dataDir, ctx, role, variant(fmt, 'review'), {
         title: book.title,
         pitch: (await d.books.pitch(slug)) ?? '',
         bible,
@@ -643,7 +646,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       bibleText = await d.books.bible(slug)
       researchText = researchBlock(researchItems)
     }
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', fmt.nonfiction ? 'rewrite_chapter_nf' : 'rewrite_chapter', {
+    const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'rewrite_chapter'), {
       title: book.title,
       pitch: (await d.books.pitch(slug)) ?? '',
       bible: bibleText,
@@ -688,7 +691,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     // the end-of-book thread check (long books) leaves a report of the threads that are still open
     const openReport = await d.books.readText(slug, 'reports', 'open-threads.md')
     const openThreads = openReport && Array.isArray(parseMd(openReport).data.threads) ? (parseMd(openReport).data.threads as { id: string; text: string; opened: number }[]) : []
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'publisher', fmt.nonfiction ? 'publish_nf' : 'publish', {
+    const { messages, version } = await buildMessages(d.dataDir, ctx, 'publisher', variant(fmt, 'publish'), {
       open_threads: openThreads.length ? openThreads.map((t) => `- ${t.id}: ${t.text} (opened in chapter ${t.opened})`).join('\n') : '(none)',
       title: book.title,
       author: book.author ?? '',
@@ -760,6 +763,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     d.emit({ type: 'book.stage', book: slug, stage: 'published' })
     return { result: `published "${title}" (score ${decision.score})`, resultPath: path.relative(d.dataDir, epub).split(path.sep).join('/') }
   })
+}
+
+/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
+export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'>, task: string): string {
+  return fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
 }
 
 function topicKind(formatId: string, formats: FormatEntry[]): string | null {

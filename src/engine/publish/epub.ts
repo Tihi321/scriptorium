@@ -6,6 +6,8 @@ export interface EpubChapter {
   title: string
   /** Markdown prose. */
   body: string
+  /** A visual novel script (scene, on-screen, speaker lines) rather than prose. */
+  script?: boolean
 }
 
 export interface EpubBook {
@@ -33,6 +35,13 @@ p { margin: 0 0 0.9em; text-indent: 0; }
 hr.scene-break { border: 0; text-align: center; margin: 1.5em 0; }
 hr.scene-break:after { content: "* * *"; }
 blockquote { margin: 1em 2em; font-style: italic; }
+h3.vn-scene { font-size: 1em; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; margin: 1.8em 0 0.6em; border-bottom: 1px solid #999; }
+p.vn-cast { font-size: 0.9em; color: #555; font-style: italic; }
+p.vn-cast .vn-label { font-style: normal; font-weight: bold; }
+p.vn-narration { font-style: italic; }
+p.vn-line { margin-left: 1em; text-indent: -1em; }
+p.vn-line .vn-speaker { font-weight: bold; font-variant: small-caps; letter-spacing: 0.03em; }
+p.vn-line .vn-how { color: #555; font-style: italic; }
 .titlepage { text-align: center; margin-top: 25%; }
 .titlepage .author { font-size: 1.2em; margin-top: 1.5em; }
 .titlepage .ai { font-size: 0.8em; margin-top: 3em; color: #555; }
@@ -103,7 +112,7 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
     const n = String(i + 1).padStart(2, '0')
     const file = `chapter-${n}.xhtml`
     const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
-    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body)}`, { epubType: 'chapter' }))
+    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script })}`, { epubType: 'chapter' }))
     manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
     spine.push(`<itemref idref="ch${n}"/>`)
     navItems.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)

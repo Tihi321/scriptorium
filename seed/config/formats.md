@@ -95,6 +95,23 @@ formats:
       A full novel in three acts, with a strong middle (rising tension, reversals, a midpoint turn), a few subplots that all pay off,
       and a distinct voice for each main character. Chapters of 2,000 to 3,500 words. Genre sets the length: romance and thrillers sit
       in the lower half of the range, epic fantasy and science fiction in the upper half.
+  - id: visual-novel
+    name: Visual novel
+    enabled: true
+    script: true
+    kinds: [visual-novel]
+    juvenile: false
+    age_band: null
+    words: [8000, 25000]
+    chapters: [4, 10]
+    read_aloud: false
+    guidance: |
+      A visual novel written as a script, like a screenplay for a story told in pictures and text boxes. Each scene opens with where
+      and when it is, a few lines of narration describe what the reader sees (the background, light and mood), an ON SCREEN line says
+      which characters are shown and how they look, and then the characters speak, one short line at a time, with their expression
+      in brackets when it matters. Most of the book is dialogue: every main character needs a distinct voice, and the story moves
+      through what people say and do on screen. Short present-tense narration, three to six scenes per chapter, and each chapter ends
+      on a moment that makes the reader want the next one. The story is linear, with no player choices. The topic sets the genre.
   - id: nonfiction-short
     name: Short non-fiction book
     enabled: true
@@ -137,6 +154,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `long`: use the book memory (see below). `max_rounds`: rewrite rounds for this format (default: `quality.max_rounds`).
 - `nonfiction`: the non-fiction variant. Research for every chapter (required), a fact base in `factbase/` instead of a story bible, non-fiction prompts (`*_nf.md` in `prompts/`), the fact-checker in place of the continuity checker (it must pass), and a references section at the end of the EPUB and the reader. Non-fiction formats are short books (not `long`).
 - `research_prep`: the writer lists research questions before each chapter (one short model call per chapter, answered by the researcher before the chapter is written). `false` by default; books whose genre or topic contains a word of `research_prep_genres` in `config/factory.md` get it too, whatever the format says.
+- `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel format is for topics of kind `visual-novel`, so it is never picked for an ordinary fiction topic.
 - `reviewers`: optional list of reviewer roles to override the default set. The default set is continuity, developmental, line, copy, beta reader and originality, plus child safety for juvenile formats and read-aloud for read-aloud formats.
 
 Middle grade, novella and novel are long formats (`long: true`): they use the book memory (structured bible, chapter and act summaries, a search index), are written chapter by chapter with a continuity check each, and are reviewed one act at a time. They get one rewrite round (`max_rounds: 1`) because every round costs a lot. The editor-in-chief picks the length by genre.

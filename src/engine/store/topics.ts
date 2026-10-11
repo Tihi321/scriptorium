@@ -3,8 +3,8 @@ import path from 'node:path'
 import { atomicWrite } from './atomic'
 import { slugify } from './ideas'
 
-export type TopicKind = 'fiction' | 'nonfiction' | 'juvenile-fiction' | 'juvenile-nonfiction'
-export const TOPIC_KINDS: readonly TopicKind[] = ['fiction', 'nonfiction', 'juvenile-fiction', 'juvenile-nonfiction']
+export type TopicKind = 'fiction' | 'nonfiction' | 'juvenile-fiction' | 'juvenile-nonfiction' | 'visual-novel'
+export const TOPIC_KINDS: readonly TopicKind[] = ['fiction', 'nonfiction', 'juvenile-fiction', 'juvenile-nonfiction', 'visual-novel']
 
 /** The section topics added from the UI go into. */
 export const MY_TOPICS_SECTION = 'My topics'

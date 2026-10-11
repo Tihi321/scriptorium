@@ -10,8 +10,37 @@ function inline(text: string): string {
   return t
 }
 
+const SCENE = /^\**\s*scene\s*:\s*\**\s*(.+?)\s*\**$/i
+const CAST = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
+/** `NAME: line` or `NAME (expression): line`. The name is in capitals, as in a script. */
+const LINE = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
+
+/**
+ * A visual novel script (formats with `script: true`) to XHTML, one element per line: `SCENE: place, time` opens a scene,
+ * `ON SCREEN: Name (look), ...` says who is shown, `NAME (expression): words` is a spoken line, `---` is a scene break,
+ * and any other line is narration (what the reader sees or the narrator says).
+ */
+export function scriptToXhtml(md: string): string {
+  const out: string[] = []
+  for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    let m: RegExpExecArray | null
+    if (/^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/.test(line)) out.push('<hr class="scene-break"/>')
+    else if ((m = /^#{1,6}\s+(.*)$/.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
+    else if ((m = SCENE.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
+    else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
+    else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
+      const how = m[2] ? ` <span class="vn-how">(${inline(m[2])})</span>` : ''
+      out.push(`<p class="vn-line"><span class="vn-speaker">${escapeXml(m[1]!.trim())}</span>${how} ${inline(m[3]!)}</p>`)
+    } else out.push(`<p class="vn-narration">${inline(line.replace(/^>\s?/, ''))}</p>`)
+  }
+  return out.join('\n')
+}
+
 /** A small markdown subset for prose (paragraphs, headings, scene breaks, quotes, emphasis) to well-formed XHTML. */
-export function markdownToXhtml(md: string): string {
+export function markdownToXhtml(md: string, opts: { script?: boolean } = {}): string {
+  if (opts.script) return scriptToXhtml(md)
   const blocks = md.replace(/\r\n/g, '\n').trim().split(/\n{2,}/)
   const out: string[] = []
   for (const raw of blocks) {
