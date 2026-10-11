@@ -14,7 +14,7 @@ const TOPIC = 'jfic-bedtime-and-dreams'
 
 interface Dbg {
   __office: { agentCount(): number; agentPos(id: string): { x: number; y: number } | null; debug(): { id: string; state?: string }[] }
-  scriptorium: { readFile(rel: string): Promise<string | null>; tailFile(rel: string, from: number): Promise<{ text: string; size: number } | null> }
+  scriptorium: { readFile(rel: string): Promise<string | null>; tailFile(rel: string, from: number): Promise<{ text: string; size: number } | null>; send(c: unknown): void }
 }
 
 let app: ElectronApplication
@@ -156,4 +156,13 @@ test('the real app: office, agents at work, terminal from real logs, pause all, 
   await expect(page.getByTestId('card-rating')).toHaveText('★★★★')
   await page.getByTestId('card-close').click()
   await page.screenshot({ path: path.join(root, '.claude/temp/p5-electron-library.png') })
+
+  // the book commands pass the app shell: the draft reader is built and a note is saved
+  await page.evaluate((slug) => {
+    const api = (globalThis as unknown as Dbg).scriptorium
+    api.send({ type: 'readDraft', book: slug })
+    api.send({ type: 'addBookNote', book: slug, text: 'Keep the moon gentle.' })
+  }, SLUG)
+  await expect.poll(() => existsSync(path.join(dataDir, 'books', SLUG, 'out', 'draft', 'index.html')), { timeout: 15_000 }).toBe(true)
+  await expect.poll(async () => readFile(path.join(dataDir, 'books', SLUG, 'notes.md'), 'utf8').catch(() => ''), { timeout: 15_000 }).toContain('Keep the moon gentle.')
 })

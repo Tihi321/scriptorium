@@ -14,19 +14,49 @@ export function DraftReader() {
   const [text, setText] = useState('')
   const [chapter, setChapter] = useState('')
   const [rewrite, setRewrite] = useState(false)
+  /** The page showing: a file of the draft folder (index.html is the contents). */
+  const [page, setPage] = useState('')
 
   useEffect(() => {
     if (slug) sendCommand({ type: 'readDraft', book: slug })
     setText('')
     setChapter('')
     setRewrite(false)
+    setPage('')
   }, [slug])
+
+  const ready = draft?.book === slug ? draft : null
+  const pages = ready?.pages ?? []
+  // start at chapter 1 (or the contents when nothing is written yet); keep the page when the draft is rebuilt
+  const current = page && (page === 'index.html' || pages.some((p) => p.file === page)) ? page : (pages[0]?.file ?? 'index.html')
+  const at = pages.findIndex((p) => p.file === current)
+  const go = (file: string) => {
+    setPage(file)
+    // a chapter page: the note is about that chapter, unless you picked another one
+    const n = pages.find((p) => p.file === file)?.n
+    if (n !== undefined && !text.trim()) setChapter(String(n))
+  }
+  const step = (d: number) => {
+    const next = pages[at + d]
+    if (next) go(next.file)
+  }
+
+  useEffect(() => {
+    if (!slug) return
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return
+      if (e.key === 'ArrowLeft') step(-1)
+      else if (e.key === 'ArrowRight') step(1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   if (!slug) return null
   const close = () => officeStore.getState().openDraft(null)
-  const ready = draft?.book === slug ? draft : null
   const paused = !!book?.summary?.paused
-  const src = ready ? `${bookUrl(`${ready.dir}/index.html`)}?v=${ready.at}` : null
+  const src = ready ? `${bookUrl(`${ready.dir}/${current}`)}?v=${ready.at}` : null
   return (
     <div className="dialog-backdrop" onClick={close}>
       <div className="reader draft-reader" onClick={(e) => e.stopPropagation()} data-testid="draft-reader">
@@ -34,6 +64,22 @@ export function DraftReader() {
           <b>
             {book?.title ?? slug} <span className="dim">(draft)</span>
           </b>
+          <span className="row draft-nav">
+            <button onClick={() => step(-1)} disabled={at <= 0} title="Previous page (left arrow)" data-testid="draft-prev">
+              ◀
+            </button>
+            <select value={current} onChange={(e) => go(e.target.value)} data-testid="draft-page">
+              <option value="index.html">Contents</option>
+              {pages.map((p) => (
+                <option key={p.file} value={p.file}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+            <button onClick={() => step(1)} disabled={at < 0 || at >= pages.length - 1} title="Next page (right arrow)" data-testid="draft-next">
+              ▶
+            </button>
+          </span>
           <span className="row">
             <button onClick={() => sendCommand({ type: 'readDraft', book: slug })} title="Build the draft again with the latest chapters">
               Refresh

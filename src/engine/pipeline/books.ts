@@ -326,9 +326,10 @@ export class BookStore {
 
   /**
    * Writes books/<slug>/out/draft/ for reading a book that isn't finished: the chapters written so far, then a page
-   * with the chapters the outline still plans, and your notes. Returns the folder relative to the data folder.
+   * with the chapters the outline still plans, and your notes. Returns the folder relative to the data folder and its
+   * pages in reading order (`n` is the chapter number, absent on the extra pages).
    */
-  async buildDraft(slug: string): Promise<string> {
+  async buildDraft(slug: string): Promise<{ dir: string; pages: { file: string; title: string; n?: number }[] }> {
     const book = await this.read(slug)
     if (!book) throw new Error(`no book ${slug}`)
     const d = book.data
@@ -350,7 +351,13 @@ export class BookStore {
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
       chapters: [...chapters.map((c) => ({ title: `${c.title} (${c.words} words${c.round ? `, rewrite ${c.round}` : ''})`, body: c.body })), ...extra]
     })
-    return ['books', slug, 'out', 'draft'].join('/')
+    // the reader names its pages chapter-01.xhtml, chapter-02.xhtml ... in this order
+    const file = (i: number) => `chapter-${String(i + 1).padStart(2, '0')}.xhtml`
+    const pages = [
+      ...chapters.map((c, i) => ({ file: file(i), title: `Chapter ${c.n}: ${c.title}`, n: c.n })),
+      ...extra.map((x, i) => ({ file: file(chapters.length + i), title: x.title }))
+    ]
+    return { dir: ['books', slug, 'out', 'draft'].join('/'), pages }
   }
 
   /** Your notes for this book (the body of notes.md), oldest first. Writers follow them. */

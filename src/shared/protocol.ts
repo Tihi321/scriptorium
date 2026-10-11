@@ -135,7 +135,16 @@ export type EngineEvent =
   | { type: 'agent.hired'; agent: AgentSummary }
   | { type: 'agent.removed'; agent: string }
   /** The draft reader of a book is ready: `dir` is relative to the data folder. */
-  | { type: 'draft.ready'; book: string; dir: string; notes: string; chapters: { n: number; title: string; words: number }[]; at: number }
+  | {
+      type: 'draft.ready'
+      book: string
+      dir: string
+      /** The reader's pages in order: the chapters (with `n`), then "Still to come" and "Your notes" when there are any. */
+      pages: { file: string; title: string; n?: number }[]
+      notes: string
+      chapters: { n: number; title: string; words: number }[]
+      at: number
+    }
   /** An agent's file changed (its model, paused, ...). */
   | { type: 'agent.updated'; agent: AgentSummary }
   | { type: 'factory.paused'; paused: boolean }
@@ -202,28 +211,35 @@ export type Command =
 
 export type CommandType = Command['type']
 
-export const COMMAND_TYPES: readonly CommandType[] = [
-  'hire',
-  'fire',
-  'pause',
-  'resume',
-  'stop',
-  'pauseAll',
-  'resumeAll',
-  'stopNow',
-  'setModel',
-  'askResearcher',
-  'rate',
-  'sendToKindle',
-  'setTopicActive',
-  'addTopic',
-  'addIdea',
-  'saveSettings',
-  'setSecret',
-  'snapshot',
-  'ping',
-  'coverRendered'
-]
+/** Every command type, as an object so the compiler fails when a new command is not listed (main drops unlisted ones). */
+const COMMAND_TYPE_SET: Record<CommandType, true> = {
+  hire: true,
+  fire: true,
+  pause: true,
+  resume: true,
+  stop: true,
+  pauseAll: true,
+  resumeAll: true,
+  stopNow: true,
+  setModel: true,
+  askResearcher: true,
+  rate: true,
+  sendToKindle: true,
+  setTopicActive: true,
+  addTopic: true,
+  addIdea: true,
+  saveSettings: true,
+  setSecret: true,
+  snapshot: true,
+  ping: true,
+  coverRendered: true,
+  readDraft: true,
+  addBookNote: true,
+  pauseBook: true,
+  retryBook: true
+}
+
+export const COMMAND_TYPES: readonly CommandType[] = Object.keys(COMMAND_TYPE_SET) as CommandType[]
 
 export function isCommand(value: unknown): value is Command {
   if (typeof value !== 'object' || value === null) return false

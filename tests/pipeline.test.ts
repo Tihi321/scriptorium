@@ -210,6 +210,7 @@ describe('bedtime story, mock e2e', () => {
     await e.engine.handleCommand({ type: 'readDraft', book: slug })
     const ready = [...e.events].reverse().find((x) => x.type === 'draft.ready')
     expect(ready).toMatchObject({ book: slug, dir: `books/${slug}/out/draft`, notes: '' })
+    expect(ready).toMatchObject({ pages: expect.arrayContaining([{ file: 'chapter-01.xhtml', title: expect.stringMatching(/^Chapter 1: /), n: 1 }, expect.objectContaining({ title: 'Still to come' })]) })
     const index = await readFile(path.join(e.dir, 'books', slug, 'out', 'draft', 'index.html'), 'utf8')
     expect(index).toContain('Still to come')
 

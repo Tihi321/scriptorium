@@ -660,3 +660,7 @@ textarea {
   margin: 0;
   font-size: 12px;
 }
+
+.draft-nav select {
+  max-width: 320px;
+}

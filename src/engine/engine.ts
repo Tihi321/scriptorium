@@ -346,9 +346,9 @@ export class Engine {
   /** Builds the draft reader of a book and sends `draft.ready`. */
   async emitDraft(slug: string): Promise<void> {
     try {
-      const dir = await this.books.buildDraft(slug)
+      const { dir, pages } = await this.books.buildDraft(slug)
       const chapters = (await this.books.chapters(slug)).map((c) => ({ n: c.n, title: c.title, words: c.words }))
-      this.emit({ type: 'draft.ready', book: slug, dir, notes: await this.books.ownerNotes(slug), chapters, at: Date.now() })
+      this.emit({ type: 'draft.ready', book: slug, dir, pages, notes: await this.books.ownerNotes(slug), chapters, at: Date.now() })
     } catch (err) {
       this.log(`readDraft ${slug}: ${(err as Error).message}`)
     }

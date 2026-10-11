@@ -4,6 +4,7 @@ import path from 'node:path'
 import nodemailer from 'nodemailer'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { parseMd } from '../src/shared/md'
+import { isCommand } from '../src/shared/protocol'
 import type { BookSummary, EngineEvent, SnapshotEvent } from '../src/shared/protocol'
 import { makePipelineEnv, sleep, waitFor } from './helpers'
 
@@ -34,6 +35,19 @@ afterAll(async () => {
 })
 
 const last = <T extends EngineEvent['type']>(type: T) => [...env.events].reverse().find((e) => e.type === type) as Extract<EngineEvent, { type: T }> | undefined
+
+describe('protocol', () => {
+  it('the app shell lets every command through, including the book commands (it drops unknown types)', () => {
+    for (const c of [
+      { type: 'readDraft', book: 'b' },
+      { type: 'addBookNote', book: 'b', text: 'note' },
+      { type: 'pauseBook', book: 'b', paused: true },
+      { type: 'retryBook', book: 'b' },
+      { type: 'saveSettings' }
+    ]) expect(isCommand(c), c.type).toBe(true)
+    expect(isCommand({ type: 'noSuchCommand' })).toBe(false)
+  })
+})
 
 describe('snapshot', () => {
   it('has agents with resolved models, books, topics, models, role defaults and settings', async () => {
