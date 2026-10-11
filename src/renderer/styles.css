@@ -544,6 +544,12 @@ textarea {
 .topic-group-head .dim {
   margin-left: auto;
 }
+.topic-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
 .topic-row {
   display: flex;
   gap: 6px;

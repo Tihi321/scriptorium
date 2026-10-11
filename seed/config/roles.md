@@ -3,37 +3,37 @@ kind: roles
 embeddings: lmstudio/text-embedding-nomic-embed-text-v1.5
 roles:
   editor-in-chief:
-    models: [deepseek/deepseek-v4-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
+    models: [deepseek/deepseek-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
   idea-generator:
-    models: [deepseek/deepseek-v4-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
+    models: [deepseek/deepseek-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
   architect:
-    models: [deepseek/deepseek-v4-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
+    models: [deepseek/deepseek-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
   writer:
-    models: [deepseek/deepseek-v4-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
+    models: [deepseek/deepseek-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
   publisher:
-    models: [deepseek/deepseek-v4-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
+    models: [deepseek/deepseek-flash, strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp]
   developmental-editor:
-    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-flash]
   line-editor:
-    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-flash]
   copy-editor:
-    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-flash]
   beta-reader:
-    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-flash]
   child-safety-reviewer:
-    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-flash]
   read-aloud-reviewer:
-    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next, lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp, deepseek/deepseek-flash]
   continuity-checker:
-    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-flash]
   originality-checker:
-    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-flash]
   fact-checker:
-    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-flash]
   researcher:
-    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-flash]
   archivist:
-    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-v4-flash]
+    models: [strata/qwen3.8-flash-next-low, lmstudio/nail-qwen3.6-35b-a3b-mtp, deepseek/deepseek-flash]
 ---
 # Roles
 

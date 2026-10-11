@@ -152,6 +152,8 @@ export type Command =
   /** Mails the EPUB. Answers with `kindle.sent`. */
   | { type: 'sendToKindle'; book: string }
   | { type: 'setTopicActive'; id: string; active: boolean }
+  /** Adds a row to the "My topics" table in topics.md, switched on unless `active` is false. */
+  | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
   /** Creates an idea file in ideas/. */
   | { type: 'addIdea'; text: string; topic?: string }
   | ({ type: 'saveSettings' } & SettingsSummary)
@@ -177,6 +179,7 @@ export const COMMAND_TYPES: readonly CommandType[] = [
   'rate',
   'sendToKindle',
   'setTopicActive',
+  'addTopic',
   'addIdea',
   'saveSettings',
   'setSecret',

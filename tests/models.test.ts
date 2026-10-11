@@ -45,8 +45,8 @@ describe('seed configs', () => {
     expect(registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
     expect(isPaidModel(registry.getModel('strata/qwen3.8-flash-next')!)).toBe(false)
     expect(new ModelRouter(registry, undefined).candidates('line-editor')[0]?.ref).toBe('strata/qwen3.8-flash-next')
-    const flash = registry.getModel('deepseek/deepseek-v4-flash')!
-    expect(flash).toMatchObject({ priceIn: 0.14, priceOut: 0.28, priceCachedIn: 0.0028, family: 'deepseek' })
+    const flash = registry.getModel('deepseek/deepseek-flash')!
+    expect(flash).toMatchObject({ priceIn: 0.3, priceOut: 1.2, priceCachedIn: 0.006, family: 'deepseek' })
     expect(isPaidModel(flash)).toBe(true)
     expect(isPaidModel(registry.getModel('lmstudio/nvidia/nemotron-3-nano-4b')!)).toBe(false)
     for (const refs of Object.values(registry.roles.roles)) for (const ref of refs.models) expect(registry.getModel(ref), ref).toBeTruthy()
@@ -63,10 +63,10 @@ describe('seed configs', () => {
 
 describe('price math', () => {
   it('bills cached input at its own price', () => {
-    const m = { priceIn: 0.14, priceOut: 0.28, priceCachedIn: 0.0028 }
+    const m = { priceIn: 0.3, priceOut: 1.2, priceCachedIn: 0.006 }
     // 800k uncached, 200k cached, 100k output
     const cost = computeCost(m, { inputTokens: 1_000_000, cachedInputTokens: 200_000, outputTokens: 100_000 })
-    expect(cost).toBeCloseTo(0.8 * 0.14 + 0.2 * 0.0028 + 0.1 * 0.28, 9)
+    expect(cost).toBeCloseTo(0.8 * 0.3 + 0.2 * 0.006 + 0.1 * 1.2, 9)
   })
 })
 

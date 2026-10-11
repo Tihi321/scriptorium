@@ -3,10 +3,72 @@ import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
 import { groupTopics } from '../store/shelves'
 
+const KINDS = [
+  ['fiction', 'Fiction'],
+  ['juvenile-fiction', 'Children, fiction'],
+  ['nonfiction', 'Non-fiction'],
+  ['juvenile-nonfiction', 'Children, non-fiction']
+] as const
+
+/** One line to add your own topic: a row in the "My topics" table of `topics.md`, switched on. */
+function AddTopic() {
+  const [name, setName] = useState('')
+  const [kind, setKind] = useState<string>('fiction')
+  const [target, setTarget] = useState('5')
+  const [sent, setSent] = useState(false)
+  const submit = () => {
+    const n = name.trim()
+    if (!n) return
+    sendCommand({ type: 'addTopic', name: n, kind, target: parseInt(target, 10) || 0 })
+    setName('')
+    setSent(true)
+    setTimeout(() => setSent(false), 2500)
+  }
+  return (
+    <div className="topic-add" data-testid="topic-add">
+      <div className="row">
+        <input
+          style={{ flex: 1, minWidth: 0 }}
+          value={name}
+          placeholder="Add a topic, e.g. Dragons who bake"
+          data-testid="topic-add-name"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+      </div>
+      <div className="row">
+        <select value={kind} data-testid="topic-add-kind" onChange={(e) => setKind(e.target.value)}>
+          {KINDS.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          min={0}
+          style={{ width: 56 }}
+          value={target}
+          title="How many books you want in this topic. 0 means no limit."
+          data-testid="topic-add-target"
+          onChange={(e) => setTarget(e.target.value)}
+        />
+        <span className="dim">books</span>
+        <button className="primary" disabled={!name.trim()} onClick={submit} data-testid="topic-add-button">
+          Add
+        </button>
+      </div>
+      {sent && <span className="dim">Added to My topics, switched on.</span>}
+    </div>
+  )
+}
+
 /**
  * The topic overview in the library: a tick box per topic (it edits `topics.md` through `setTopicActive`),
  * grouped by section, the emptiest first, with done / target and the books in progress. A filter box finds a topic
- * in the 400 or so rows.
+ * in the 400 or so rows. Your own topics are added at the top and land in the "My topics" section.
  */
 export function TopicOverview() {
   const topics = useOffice((s) => s.topics)
@@ -31,6 +93,7 @@ export function TopicOverview() {
       <div className="dim" data-testid="topic-summary">
         {activeCount} of {topics.length} on, {done} done, {inProgress} in progress{query || activeOnly ? `, ${shown} shown` : ''}. Each row: done/target.
       </div>
+      <AddTopic />
       {groups.length === 0 && <div className="empty">{topics.length === 0 ? 'No topics yet.' : 'No topic matches.'}</div>}
       {groups.map((g) => {
         const open = toggled[g.section] ?? g.open

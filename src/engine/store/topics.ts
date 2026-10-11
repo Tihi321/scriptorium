@@ -1,8 +1,13 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { atomicWrite } from './atomic'
+import { slugify } from './ideas'
 
 export type TopicKind = 'fiction' | 'nonfiction' | 'juvenile-fiction' | 'juvenile-nonfiction'
+export const TOPIC_KINDS: readonly TopicKind[] = ['fiction', 'nonfiction', 'juvenile-fiction', 'juvenile-nonfiction']
+
+/** The section topics added from the UI go into. */
+export const MY_TOPICS_SECTION = 'My topics'
 
 export interface TopicRow {
   id: string
@@ -179,5 +184,50 @@ export class TopicsFile {
 
   setActive(id: string, active: boolean): Promise<boolean> {
     return this.adjust(id, {}, { active })
+  }
+
+  /**
+   * Adds a topic row at the end of the `## My topics` table, creating the section at the end of the file when it is
+   * missing. The id is `my-` plus the name as a slug, made unique. Returns the new id, or null for a bad name or kind.
+   */
+  add(input: { name: string; kind: string; target?: number; active?: boolean }): Promise<string | null> {
+    const run = async (): Promise<string | null> => {
+      const name = input.name.replace(/[|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
+      const kind = input.kind.trim().toLowerCase()
+      if (!name || !(TOPIC_KINDS as readonly string[]).includes(kind)) return null
+      let text = ''
+      try {
+        text = await fs.readFile(this.file, 'utf8')
+      } catch {
+        /* no topics.md yet: it is created */
+      }
+      const taken = new Set(parseTopics(text).map((r) => r.id))
+      const base = `my-${slugify(name)}`
+      let id = base
+      for (let n = 2; taken.has(id); n++) id = `${base}-${n}`
+      const target = Math.max(0, Math.floor(input.target ?? 0))
+      const row = `| ${id} | ${name} | ${kind} | ${input.active === false ? 'no' : 'yes'} | ${target || ''} |  |  |`
+      const eol = text.includes('\r\n') ? '\r\n' : '\n'
+      const lines = text.split(/\r?\n/)
+      const isMine = (l: string) => /^#{2,6}\s+(.*)$/.exec(l)?.[1]?.trim().toLowerCase() === MY_TOPICS_SECTION.toLowerCase()
+      const head = lines.findIndex(isMine)
+      let tableEnd = -1
+      if (head >= 0) {
+        for (let i = head + 1; i < lines.length && !/^#{1,6}\s/.test(lines[i]!); i++) if (lines[i]!.includes('|')) tableEnd = i
+      }
+      const table = ['| id | topic | kind | active | target | done | in progress |', '| --- | --- | --- | --- | --- | --- | --- |', row]
+      if (tableEnd >= 0) lines.splice(tableEnd + 1, 0, row)
+      else if (head >= 0) lines.splice(head + 1, 0, '', ...table)
+      else {
+        while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop()
+        lines.push(...(lines.length ? [''] : []), `## ${MY_TOPICS_SECTION}`, '', ...table, '')
+      }
+      await atomicWrite(this.file, lines.join(eol))
+      this.onChange?.()
+      return id
+    }
+    const result = this.chain.then(run, run)
+    this.chain = result.catch(() => undefined)
+    return result
   }
 }

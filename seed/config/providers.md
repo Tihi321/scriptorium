@@ -7,19 +7,19 @@ providers:
     api_key_env: DEEPSEEK_API_KEY
     concurrency: 8
     models:
-      - id: deepseek-v4-flash
+      - id: deepseek-flash
         family: deepseek
         context: 1000000
-        price_in: 0.14
-        price_out: 0.28
-        price_cached_in: 0.0028
+        price_in: 0.30
+        price_out: 1.20
+        price_cached_in: 0.006
         extra_body: null
       - id: deepseek-v4-pro
         family: deepseek
         context: 1000000
-        price_in: 1.74
-        price_out: 3.48
-        price_cached_in: 0.0145
+        price_in: 1.32
+        price_out: 3.96
+        price_cached_in: 0.044
         extra_body: null
   - id: openrouter
     kind: openai-compat
@@ -167,7 +167,7 @@ search_order: [tavily, wikipedia, brave, serpapi, serphouse, duckduckgo]
 
 One entry per provider. Edit this file and the engine picks the change up without a restart. API keys are never written here: `api_key_env` names an environment variable, and the engine also looks in the Windows credential store under that name (`npm run key:set <NAME>`).
 
-Prices were checked 2026-10-08 from third-party listings. Verify them at api-docs.deepseek.com/quick_start/pricing and the other providers' pricing pages. The DeepSeek numbers are the ones in use. The OpenRouter, Anthropic and Gemini entries are examples marked "to verify": model ids and prices there may be out of date.
+Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were updated 2026-10-11 from the DeepSeek docs. `deepseek-flash` is DeepSeek-V4.1-Flash (the old name `deepseek-v4-flash` still works, but is served by V4.1 at the Flash price) and `deepseek-v4-pro` is DeepSeek-V4-Pro-0813. DeepSeek charges a peak and an off-peak price; the config holds the peak price, so the budget never counts too little (off-peak is half of it). Verify them at api-docs.deepseek.com/quick_start/pricing and the other providers' pricing pages. The OpenRouter, Anthropic and Gemini entries are examples marked "to verify": model ids and prices there may be out of date.
 
 ## Fields of a provider
 
@@ -187,7 +187,7 @@ Strata (`D:\Strata`) is a fast local server for Qwen3.8-Flash-Next with an OpenA
 
 - Run `D:\Strata\run-iq3_s.bat` (or `run-iq2_xs.bat`). Loading the model takes 1 to 3 minutes. Check `curl http://127.0.0.1:8080/health` and wait for `loaded: true`. Until then requests fail, and the router falls back to the next model in the role.
 - It serves one model per process, and every quant uses port 8080. It ignores the `model` field of a request, so the two ids above (no thinking, and thinking on `low`) only differ in `extra_body`. They stand in for the 27B editors and the 35B checks.
-- The IQ3_S quant takes about 84 GB, so it does not fit beside the big LM Studio models. Keep only the nomic embedding model loaded in LM Studio while Strata runs.
+- The IQ3_S quant takes about 84 GB, so it does not fit beside the big LM Studio models: keep only the nomic embedding model loaded in LM Studio while it runs. The IQ2_XS quant (`run-iq2_xs.bat`) takes about 48 GB, at some cost in quality. Both answer to the same model ids, so `config/roles.md` stays the same whichever you start.
 - `context` must match `--max-context` in the run config (131072).
 - `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. That would be retried and then sent to a paid model, while the engine's own parse-and-repair step already copes with a loose JSON answer.
 - No key is needed. `STRATA_API_KEY` is only sent if you set it.

@@ -51,8 +51,8 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     uptimeMs: 1,
     paused: false,
     agents: [
-      agentSummary('w1', 'Mara', 'writer', { resolvedModel: 'deepseek/deepseek-v4-flash' }),
-      agentSummary('w2', 'Tobias', 'writer', { resolvedModel: 'deepseek/deepseek-v4-flash' }),
+      agentSummary('w1', 'Mara', 'writer', { resolvedModel: 'deepseek/deepseek-flash' }),
+      agentSummary('w2', 'Tobias', 'writer', { resolvedModel: 'deepseek/deepseek-flash' }),
       agentSummary('e1', 'Otto', 'line-editor', { model: 'lmstudio/qwen', resolvedModel: 'lmstudio/qwen' }),
       agentSummary('a1', 'Milo', 'archivist', { paused: true })
     ],
@@ -186,7 +186,7 @@ describe('budget', () => {
   it('adds spend events to today and the month, and replaces them from a snapshot', () => {
     const store = createOfficeStore()
     store.getState().applyEvent(snapshot(), T0)
-    store.getState().applyEvent({ type: 'spend', provider: 'deepseek', model: 'deepseek-v4-flash', tokensIn: 10, tokensOut: 5, costUsd: 0.1, agent: 'w1' }, T0)
+    store.getState().applyEvent({ type: 'spend', provider: 'deepseek', model: 'deepseek-flash', tokensIn: 10, tokensOut: 5, costUsd: 0.1, agent: 'w1' }, T0)
     const { spend } = store.getState()
     expect(spend.today).toBeCloseTo(1.7)
     expect(spend.month).toBeCloseTo(6.1)
@@ -202,7 +202,7 @@ describe('live job log', () => {
     store.getState().applyEvent(snapshot(), T0)
     store.getState().applyEvents(
       [
-        { type: 'job.started', jobId: 'j1', agent: 'w1', task: 'draft ch-1', book: 'fox-book', model: 'deepseek/deepseek-v4-flash' },
+        { type: 'job.started', jobId: 'j1', agent: 'w1', task: 'draft ch-1', book: 'fox-book', model: 'deepseek/deepseek-flash' },
         { type: 'handover', from: 'you', to: 'w1', label: 'draft ch-1', jobId: 'j1' },
         { type: 'job.token', jobId: 'j1', agent: 'w1', text: 'Once ' },
         { type: 'job.token', jobId: 'j1', agent: 'w1', text: 'upon a time' },
@@ -232,13 +232,13 @@ const LOG = `
 
 - requested by: editor-in-chief-edith-marlowe
 - task: draft (role writer), book fox, unit ch-01, round 0
-- agent: writer-mara-quill, first model: deepseek/deepseek-v4-flash, prompt version a1b2, attempt 1
+- agent: writer-mara-quill, first model: deepseek/deepseek-flash, prompt version a1b2, attempt 1
 ### Context
 - bible/characters (412 tokens)
 - outline (233 tokens)
 ### Output
 
-_model deepseek/deepseek-v4-flash_
+_model deepseek/deepseek-flash_
 
 Once upon a time.
 
@@ -249,7 +249,7 @@ Written to books/fox/chapters/ch-01.md. 1 call(s), 2100 in (0 cached) / 640 out 
 
 - requested by: engine
 - task: review (role line-editor), book fox, round 0
-- agent: writer-mara-quill, first model: deepseek/deepseek-v4-flash, prompt version a1b2, attempt 1
+- agent: writer-mara-quill, first model: deepseek/deepseek-flash, prompt version a1b2, attempt 1
 ### Output
 ### Result
 Failed (attempt 1 of 3): 429. Retrying in 2 s.
@@ -265,7 +265,7 @@ describe('log parsing', () => {
     expect(j.task).toBe('draft ch-01')
     expect(j.book).toBe('fox')
     expect(j.agent).toBe('writer-mara-quill')
-    expect(j.model).toBe('deepseek/deepseek-v4-flash')
+    expect(j.model).toBe('deepseek/deepseek-flash')
     expect(j.context).toEqual([
       { name: 'bible/characters', tokens: 412 },
       { name: 'outline', tokens: 233 }
@@ -309,9 +309,9 @@ describe('library and protocol events', () => {
   it('replaces and removes agents from agent.hired and agent.removed, and follows factory.paused', () => {
     const store = createOfficeStore()
     store.getState().applyEvent(snapshot(), T0)
-    store.getState().applyEvent({ type: 'agent.hired', agent: agentSummary('w3', 'Nina', 'writer', { resolvedModel: 'deepseek/deepseek-v4-flash' }) }, T0)
+    store.getState().applyEvent({ type: 'agent.hired', agent: agentSummary('w3', 'Nina', 'writer', { resolvedModel: 'deepseek/deepseek-flash' }) }, T0)
     expect(store.getState().agentOrder).toContain('w3')
-    expect(store.getState().agents.w3?.model).toBe('deepseek/deepseek-v4-flash')
+    expect(store.getState().agents.w3?.model).toBe('deepseek/deepseek-flash')
     expect(store.getState().agents.w3?.override).toBeNull()
     store.getState().selectAgent('w3')
     store.getState().applyEvent({ type: 'agent.removed', agent: 'w3' }, T0)
@@ -325,7 +325,7 @@ describe('library and protocol events', () => {
     const store = createOfficeStore()
     store.getState().applyEvent(snapshot(), T0)
     expect(store.getState().agents.e1).toMatchObject({ override: 'lmstudio/qwen', model: 'lmstudio/qwen' })
-    expect(store.getState().agents.w1).toMatchObject({ override: null, model: 'deepseek/deepseek-v4-flash' })
+    expect(store.getState().agents.w1).toMatchObject({ override: null, model: 'deepseek/deepseek-flash' })
   })
 
   it('tracks book.updated, ratings and the Kindle result', () => {

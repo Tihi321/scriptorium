@@ -17,7 +17,7 @@ export interface IdeaFile {
   createdMs: number
 }
 
-const slugify = (s: string) =>
+export const slugify = (s: string) =>
   s
     .toLowerCase()
     .normalize('NFKD')

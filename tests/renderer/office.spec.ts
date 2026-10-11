@@ -57,7 +57,7 @@ test('the office renders, an agent opens its terminal, and the controls send com
   // streamed text shows up live
   await page.evaluate((agent) => {
     const { emit } = (globalThis as unknown as Dbg).__scriptoriumFake
-    emit({ type: 'job.started', jobId: 'smoke-1', agent, task: 'draft ch-99', book: 'moon-bakery-bedtime', model: 'deepseek/deepseek-v4-flash' })
+    emit({ type: 'job.started', jobId: 'smoke-1', agent, task: 'draft ch-99', book: 'moon-bakery-bedtime', model: 'deepseek/deepseek-flash' })
     emit({ type: 'job.token', jobId: 'smoke-1', agent, text: 'STREAMED-SMOKE-TEXT ' })
   }, id)
   await expect(page.getByTestId('terminal-log')).toContainText('STREAMED-SMOKE-TEXT')
@@ -150,6 +150,16 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await expect(page.getByTestId('topic-nf-printing')).toBeChecked()
   await expect(page.getByTestId('topic-fic-historical')).toHaveCount(0)
   await page.getByTestId('topic-active-only').uncheck()
+  // your own topic: added from the panel, switched on, in the My topics section, with an empty shelf
+  await page.getByTestId('topic-add-name').fill('Dragons Who Bake')
+  await page.getByTestId('topic-add-kind').selectOption('juvenile-fiction')
+  await page.getByTestId('topic-add-target').fill('3')
+  await page.getByTestId('topic-add-button').click()
+  expect(await commands(page)).toContainEqual({ type: 'addTopic', name: 'Dragons Who Bake', kind: 'juvenile-fiction', target: 3 })
+  await expect(page.getByTestId('topic-section-My topics')).toBeVisible()
+  await expect(page.getByTestId('topic-my-dragons-who-bake')).toBeChecked()
+  await expect(page.getByTestId('topic-count-my-dragons-who-bake')).toHaveText('0/3')
+  await expect(page.getByTestId('topic-add-name')).toHaveValue('')
   // rejected books are kept apart
   await expect(page.getByTestId('library').locator('.shelf-title', { hasText: 'The Grey Lighthouse' })).toHaveCount(0)
   await page.getByTestId('toggle-rejected').click()

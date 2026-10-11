@@ -439,6 +439,35 @@ b-one | Beta | nonfiction | yes |  |  |
     }
   })
 
+  it('adds your own topics to a My topics table and keeps the rest of the file', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const os = await import('node:os')
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'scrip-topics-'))
+    try {
+      const { TopicsFile } = await import('../src/engine/store/topics')
+      const crlf = text.replace(/\n/g, '\r\n')
+      await writeFile(path.join(dir, 'topics.md'), crlf)
+      const t = new TopicsFile(dir)
+      expect(await t.add({ name: 'Dragons | Who\nBake', kind: 'juvenile-fiction', target: 3 })).toBe('my-dragons-who-bake')
+      expect(await t.add({ name: 'Dragons who bake', kind: 'Fiction', active: false })).toBe('my-dragons-who-bake-2')
+      expect(await t.add({ name: '  ', kind: 'fiction' })).toBeNull()
+      expect(await t.add({ name: 'Poems', kind: 'poetry' })).toBeNull()
+      const next = await readFile(path.join(dir, 'topics.md'), 'utf8')
+      expect(next.startsWith(crlf.trimEnd())).toBe(true) // the old text is untouched, the line endings kept
+      expect(next.replace(/\r\n/g, '').includes('\n')).toBe(false)
+      const mine = parseTopics(next).filter((r) => r.section === 'My topics')
+      expect(mine.map((r) => [r.id, r.topic, r.kind, r.active, r.target])).toEqual([
+        ['my-dragons-who-bake', 'Dragons Who Bake', 'juvenile-fiction', true, 3],
+        ['my-dragons-who-bake-2', 'Dragons who bake', 'fiction', false, 0]
+      ])
+      // the counts the engine keeps work on the new rows too
+      expect(await t.adjust('my-dragons-who-bake', { inProgress: 1 })).toBe(true)
+      expect(parseTopics(await readFile(path.join(dir, 'topics.md'), 'utf8')).find((r) => r.id === 'my-dragons-who-bake')!.inProgress).toBe(1)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('the seed list has 250 to 450 rows, all inactive, with unique ids and the expected kinds', async () => {
     const rows = parseTopics(await readFile(path.resolve(__dirname, '../seed/topics.md'), 'utf8'))
     expect(rows.length).toBeGreaterThanOrEqual(250)

@@ -31,7 +31,7 @@ npm install
 - `npm run engine -- probe [--model provider/model]`: streams one short reply from LM Studio (and DeepSeek when a key is set), embeds one string, and writes a spend row.
 - `npm run engine -- reindex --data <dir>`: rebuilds the search index (`index/library.sqlite`, a cache) from the markdown files, using the embedding model. `npm run engine -- rebuild-reader --data <dir>`: writes the in-app reader folder (`books/<slug>/out/reader/`) for books published earlier.
 - `npm run key:set <ENV_NAME>`: stores an API key in the Windows credential store (hidden prompt). The engine looks at the environment variable first, then the store.
-- To make a book: switch a topic on (`active: yes` in `topics.md` in the data folder) or drop an idea file into `ideas/`, then run the engine. Formats: bedtime story (toddler and 3-6), short story, chapter book, and the long ones (middle grade, novella, novel) that use the book memory. Finished books are in `books/<slug>/out/<slug>.epub`.
+- To make a book: switch a topic on (`active: yes` in `topics.md` in the data folder, or the tick box in the app's Topics panel), add your own topic with "Add a topic" in that panel (it goes into a `## My topics` table in `topics.md`), or drop an idea file into `ideas/`, then run the engine. Formats: bedtime story (toddler and 3-6), short story, chapter book, and the long ones (middle grade, novella, novel) that use the book memory. Finished books are in `books/<slug>/out/<slug>.epub`.
 - `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
 
 Data folder: `--data <dir>`, else the `SCRIPTORIUM_DATA` environment variable, else `~/Scriptorium`.

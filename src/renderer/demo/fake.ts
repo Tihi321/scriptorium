@@ -28,7 +28,7 @@ interface FakeAgent {
   phase: 'main' | 'wait-provider' | 'wait-research'
 }
 
-const DS = 'deepseek/deepseek-v4-flash'
+const DS = 'deepseek/deepseek-flash'
 const QWEN27 = 'lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp'
 const QWEN35 = 'lmstudio/nail-qwen3.6-35b-a3b-mtp'
 
@@ -378,6 +378,14 @@ export function installFakeEngine(params: URLSearchParams): void {
         case 'setTopicActive': {
           const t = topics.find((x) => x.id === command.id)
           if (t) t.active = command.active
+          emit({ type: 'topics.updated', topics: topicSummaries(topics, books) })
+          break
+        }
+        case 'addTopic': {
+          const slug = command.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'topic'
+          let id = `my-${slug}`
+          for (let n = 2; topics.some((x) => x.id === id); n++) id = `my-${slug}-${n}`
+          topics.push({ id, name: command.name.trim(), kind: command.kind, section: 'My topics', active: command.active !== false, target: command.target ?? 0 })
           emit({ type: 'topics.updated', topics: topicSummaries(topics, books) })
           break
         }

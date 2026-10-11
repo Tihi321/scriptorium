@@ -23,7 +23,7 @@ const entry = (time: Date, cost: number, extra: Partial<SpendEntry> = {}): Spend
   book: 'silver-inn',
   role: 'writer',
   provider: 'deepseek',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-flash',
   tokensIn: 1000,
   tokensCached: 200,
   tokensOut: 300,
@@ -57,7 +57,7 @@ describe('Budget', () => {
     expect(again.spentBook('other')).toBeCloseTo(0.5)
     const file = await readFile(path.join(dir, 'logs', 'spend', `${monthKey(now)}.md`), 'utf8')
     expect(file).toContain('| time | agent | book | role | provider | model |')
-    expect(file.split('\n').filter((l) => l.includes('deepseek-v4-flash')).length).toBe(3)
+    expect(file.split('\n').filter((l) => l.includes('deepseek-flash')).length).toBe(3)
   })
 
   it('uses local time for the day and month boundaries', async () => {

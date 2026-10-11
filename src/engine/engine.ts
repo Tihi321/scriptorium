@@ -416,6 +416,12 @@ export class Engine {
         if (!(await this.topics.setActive(cmd.id, cmd.active))) this.log(`setTopicActive: unknown topic ${cmd.id}`)
         else this.pipeline.kick()
         return
+      case 'addTopic': {
+        const id = await this.topics.add({ name: cmd.name, kind: cmd.kind, target: cmd.target, active: cmd.active })
+        if (!id) this.log(`addTopic: bad name "${cmd.name}" or kind "${cmd.kind}"`)
+        else this.pipeline.kick()
+        return
+      }
       case 'addIdea': {
         const text = cmd.text.trim()
         if (!text) return
