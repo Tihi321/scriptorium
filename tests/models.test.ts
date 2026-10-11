@@ -149,6 +149,34 @@ describe('router', () => {
     expect(events.filter((e) => e.startsWith('attempt'))).toEqual(['attempt:a/x', 'attempt:a/x', 'attempt:b/y', 'attempt:c/z'])
   })
 
+  it('a context-size error goes straight to the next model; when all fail, the error names each model', async () => {
+    const { registry, mock } = await registryWith({
+      providers: [{ id: 'a', models: ['x'] }, { id: 'b', models: ['y'] }, { id: 'c', models: ['z'] }],
+      roles: { writer: ['a/x', 'b/y', 'c/z'] }
+    })
+    const seen: string[] = []
+    let zWorks = true
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw new ProviderError('the model stopped at its token limit without an answer (15000 tokens in, 6000 out)')
+      // LM Studio sends this inside the stream, which the client marks retryable
+      if (req.model === 'y') throw new ProviderError('provider error: {"message":"request (15430 tokens) exceeds the available context size (8192 tokens)","type":"exceed_context_size_error"}', undefined, true)
+      if (!zWorks) throw new ProviderError('bad request', 400, false)
+      return 'from z'
+    })
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1 })
+    const req = { messages: [{ role: 'user' as const, content: 'hi' }], meta: { role: 'writer' } }
+    let text = ''
+    for await (const ev of r.chat(r.candidates('writer'), req)) if (ev.type === 'delta') text += ev.text
+    expect(seen).toEqual(['x', 'y', 'z']) // no retries of y on the same model
+    expect(text).toBe('from z')
+    zWorks = false
+    const drain = async () => {
+      for await (const ev of r.chat(r.candidates('writer'), req)) void ev
+    }
+    await expect(drain()).rejects.toThrow(/all models failed\. a\/x: .*token limit.* \| b\/y: .*exceeds the available context.* \| c\/z: bad request/)
+  })
+
   it('refuses paid models over the cap and falls to a local one; throws BudgetError when nothing is left', async () => {
     const { registry, mock } = await registryWith({
       providers: [{ id: 'paid', price: 1000, models: ['p'] }, { id: 'loc', local: true, models: ['l'] }],

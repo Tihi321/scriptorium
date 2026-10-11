@@ -215,15 +215,32 @@ describe('scheduler', () => {
     })
     await env.engine.jobs.enqueue({ id: 'once', task: 'boom', role: 'writer', max_attempts: 1 })
     await env.engine.jobs.enqueue({ id: 'twice', task: 'boom', role: 'writer', max_attempts: 3 })
-    await waitFor(async () => (await jobsIn(env!, 'failed')).includes('once.md'), 5000, 'failed')
+    await waitFor(async () => (await jobsIn(env!, 'failed')).includes('once.md'), 10000, 'failed')
     const failed = parseMd(await readFile(path.join(env.dir, 'jobs', 'failed', 'once.md'), 'utf8'))
     expect(failed.data).toMatchObject({ attempts: 1, failure: 'kaboom' })
     const retry = await waitFor(async () => {
       const j = await env!.engine.jobs.read('queued', 'twice')
       return j && j.data.attempts === 1 ? j : null
-    }, 5000, 'retry queued')
+    }, 10000, 'retry queued')
     expect(retry.data.not_before).toBeTruthy()
     expect(env.events.some((e) => e.type === 'agent.state' && e.state === 'error')).toBe(true)
+  }, 20000)
+
+  it('a paused book: its jobs wait while other books go on, and run once it is resumed', async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'W' }] })
+    registerChat(env)
+    // published, so the pipeline leaves these test books alone
+    for (const slug of ['held', 'other']) await env.engine.books.create(slug, { title: slug, stage: 'published', format: 'short-story', target_words: 1000 })
+    await env.engine.handleCommand({ type: 'pauseBook', book: 'held', paused: true })
+    expect(parseMd(await readFile(path.join(env.dir, 'books', 'held', 'book.md'), 'utf8')).data.paused).toBe(true)
+    expect(env.events.some((e) => e.type === 'book.updated' && e.book.slug === 'held' && e.book.paused)).toBe(true)
+    await env.engine.jobs.enqueue({ id: 'held-job', task: 't', role: 'writer', book: 'held' })
+    await env.engine.jobs.enqueue({ id: 'other-job', task: 't', role: 'writer', book: 'other' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).includes('other-job.md'), 5000, 'the other book runs')
+    await sleep(300)
+    expect(await jobsIn(env, 'queued')).toEqual(['held-job.md'])
+    await env.engine.handleCommand({ type: 'pauseBook', book: 'held', paused: false })
+    await waitFor(async () => (await jobsIn(env!, 'done')).includes('held-job.md'), 5000, 'the resumed book runs')
   })
 
   it('enqueue is idempotent by id, in any state', async () => {

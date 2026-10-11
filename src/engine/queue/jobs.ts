@@ -136,6 +136,16 @@ export class JobStore {
     if (Object.keys(patch).length > 0) await this.update('queued', id, patch)
   }
 
+  /** failed -> queued with the attempts reset, for a book that is retried. The old request and failure text are dropped from the body. */
+  async retry(id: string): Promise<boolean> {
+    const cur = await this.read('failed', id)
+    if (!cur) return false
+    const body = cur.body.split(/^## (?:Request|Failed)$/m)[0]!.trimEnd()
+    await writeMd(this.file('queued', id), { ...cur.data, attempts: 0, not_before: null, failure: null, paid: null }, body ? body + '\n' : '')
+    await fs.rm(this.file('failed', id), { force: true })
+    return true
+  }
+
   /**
    * On start: every job left in running/ moves back to queued/ with attempts + 1.
    * A job that also exists in done/ or failed/ (crash during the move) is just dropped from running/.

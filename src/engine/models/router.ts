@@ -96,6 +96,7 @@ export class ModelRouter {
     let lastError: unknown
     let budgetRefusal: string | undefined
     let attempts = 0
+    const failures: string[] = []
     for (const model of models) {
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
@@ -160,8 +161,12 @@ export class ModelRouter {
         } catch (err) {
           if (isAbortError(err) || req.signal?.aborted) throw err
           lastError = err
-          const retryable = err instanceof ProviderError && err.retryable
-          if (!retryable || retry === this.opts.retries) break
+          // a request too big for this model fails the same way every time: go straight to the next model
+          const retryable = err instanceof ProviderError && err.retryable && !isContextError(err)
+          if (!retryable || retry === this.opts.retries) {
+            failures.push(`${model.ref}: ${err instanceof Error ? err.message : String(err)}`)
+            break
+          }
           const delay = (err as ProviderError).retryAfterMs ?? this.opts.backoffMs * 2 ** retry
           await this.opts.sleep(delay, req.signal)
         } finally {
@@ -171,8 +176,17 @@ export class ModelRouter {
       }
     }
     if (!lastError && budgetRefusal) throw new BudgetError(budgetRefusal)
+    if (budgetRefusal) failures.push(`paid models skipped: ${budgetRefusal}`)
+    // with more than one model, say why each one failed: the last error alone hides the real cause
+    if (failures.length > 1) throw new ProviderError(`all models failed. ${failures.map((f) => f.slice(0, 400)).join(' | ')}`)
     throw lastError instanceof Error ? lastError : new ProviderError('all models failed')
   }
+}
+
+/** The request is larger than the model's context window, or the model ran out of tokens before answering. */
+export function isContextError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /exceed_context_size|exceeds the available context|context (size|length|window)|maximum context|n_ctx|token limit without an answer/i.test(msg)
 }
 
 function abort(): Error {

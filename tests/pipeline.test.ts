@@ -4,6 +4,7 @@ import path from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, describe, expect, it } from 'vitest'
 import { advance } from '../src/engine/pipeline/advance'
+import { retryStage } from '../src/engine/pipeline/pipeline'
 import type { BookState, ReviewSummary } from '../src/engine/pipeline/advance'
 import { decide, weightedScore } from '../src/engine/pipeline/scoring'
 import { ancestors, chapterPlace, checkBranches } from '../src/engine/pipeline/branches'
@@ -12,6 +13,7 @@ import { writeMd } from '../src/engine/store/atomic'
 import { parseTopics } from '../src/engine/store/topics'
 import { parseMd } from '../src/shared/md'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
+import { ProviderError } from '../src/engine/models/types'
 import { makePipelineEnv, quietResearchState, sleep, waitFor } from './helpers'
 
 type Env = Awaited<ReturnType<typeof makePipelineEnv>>
@@ -139,6 +141,42 @@ describe('bedtime story, mock e2e', () => {
     // headless engine: no renderer, so the PNG is pending
     expect(env.events.some((e) => e.type === 'cover.render')).toBe(false)
   }, 90000)
+
+  it('a book whose job failed for good can be retried and continues from the stage it failed in', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', maxBooks: 1 })
+    const e = env
+    const down = e.mock.on({ task: 'review' }, () => {
+      throw new ProviderError('reviewer model down', 400, false)
+    })
+    const failedSlug = async () => {
+      for (const s of await readdir(path.join(e.dir, 'books'))) if ((await bookMd(e, s).then((b) => b.data.stage, () => null)) === 'failed') return s
+      return null
+    }
+    const slug = (await waitFor(failedSlug, 60000, 'a failed book'))!
+    await e.engine.handleCommand({ type: 'pauseAll' })
+    await waitFor(() => e.engine.scheduler.runningJobs().length === 0, 20000, 'running jobs to end')
+    const failed = await bookMd(e, slug)
+    expect(failed.data).toMatchObject({ stage: 'failed', failed_from: 'reviewing' })
+    const failedJobs = (await readdir(path.join(e.dir, 'jobs', 'failed'))).filter((f) => f.startsWith(`${slug}--review--`))
+    expect(failedJobs.length).toBeGreaterThan(0)
+
+    down()
+    await e.engine.handleCommand({ type: 'retryBook', book: slug })
+    const retried = await bookMd(e, slug)
+    expect(retried.data.stage).toBe('reviewing')
+    expect(retried.data.failed_from).toBeUndefined()
+    expect(retried.data.reasons).toEqual([])
+    expect((await readdir(path.join(e.dir, 'jobs', 'failed'))).filter((f) => f.startsWith(`${slug}--`))).toEqual([])
+    const requeued = await parseMdFile(path.join(e.dir, 'jobs', 'queued', failedJobs[0]!))
+    expect(requeued.data).toMatchObject({ attempts: 0, failure: null })
+    expect(requeued.body).not.toMatch(/## (Request|Failed)/)
+    // retrying a book that isn't failed does nothing
+    await e.engine.handleCommand({ type: 'retryBook', book: slug })
+    expect(e.logs.some((l) => l.includes(`retryBook: "${slug}" is not a failed book`))).toBe(true)
+
+    await e.engine.handleCommand({ type: 'resumeAll' })
+    await waitFor(async () => (await bookMd(e, slug)).data.stage === 'published', 60000, 'the retried book published')
+  }, 120000)
 
   it('a chapter book gets several chapters, all in the EPUB', async () => {
     env = await makePipelineEnv({ activate: ['jfic-chapter-books-everyday-adventures'], format: 'chapter-book' })
@@ -422,6 +460,14 @@ describe('pure parts', () => {
     // terminal and failed
     expect(advance(base({ stage: 'published' }))).toEqual({ patch: {}, jobs: [] })
     expect(advance(base({ failedJobs: ['b--pitch--book--r0'] })).patch).toMatchObject({ stage: 'failed' })
+    expect(advance(base({ stage: 'rewriting', failedJobs: ['b--rewrite--ch02--r1'] })).patch).toMatchObject({ stage: 'failed', failed_from: 'rewriting' })
+    // a retry continues from the recorded stage; books failed before it was recorded get a guess from the job ids
+    expect(retryStage('rewriting', [])).toBe('rewriting')
+    expect(retryStage(undefined, ['b--rewrite--ch02--r1'])).toBe('rewriting')
+    expect(retryStage(undefined, ['b--rewrite--ch02--len'])).toBe('drafting')
+    expect(retryStage(undefined, ['b--review--line-editor--r0'])).toBe('reviewing')
+    expect(retryStage(undefined, ['b--publish--book--r1'])).toBe('publishing')
+    expect(retryStage(undefined, ['b--check--ch03--r0'])).toBe('drafting')
   })
 
   it('scoring: weights, must-pass gates and the threshold', () => {

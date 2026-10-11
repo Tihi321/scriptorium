@@ -87,6 +87,8 @@ export interface SchedulerDeps {
   now?: () => number
   /** Called when an agent file was removed (a graceful fire finished). */
   onAgentsChanged?: () => void
+  /** True for a book paused on its own (`paused: true` in book.md): its jobs wait, running ones finish. */
+  isBookPaused?: (book: string) => boolean
 }
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex').slice(0, 8)
@@ -236,6 +238,7 @@ export class Scheduler {
         const j = job.data
         if (!this.handlers.has(j.task)) continue
         if (j.not_before && Date.parse(j.not_before) > t) continue
+        if (j.book && this.d.isBookPaused?.(j.book)) continue
         if (j.depends_on.some((id) => !doneIds.has(id))) continue
         if (j.waiting_on && !doneIds.has(j.waiting_on)) continue
         if (j.locks.some((l) => this.locks.has(l))) continue

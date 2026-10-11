@@ -372,6 +372,22 @@ export function installFakeEngine(params: URLSearchParams): void {
           }
           break
         }
+        case 'pauseBook': {
+          const b = books.find((x) => x.slug === command.book)
+          if (b) {
+            b.paused = command.paused
+            emit({ type: 'book.updated', book: summaryOfBook(b, topics) })
+          }
+          break
+        }
+        case 'retryBook': {
+          const b = books.find((x) => x.slug === command.book)
+          if (b && b.stage === 'failed') {
+            b.stage = 'drafting'
+            emit({ type: 'book.stage', book: b.slug, stage: b.stage })
+          }
+          break
+        }
         case 'sendToKindle':
           setTimeout(() => emit({ type: 'kindle.sent', book: command.book, ok: true }), 200)
           break

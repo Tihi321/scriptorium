@@ -8,6 +8,7 @@ export interface FakeBook {
   topic: number
   rating: number | null
   note: string | null
+  paused?: boolean
 }
 
 export interface FakeTopic {
@@ -74,6 +75,7 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     kind: t.kind,
     format: t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
     stage: b.stage,
+    paused: !!b.paused,
     words: 450 + b.slug.length * 120,
     year: 2026,
     score: published ? 7.8 : null,

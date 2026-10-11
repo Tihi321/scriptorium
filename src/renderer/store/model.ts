@@ -157,13 +157,14 @@ export function bookColor(slug: string): string {
   return hslToHex(hash(slug) % 360, 0.65, 0.58)
 }
 
-export const STAGE_COLUMNS = ['idea', 'outline', 'drafting', 'editing', 'published', 'rejected'] as const
+export const STAGE_COLUMNS = ['idea', 'outline', 'drafting', 'editing', 'published', 'rejected', 'failed'] as const
 export type StageColumn = (typeof STAGE_COLUMNS)[number] | 'other'
 
 /** Maps whatever stage name the engine uses onto a whiteboard column. */
 export function stageColumn(stage: string): StageColumn {
   const s = stage.toLowerCase()
   if (s === 'rejected') return 'rejected'
+  if (s === 'failed') return 'failed'
   if (s.startsWith('publish') || s === 'done' || s === 'complete') return 'published'
   if (s === 'new' || s.startsWith('idea')) return 'idea'
   if (s.startsWith('outline') || s.startsWith('plan') || s.startsWith('bible') || s.startsWith('architect')) return 'outline'

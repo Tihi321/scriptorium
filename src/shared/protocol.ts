@@ -41,6 +41,8 @@ export interface BookSummary {
   kind: string | null
   format: string
   stage: string
+  /** Paused on its own: its jobs wait. */
+  paused: boolean
   words: number
   year: number | null
   /** Weighted overall score (1-10), or null before the publisher scored it. */
@@ -149,6 +151,10 @@ export type Command =
   | { type: 'askResearcher'; question: string; book?: string; idea?: string }
   /** Writes `rating` (1-5) and `rating_note` to the book's book.md and answers with `book.updated`. */
   | { type: 'rate'; book: string; rating: number; note?: string }
+  /** Pauses or resumes one book (`paused` in its book.md): its jobs wait, so the agents work on the other books. */
+  | { type: 'pauseBook'; book: string; paused: boolean }
+  /** Puts a failed book's failed jobs back in the queue and continues the book from the stage it failed in. */
+  | { type: 'retryBook'; book: string }
   /** Mails the EPUB. Answers with `kindle.sent`. */
   | { type: 'sendToKindle'; book: string }
   | { type: 'setTopicActive'; id: string; active: boolean }

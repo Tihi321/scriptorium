@@ -2,6 +2,9 @@ import { useMemo } from 'react'
 import { STAGE_COLUMNS, stageColumn, type BookView } from '../store/model'
 import { useAgentList, useOffice } from '../store/hooks'
 import { agentsPerBook, officeStore } from '../store/store'
+import { sendCommand } from '../api'
+
+const TERMINAL = new Set(['published', 'rejected', 'failed'])
 
 export function Whiteboard() {
   const books = useOffice((s) => s.books)
@@ -34,7 +37,7 @@ export function Whiteboard() {
             >
               <span className="swatch" style={{ background: b.color }} />
               <span className="name">{b.title}</span>
-              <span className="dim">{perBook[b.slug] ? `${perBook[b.slug]} on it` : ''}</span>
+              <span className="dim">{b.summary?.paused ? 'paused' : perBook[b.slug] ? `${perBook[b.slug]} on it` : ''}</span>
             </button>
           ))}
         </div>
@@ -42,6 +45,24 @@ export function Whiteboard() {
       {highlight && (
         <div className="row spread">
           <button onClick={() => officeStore.getState().setTerminal(true, 'book')}>Book log</button>
+          {books[highlight] && !TERMINAL.has(books[highlight].stage) && (
+            <button
+              onClick={() => sendCommand({ type: 'pauseBook', book: highlight, paused: !books[highlight]!.summary?.paused })}
+              title="Paused: this book's jobs wait and the agents work on the other books. Running jobs finish."
+              data-testid="pause-book"
+            >
+              {books[highlight].summary?.paused ? 'Resume book' : 'Pause book'}
+            </button>
+          )}
+          {books[highlight]?.stage === 'failed' && (
+            <button
+              onClick={() => sendCommand({ type: 'retryBook', book: highlight })}
+              title="Put the failed jobs back in the queue and continue the book"
+              data-testid="retry-book"
+            >
+              Retry
+            </button>
+          )}
           <button onClick={() => officeStore.getState().toggleHighlightBook(null)}>Clear highlight</button>
         </div>
       )}

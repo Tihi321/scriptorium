@@ -36,6 +36,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     kind: topic?.kind ?? null,
     format: d.format,
     stage: d.stage,
+    paused: d.paused === true,
     words: chapters.reduce((s, c) => s + c.words, 0),
     year: typeof d.year === 'number' ? d.year : null,
     score: typeof d.score === 'number' ? d.score : null,

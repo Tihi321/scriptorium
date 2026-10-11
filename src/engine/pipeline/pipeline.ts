@@ -35,6 +35,8 @@ export class Pipeline {
   private queuedTick = false
   private stopped = false
   private warned = new Set<string>()
+  /** Books with `paused: true` in book.md, refreshed every tick (so a hand edit counts too). */
+  readonly pausedBooks = new Set<string>()
   private readonly deps: PipelineDeps
 
   constructor(private readonly o: PipelineOptions) {
@@ -77,6 +79,43 @@ export class Pipeline {
         this.o.log(`pipeline tick failed: ${(err as Error).message}`)
       }
     })
+  }
+
+  /**
+   * Continues a failed book: its failed jobs go back to the queue with their attempts reset, and the book
+   * returns to the stage it failed in. Runs between ticks. Returns false when the book isn't failed.
+   */
+  retryBook(slug: string): Promise<boolean> {
+    const run = this.chain.then(async () => {
+      const b = await this.books.read(slug)
+      if (!b || b.data.stage !== 'failed') return false
+      const ids = (await this.failedByBook()).get(slug) ?? []
+      for (const id of ids) await this.jobs.retry(id)
+      const stage = retryStage(b.data.failed_from, ids)
+      await this.books.update(slug, (d) => {
+        delete d.failed_from
+        return { stage, reasons: [] }
+      })
+      if (b.data.topic) await this.o.topics.adjust(b.data.topic, { inProgress: 1 })
+      this.o.emit({ type: 'book.stage', book: slug, stage })
+      this.o.log(`book ${slug} retried from ${stage}: ${ids.length ? ids.join(', ') : 'no failed jobs'} back in the queue`)
+      return true
+    })
+    this.chain = run.catch(() => undefined)
+    return run.then((ok) => {
+      if (ok) this.kick()
+      return ok
+    })
+  }
+
+  /** Pauses or resumes one book: its queued jobs wait while it is paused, jobs already running finish. */
+  async setBookPaused(slug: string, paused: boolean): Promise<boolean> {
+    if (!(await this.books.read(slug))) return false
+    await this.books.update(slug, () => ({ paused }))
+    if (paused) this.pausedBooks.add(slug)
+    else this.pausedBooks.delete(slug)
+    this.o.log(`book ${slug} ${paused ? 'paused' : 'resumed'}`)
+    return true
   }
 
   /** Waits until the ticks asked for so far have run. For tests. */
@@ -274,6 +313,8 @@ export class Pipeline {
     const failed = await this.failedByBook()
     for (const slug of await this.books.slugs()) {
       const b = await this.books.read(slug)
+      if (b?.data.paused === true) this.pausedBooks.add(slug)
+      else if (b) this.pausedBooks.delete(slug)
       if (!b || TERMINAL_STAGES.has(b.data.stage)) continue
       await this.advanceBook(slug, failed)
     }
@@ -407,3 +448,17 @@ export class Pipeline {
   }
 }
 
+
+/**
+ * The stage a retried book continues from: the one it failed in, or, for a book that failed before that was
+ * recorded, a guess from its failed jobs. `advance` corrects the other stages by itself, but it needs these three.
+ */
+export function retryStage(failedFrom: unknown, failedJobs: string[]): string {
+  if (typeof failedFrom === 'string' && failedFrom && failedFrom !== 'failed') return failedFrom
+  const tasks = failedJobs.map((id) => id.split('--')[1] ?? '')
+  // round rewrites end in --r<n>; the length-gate (--len) and continuity (--chk) rewrites belong to drafting
+  if (failedJobs.some((id) => /--rewrite--.*--r\d+$/.test(id))) return 'rewriting'
+  if (tasks.includes('publish')) return 'publishing'
+  if (tasks.includes('review')) return 'reviewing'
+  return 'drafting'
+}

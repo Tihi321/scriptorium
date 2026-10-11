@@ -13,7 +13,7 @@ providers:
         price_in: 0.30
         price_out: 1.20
         price_cached_in: 0.006
-        extra_body: null
+        extra_body: { thinking: { type: disabled } }
       - id: deepseek-v4-pro
         family: deepseek
         context: 1000000
@@ -209,4 +209,4 @@ Set a key with `npm run key:set TAVILY_API_KEY` (or the environment variable). N
 - `price_in`, `price_out`, `price_cached_in`: USD per 1M tokens. Cached input falls back to `price_in` when missing.
 - `embedding: true` marks an embedding model.
 - LM Studio models load with a small context window (8192 tokens) unless you change it. Long books need more: the engine reads the loaded window from LM Studio and keeps its prompts within it, but a window of 8192 makes long-book prompts fail. Load the models you use with 32768 or more, for example `lms load nail-qwen3.6-35b-a3b-mtp -c 32768 --parallel 1 --ttl 28800 -y`, or set it in LM Studio's model settings.
-- `extra_body`: optional JSON fields merged into the request body. The LM Studio chat models here send `reasoning_effort: none`, which turns thinking off (checked 2026-10-08 on the Qwen models: a 500-word story took 25 s instead of 3.5 minutes, because the model otherwise spends thousands of hidden tokens thinking). The Qwen 35B MoE (used for review) uses `low` so its verdicts are steadier. Remove it, or set `low` or `medium`, if you want thinking back for the other models. DeepSeek V4 has thinking on by default and bills it as output. The field that turns it off is not set here because the exact name hasn't been checked. Find it in the DeepSeek API docs and put it under `extra_body` for the model, for example `extra_body: { some_field: value }`. Empty means nothing extra is sent.
+- `extra_body`: optional JSON fields merged into the request body. The LM Studio chat models here send `reasoning_effort: none`, which turns thinking off (checked 2026-10-08 on the Qwen models: a 500-word story took 25 s instead of 3.5 minutes, because the model otherwise spends thousands of hidden tokens thinking). The Qwen 35B MoE (used for review) uses `low` so its verdicts are steadier. Remove it, or set `low` or `medium`, if you want thinking back for the other models. DeepSeek V4 has thinking on by default and bills it as output. `deepseek-flash` sends `thinking: { type: disabled }` (checked 2026-10-11: with thinking on, a 15k-token continuity check spent all 6000 answer tokens thinking and returned nothing). `deepseek-v4-pro` keeps thinking on. Empty means nothing extra is sent.

@@ -258,7 +258,8 @@ export function advance(s: BookState): Plan {
   const none: Plan = { patch: {}, jobs: [] }
   if (TERMINAL_STAGES.has(s.stage)) return none
   if (s.failedJobs.length > 0) {
-    return { patch: { stage: 'failed', reasons: [`job failed for good: ${s.failedJobs.join(', ')}`] }, jobs: [] }
+    // the stage it failed in is kept, so a retry can continue from there
+    return { patch: { stage: 'failed', failed_from: s.stage, reasons: [`job failed for good: ${s.failedJobs.join(', ')}`] }, jobs: [] }
   }
   const slug = s.slug
   const stageOf = (stage: string) => (s.stage === stage ? {} : { stage })

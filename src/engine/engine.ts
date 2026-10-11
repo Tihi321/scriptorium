@@ -106,7 +106,8 @@ export class Engine {
       getFactory: () => this.factory,
       emit: this.emit,
       pollMs: opts.pollMs,
-      onAgentsChanged: () => this.syncAgents()
+      onAgentsChanged: () => this.syncAgents(),
+      isBookPaused: (book) => this.pipeline.pausedBooks.has(book)
     })
     this.books = new BookStore(dir)
     this.topics = new TopicsFile(dir, () => void this.emitTopics())
@@ -438,6 +439,17 @@ export class Engine {
         await this.emitBookUpdated(cmd.book)
         return
       }
+      case 'pauseBook':
+        if (!(await this.pipeline.setBookPaused(cmd.book, cmd.paused))) this.log(`pauseBook: no book "${cmd.book}"`)
+        else {
+          await this.emitBookUpdated(cmd.book)
+          this.scheduler.kick()
+        }
+        return
+      case 'retryBook':
+        if (!(await this.pipeline.retryBook(cmd.book))) this.log(`retryBook: "${cmd.book}" is not a failed book`)
+        else await this.emitBookUpdated(cmd.book)
+        return
       case 'setTopicActive':
         if (!(await this.topics.setActive(cmd.id, cmd.active))) this.log(`setTopicActive: unknown topic ${cmd.id}`)
         else this.pipeline.kick()

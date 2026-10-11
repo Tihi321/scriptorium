@@ -29,6 +29,7 @@ export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSum
     kind: 'juvenile-fiction',
     format: 'bedtime-toddler',
     stage: 'drafting',
+    paused: false,
     words: 450,
     year: 2026,
     score: null,
