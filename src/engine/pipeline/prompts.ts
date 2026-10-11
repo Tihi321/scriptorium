@@ -43,6 +43,29 @@ export async function loadRules(dataDir: string): Promise<LoadedPrompt> {
 }
 
 /**
+ * One section (`## outline`, `## draft`, `## rewrite`, `## review`) of `prompts/_choices.md`, rendered with `vars`:
+ * the extra instructions for a story with choices. Empty when the file or the section is missing.
+ */
+export async function loadChoicesSection(dataDir: string, section: string, vars: Record<string, string | number | undefined | null> = {}): Promise<string> {
+  let body: string
+  try {
+    const file = path.join(dataDir, 'prompts', '_choices.md')
+    body = parseMd(await fs.readFile(file, 'utf8'), file).body
+  } catch {
+    return ''
+  }
+  const parts = body.replace(/\r\n/g, '\n').split(/^## +/m)
+  const part = parts.find((p) => p.split('\n', 1)[0]!.trim().toLowerCase() === section)
+  return part ? render(part.slice(part.indexOf('\n') + 1).trim(), vars) : ''
+}
+
+/** Adds a block of extra instructions to the end of the user message. */
+export function appendToPrompt(messages: ChatMessage[], text: string): void {
+  const last = messages[messages.length - 1]
+  if (text && last) last.content += `\n\n${text}`
+}
+
+/**
  * Builds the two messages for a task: the system message is the shared rules plus the agent's persona,
  * the user message is the rendered template. Tells the scheduler which template text was used.
  */

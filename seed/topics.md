@@ -10,7 +10,7 @@ How to edit:
 - `target`: how many books you want in this topic. Empty or 0 means no limit.
 - `done` and `in progress`: kept by the engine. Don't edit them. Everything else in the file is kept exactly as written, including the column alignment.
 - Add your own rows anywhere, in any table with the same columns. `id` must be unique.
-- `kind` is `fiction`, `nonfiction`, `juvenile-fiction`, `juvenile-nonfiction` or `visual-novel`. A `visual-novel` topic is written as a visual novel script (scenes, who is on screen, and who says what), in the genre the topic names.
+- `kind` is `fiction`, `nonfiction`, `juvenile-fiction`, `juvenile-nonfiction`, `visual-novel`, `juvenile-visual-novel`, `interactive-fiction` or `juvenile-interactive-fiction`. A `visual-novel` topic is written as a visual novel script (scenes, who is on screen, and who says what), in the genre the topic names, either straight through or with choices; `juvenile-visual-novel` is the same for children aged six to nine. An `interactive-fiction` topic is a choose-your-path book: the reader picks what happens at the end of a chapter and the story has several endings; `juvenile-interactive-fiction` is the same for children, with only happy endings.
 
 This list is our own, written by hand for this project. It is modelled on how libraries and shops group books, but it is not the BISAC list and doesn't copy its wording. Fiction, juvenile fiction, non-fiction and juvenile non-fiction all have a pipeline. Non-fiction topics use the non-fiction variant: research for every chapter, a fact base, a fact-checker that must pass and a references section.
 
@@ -595,3 +595,37 @@ This list is our own, written by hand for this project. It is modelled on how li
 | vn-school-life          | School Life Visual Novel     | visual-novel | no     | 5      |      |             |
 | vn-horror               | Horror Visual Novel          | visual-novel | no     | 5      |      |             |
 | vn-comedy               | Comedy Visual Novel          | visual-novel | no     | 5      |      |             |
+
+## Visual Stories for Children
+
+| id                      | topic                        | kind                  | active | target | done | in progress |
+| ----------------------- | ---------------------------- | --------------------- | ------ | ------ | ---- | ----------- |
+| jvn-animal-friends      | Animal Friends Visual Story  | juvenile-visual-novel | no     | 5      |      |             |
+| jvn-fairy-tales         | Fairy Tale Visual Story      | juvenile-visual-novel | no     | 5      |      |             |
+| jvn-space-adventure     | Space Adventure Visual Story | juvenile-visual-novel | no     | 5      |      |             |
+| jvn-dinosaurs           | Dinosaur Visual Story        | juvenile-visual-novel | no     | 5      |      |             |
+| jvn-magic-school        | Magic School Visual Story    | juvenile-visual-novel | no     | 5      |      |             |
+| jvn-little-detectives   | Little Detectives Visual Story | juvenile-visual-novel | no   | 5      |      |             |
+| jvn-under-the-sea       | Under the Sea Visual Story   | juvenile-visual-novel | no     | 5      |      |             |
+
+## Choose Your Path
+
+| id                      | topic                        | kind                  | active | target | done | in progress |
+| ----------------------- | ---------------------------- | --------------------- | ------ | ------ | ---- | ----------- |
+| cyp-fantasy-quest       | Fantasy Quest                | interactive-fiction   | no     | 5      |      |             |
+| cyp-mystery             | Mystery and Detection        | interactive-fiction   | no     | 5      |      |             |
+| cyp-science-fiction     | Science Fiction Adventure    | interactive-fiction   | no     | 5      |      |             |
+| cyp-horror              | Horror and Survival          | interactive-fiction   | no     | 5      |      |             |
+| cyp-sea-adventure       | Pirates and the High Seas    | interactive-fiction   | no     | 5      |      |             |
+| cyp-spy-thriller        | Spy Thriller                 | interactive-fiction   | no     | 5      |      |             |
+
+## Choose Your Path for Children
+
+| id                      | topic                        | kind                         | active | target | done | in progress |
+| ----------------------- | ---------------------------- | ---------------------------- | ------ | ------ | ---- | ----------- |
+| jcyp-treasure-hunt      | Treasure Hunt                | juvenile-interactive-fiction | no     | 5      |      |             |
+| jcyp-magic-forest       | The Magic Forest             | juvenile-interactive-fiction | no     | 5      |      |             |
+| jcyp-space-explorers    | Space Explorers              | juvenile-interactive-fiction | no     | 5      |      |             |
+| jcyp-dinosaur-island    | Dinosaur Island              | juvenile-interactive-fiction | no     | 5      |      |             |
+| jcyp-little-detectives  | Little Detectives            | juvenile-interactive-fiction | no     | 5      |      |             |
+| jcyp-animal-rescue      | Animal Rescue                | juvenile-interactive-fiction | no     | 5      |      |             |

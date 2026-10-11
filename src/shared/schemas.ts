@@ -137,6 +137,12 @@ export const formatEntrySchema = z.looseObject({
    * line editor use the `_vn` prompts, and the EPUB lays the chapters out as a script.
    */
   script: z.boolean().default(false),
+  /**
+   * A story with choices: some chapters end with two or three choices, each leading to a later chapter, and the
+   * story has several endings. The engine adds the matching section of `prompts/_choices.md` to the prompts.
+   * For short formats only (not `long`).
+   */
+  choices: z.boolean().default(false),
   /** Rewrite rounds for this format. Falls back to quality.max_rounds. */
   max_rounds: z.number().int().nonnegative().optional(),
   /** Overrides the default reviewer list. */

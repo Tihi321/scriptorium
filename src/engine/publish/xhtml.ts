@@ -62,6 +62,14 @@ export function markdownToXhtml(md: string, opts: { script?: boolean } = {}): st
   return out.join('\n')
 }
 
+/** The end of a chapter in a story with choices: links to the chapters the choices lead to (`to` is the chapter's 1-based position), or "The End" with a link back to the start. Empty for other books. */
+export function choicesHtml(c: { choices?: { text: string; to: number }[]; ending?: string }): string {
+  const file = (i: number) => `chapter-${String(i).padStart(2, '0')}.xhtml`
+  if (c.choices?.length) return `<div class="choices">\n<p class="choices-ask">What do you choose?</p>\n<ul>\n${c.choices.map((ch) => `<li><a href="${file(ch.to)}">${inline(ch.text)}</a></li>`).join('\n')}\n</ul>\n</div>`
+  if (c.ending) return `<div class="the-end">\n<p>The End</p>\n<p class="again"><a href="${file(1)}">Start again and choose differently</a></p>\n</div>`
+  return ''
+}
+
 export function xhtmlPage(title: string, bodyHtml: string, opts: { css?: string; bodyClass?: string; epubType?: string } = {}): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>

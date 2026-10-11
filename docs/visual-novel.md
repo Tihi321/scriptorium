@@ -6,10 +6,11 @@ Scriptorium only writes the text. It never makes images for a visual novel. Ever
 
 ## What kind of visual novel
 
-- **Linear.** One story from start to end, with no player choices or branches (a "kinetic" visual novel).
+- **Linear or with choices.** Format `visual-novel` is one story from start to end (a "kinetic" visual novel). Format `choice-visual-novel` branches: at the end of some chapters the player picks what happens next, and the story has several endings (see [Choices](#choices)).
+- **For children too.** Topics of kind `juvenile-visual-novel` (seed section "Visual Stories for Children") get `kids-visual-story` (linear) or `kids-choice-visual-story` (with choices, happy endings only), for ages six to nine: simple words, bright places, gentle stories.
 - **A script, not prose.** Every chapter is a list of scenes. A scene says where and when it is, what the reader sees, who is on screen and how they look, and then who says what, one short line at a time.
 - **Any genre.** The topic sets the genre: the seed has a "Visual Novels" section in `topics.md` (romance, mystery, fantasy, science fiction, slice of life, school life, horror, comedy), and any topic of kind `visual-novel` is written this way. You can add your own with "Add a topic" (kind: Visual novel).
-- **Size.** 8,000 to 25,000 words in 4 to 10 chapters, three to six scenes per chapter (`config/formats.md`, format `visual-novel`).
+- **Size.** Linear: 8,000 to 25,000 words in 4 to 10 chapters, three to six scenes per chapter. With choices: 10,000 to 30,000 words in 8 to 16 chapters over all paths. For children: 2,000 to 6,000 words in 3 to 6 chapters, or 3,000 to 8,000 in 6 to 10 with choices (`config/formats.md`).
 
 ## Where the files are
 
@@ -20,7 +21,7 @@ A book is a folder `books/<slug>/` in the data folder (default `~/Scriptorium`).
 | `book.md` | Frontmatter: `title`, `author`, `genre`, `format: visual-novel`, `script: true`, `stage` (`published` when finished), `blurb`, `topic`, `topic_name` | Pick books with `script: true` and `stage: published`; title screen |
 | `bible/bible.md` | The art reference: `## Setting`, `## Characters` (one bullet per character: `- **Name**: looks, then who they are. Voice: ...`), `## Places` (one bullet per place: how it looks), `## Style` | Character sprites and backgrounds, the same in every scene |
 | `chapters/ch-01.md` ... | Frontmatter `n`, `title`, `words`; the body is the script | The scenes and the text |
-| `outline.md` | Chapter titles and summaries | Chapter select, scene summaries |
+| `outline.md` | Chapter titles and summaries; for a book with choices also the chapter map (`choices`, `ending`) | Chapter select, scene summaries, the branches |
 | `cover-brief.md` | One paragraph describing a cover picture | Title-screen image |
 | `out/<slug>.epub` | The same script laid out for reading | Not needed by the app |
 
@@ -107,6 +108,33 @@ A suggested pipeline for the app. None of it exists yet.
    - **Pixel-drawing tool**: the same descriptions go to a model that draws with the tool's commands (a small palette, a fixed canvas size such as 320x180 for backgrounds and 64x96 for sprites). The descriptions are concrete on purpose (colours, objects in view), which suits drawing step by step.
 4. **Assemble**: for every line, the background + the sprites on screen + the text box. Save as a project for a visual novel engine (for example Ren'Py, which reads a script very like this one), or play it in the app itself.
 
+## Choices
+
+A book with choices (`format: choice-visual-novel` or `kids-choice-visual-story`) is a map of chapters instead of a line. The map is in the frontmatter of `outline.md`, never in the chapter text:
+
+```yaml
+chapters:
+  - n: 1
+    title: The Late Boat
+    summary: ...
+    choices:
+      - { text: Wait at the harbour wall, to: 2 }
+      - { text: Row out to find him, to: 3 }
+  - n: 2
+    title: ...
+    choices:
+      - { text: Open the letter, to: 4 }
+  - n: 3
+    title: ...
+    ending: "bittersweet: the boat is found, empty"
+```
+
+- Every reader starts at chapter 1. A chapter with `choices` ends with a choice menu: each `text` is a button, `to` is the chapter it jumps to. A chapter without `choices` is an ending; `ending` says how it ends in a few words.
+- A choice always goes forward (`to` is higher than `n`), and two choices may lead into the same chapter (paths meet). Every chapter can be reached from chapter 1, and there are at least two endings: the engine checks this before any chapter is written.
+- The chapter text ends at the moment of decision and never contains the choices themselves. Show the menu after the last line of the chapter. On an ending, show "The End" and offer to start again.
+- The EPUB and the in-app reader do the same with links: a list of choices after the chapter, or "The End" with a link back to chapter 1.
+- The same map is used by choose-your-path books in prose (formats `gamebook` and `kids-choice-book`), which an app could also turn into a visual novel, using the prose as narration.
+
 ### A JSON shape for the parsed book
 
 Suggested, so the parser and the image steps agree on one structure:
@@ -124,6 +152,8 @@ Suggested, so the parser and the image steps agree on one structure:
     {
       "n": 1,
       "title": "The Late Boat",
+      "choices": [{ "text": "Wait at the harbour wall", "to": 2 }, { "text": "Row out to find him", "to": 3 }],
+      "ending": null,
       "scenes": [
         {
           "place": "The harbour wall",
@@ -145,6 +175,7 @@ Suggested, so the parser and the image steps agree on one structure:
 
 ## In Scriptorium
 
-- Format: `visual-novel` in `config/formats.md` with `script: true`, for topics of kind `visual-novel` only.
+- Formats: `visual-novel` and `choice-visual-novel` for topics of kind `visual-novel`, `kids-visual-story` and `kids-choice-visual-story` for kind `juvenile-visual-novel`, all with `script: true`; the choice formats also have `choices: true`. The editor-in-chief picks one of the formats of the topic's kind; set `enabled: false` on a format to stop it being picked.
+- Choices: `prompts/_choices.md` holds the extra instructions for planning, writing and reviewing a story with choices.
 - Prompts: `architect/outline_vn.md` (looks of characters and places for the bible), `writer/draft_chapter_vn.md` and `writer/rewrite_chapter_vn.md` (the script grammar), `line-editor/review_vn.md` (dialogue, voices and the script form). Other roles use their usual prompts with the format guidance. Edit them in the data folder's `prompts/` to change the style of the scripts.
 - The EPUB and the in-app reader show the script with scene headings, an "On screen" line, bold speaker names and italic narration.

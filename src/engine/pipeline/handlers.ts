@@ -25,7 +25,9 @@ import { findMarkers, stripMarkers } from '../research/markers'
 import type { ResearchService, SearchService } from '../research/service'
 import { bibleFor, nonfictionContext } from './nfcontext'
 import { chatJson, cleanProse } from './llm'
-import { buildMessages } from './prompts'
+import { appendToPrompt, buildMessages, loadChoicesSection } from './prompts'
+import { ancestors, chapterPlace, checkBranches, endLine } from './branches'
+import type { BranchChapter } from './branches'
 import { decide, dimensionsFor } from './scoring'
 import type { ReviewResult } from './scoring'
 
@@ -363,8 +365,19 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    // a story with choices: the architect plans a map of chapters with choices and endings
+    if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
     const schema = z.object({
-      chapters: z.array(z.object({ title: z.string().min(1), summary: z.string().min(5) })).min(1),
+      chapters: z
+        .array(
+          z.object({
+            title: z.string().min(1),
+            summary: z.string().min(5),
+            choices: z.array(z.object({ text: z.string(), to: z.coerce.number() })).default([]),
+            ending: z.string().default('')
+          })
+        )
+        .min(1),
       characters: z.array(z.object({ name: z.string(), description: z.string(), voice: z.string().default('') })).default([]),
       places: z.array(z.object({ name: z.string(), description: z.string() })).default([]),
       threads: z.array(z.string()).default([]),
@@ -380,7 +393,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     let chapters = r.value.chapters
     if (chapters.length > fmt.chapters[1]) chapters = chapters.slice(0, fmt.chapters[1])
     if (chapters.length < fmt.chapters[0]) throw new Error(`the outline has ${chapters.length} chapter(s), the format needs ${fmt.chapters[0]} to ${fmt.chapters[1]}`)
-    const numbered = chapters.map((c, i) => ({ n: i + 1, title: c.title.trim(), summary: c.summary.trim() }))
+    let numbered: BranchChapter[] = chapters.map((c, i) => ({ n: i + 1, title: c.title.trim(), summary: c.summary.trim() }))
+    // a story with choices: bad choices are dropped, and a map a reader can't get through fails the job (it is planned again)
+    if (fmt.choices) numbered = checkBranches(chapters.map((c, i) => ({ n: i + 1, title: c.title.trim(), summary: c.summary.trim(), choices: c.choices, ending: c.ending })))
     const acts = fmt.long ? splitActs(numbered.length) : undefined
     await writeMd(
       d.books.file(slug, 'outline.md'),
@@ -388,7 +403,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       '\n' +
         (acts
           ? acts.map((a) => `## ${a.title}\n\n${a.chapters.map((n) => `${n}. **${numbered[n - 1]!.title}**: ${numbered[n - 1]!.summary}`).join('\n')}`).join('\n\n')
-          : numbered.map((c) => `${c.n}. **${c.title}**: ${c.summary}`).join('\n')) +
+          : numbered.map((c) => `${c.n}. **${c.title}**: ${c.summary}${fmt.choices ? `\n   - ${endLine(c)}` : ''}`).join('\n')) +
         '\n'
     )
     if (fmt.nonfiction) {
@@ -412,7 +427,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
     await made(slug, run)
-    return { result: `outline with ${numbered.length} chapter(s)${acts ? ` in ${acts.length} acts` : ''}`, resultPath: `books/${slug}/outline.md` }
+    const endings = fmt.choices ? numbered.filter((c) => !c.choices).length : 0
+    return { result: `outline with ${numbered.length} chapter(s)${acts ? ` in ${acts.length} acts` : ''}${endings ? `, ${endings} endings` : ''}`, resultPath: `books/${slug}/outline.md` }
   })
 
   // ---- writer: draft a chapter ----
@@ -438,14 +454,16 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ctx.context(packed.items.map((i) => ({ name: i.included ? i.name : `${i.name} (left out: over the budget)`, tokens: i.tokens })))
       storySoFar = packed.text
     } else {
-      const prior = (await d.books.chapters(slug)).filter((c) => c.n < n)
+      // a story with choices: only the chapters a reader can pass through on the way here
+      const before = fmt.choices ? ancestors(outline.chapters, n) : null
+      const prior = (await d.books.chapters(slug)).filter((c) => (before ? before.has(c.n) : c.n < n))
       const research = await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4)
       storySoFar = [
         `## Pitch\n${(await d.books.pitch(slug)) ?? ''}`,
-        `## Outline\n${outline.chapters.map((c) => `${c.n}. ${c.title}: ${c.summary}`).join('\n')}`,
+        `## Outline\n${outline.chapters.map((c) => `${c.n}. ${c.title}: ${c.summary}${fmt.choices ? ` [${endLine(c)}]` : ''}`).join('\n')}`,
         `## Story bible\n${await d.books.bible(slug)}`,
         ...(research.length ? [`## ${researchBlock(research)}`] : []),
-        `## The chapters written so far\n${prior.length ? prior.map((c) => `### Chapter ${c.n}: ${c.title}\n\n${c.body}`).join('\n\n') : '(this is the first chapter)'}`
+        `## ${before ? 'The chapters that can lead to this one' : 'The chapters written so far'}\n${prior.length ? prior.map((c) => `### Chapter ${c.n}: ${c.title}\n\n${c.body}`).join('\n\n') : '(this is the first chapter)'}`
       ].join('\n\n')
       ctx.context([
         { name: 'pitch, outline and bible', tokens: Math.round((storySoFar.length - prior.reduce((s, c) => s + c.body.length, 0)) / 4) },
@@ -464,6 +482,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'draft', chapterPlace(outline.chapters, n)))
     let r = await run.chat({ messages, maxTokens: Math.max(4000, perChapter * 6) })
     let body = stripLeadingHeading(cleanProse(r.text))
     if (countWords(body) < 20) throw new Error(`chapter ${n} came back too short (${countWords(body)} words, ${r.usage.outputTokens} tokens used: a thinking model may have run out of tokens)`)
@@ -559,6 +578,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         ...formatVars(fmt, book.target_words)
       })
       run.version = version
+      if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
       // the schema names this reviewer's dimensions, so structured output and the repair retry both insist on them
       const schema = z.object({
@@ -646,6 +666,16 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       bibleText = await d.books.bible(slug)
       researchText = researchBlock(researchItems)
     }
+    // a story with choices: the chapters that lead here and the ones its choices lead to, each with where it goes next
+    const branches = fmt.choices ? (await d.books.outline(slug))?.chapters ?? null : null
+    const near = branches ? new Set([...ancestors(branches, n), ...(branches.find((c) => c.n === n)?.choices ?? []).map((ch) => ch.to)]) : null
+    const otherChapters = chapters
+      .filter((c) => c.n !== n && (!near || near.has(c.n)))
+      .map((c) => {
+        const o = branches?.find((x) => x.n === c.n)
+        return `### Chapter ${c.n}: ${c.title}\n\n${c.body}${o ? `\n\n[${endLine(o)}]` : ''}`
+      })
+      .join('\n\n')
     const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'rewrite_chapter'), {
       title: book.title,
       pitch: (await d.books.pitch(slug)) ?? '',
@@ -655,11 +685,12 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_n: n,
       chapter_title: current.title,
       chapter_text: current.body,
-      other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : chapters.filter((c) => c.n !== n).map((c) => `### Chapter ${c.n}: ${c.title}\n\n${c.body}`).join('\n\n') || '(this is the only chapter)',
+      other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : otherChapters || '(this is the only chapter)',
       chapter_words: Math.round(book.target_words / Math.max(1, chapters.length)),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    if (branches) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n)))
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6) })
     const body = stripMarkers(stripLeadingHeading(cleanProse(r.text)))
     if (countWords(body) < 20) throw new Error(`the rewrite of chapter ${n} came back too short`)

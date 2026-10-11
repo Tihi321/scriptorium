@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 import { ORNAMENT_CSS, ornamentHtml, ornamentSvg } from './art'
-import { escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
+import { choicesHtml, escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
 
 export interface EpubChapter {
   title: string
@@ -8,6 +8,10 @@ export interface EpubChapter {
   body: string
   /** A visual novel script (scene, on-screen, speaker lines) rather than prose. */
   script?: boolean
+  /** A story with choices: the choices at the end (`to` is the 1-based position of the target chapter). */
+  choices?: { text: string; to: number }[]
+  /** A story with choices: this chapter is an ending. */
+  ending?: string
 }
 
 export interface EpubBook {
@@ -42,6 +46,13 @@ p.vn-narration { font-style: italic; }
 p.vn-line { margin-left: 1em; text-indent: -1em; }
 p.vn-line .vn-speaker { font-weight: bold; font-variant: small-caps; letter-spacing: 0.03em; }
 p.vn-line .vn-how { color: #555; font-style: italic; }
+div.choices { margin: 2em 0 1em; padding: 0.8em 1em; border: 1px solid #999; border-radius: 6px; }
+div.choices p.choices-ask { font-weight: bold; margin-bottom: 0.5em; }
+div.choices ul { margin: 0; padding-left: 1.2em; }
+div.choices li { margin: 0.4em 0; }
+div.the-end { text-align: center; margin: 2.5em 0 1em; }
+div.the-end p { font-variant: small-caps; letter-spacing: 0.1em; font-size: 1.2em; }
+div.the-end p.again { font-variant: normal; letter-spacing: 0; font-size: 0.9em; }
 .titlepage { text-align: center; margin-top: 25%; }
 .titlepage .author { font-size: 1.2em; margin-top: 1.5em; }
 .titlepage .ai { font-size: 0.8em; margin-top: 3em; color: #555; }
@@ -112,7 +123,7 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
     const n = String(i + 1).padStart(2, '0')
     const file = `chapter-${n}.xhtml`
     const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
-    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script })}`, { epubType: 'chapter' }))
+    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
     manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
     spine.push(`<itemref idref="ch${n}"/>`)
     navItems.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)

@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { advance } from '../src/engine/pipeline/advance'
 import type { BookState, ReviewSummary } from '../src/engine/pipeline/advance'
 import { decide, weightedScore } from '../src/engine/pipeline/scoring'
-import { markdownToXhtml, scriptToXhtml } from '../src/engine/publish/xhtml'
+import { ancestors, chapterPlace, checkBranches } from '../src/engine/pipeline/branches'
+import { choicesHtml, markdownToXhtml, scriptToXhtml } from '../src/engine/publish/xhtml'
 import { writeMd } from '../src/engine/store/atomic'
 import { parseTopics } from '../src/engine/store/topics'
 import { parseMd } from '../src/shared/md'
@@ -216,6 +217,47 @@ describe('bedtime story, mock e2e', () => {
     expect(await readFile(path.join(env.dir, 'books', slug, 'out', 'reader', 'chapter-01.xhtml'), 'utf8')).toContain('class="vn-')
   }, 90000)
 
+  it('a children\'s visual story with choices branches: writers see their path, chapters end with choice links', async () => {
+    env = await makePipelineEnv({
+      activate: ['jvn-animal-friends'],
+      format: 'kids-choice-visual-story',
+      beforeStart: async (dir) => {
+        const file = path.join(dir, 'config', 'formats.md')
+        const doc = parseMd(await readFile(file, 'utf8'))
+        const formats = (doc.data.formats as { id: string }[]).map((f) => (f.id === 'kids-choice-visual-story' ? { ...f, words: [1200, 4000], chapters: [4, 4] } : f))
+        await writeMd(file, { ...doc.data, formats }, doc.body)
+      }
+    })
+    const slug = (await waitStage(env, 'published'))!
+    const { data } = await bookMd(env, slug)
+    expect(data).toMatchObject({ format: 'kids-choice-visual-story', script: true, age_band: '6-9' })
+    // the map: 1 -> 2, 3; 2 -> 4; 3 and 4 are endings
+    const outline = await parseMdFile(path.join(env.dir, 'books', slug, 'outline.md'))
+    const chapters = outline.data.chapters as { choices?: { to: number }[]; ending?: string }[]
+    expect(chapters.map((c) => c.choices?.map((x) => x.to) ?? c.ending)).toEqual([[2, 3], [4], 'happy: the fox sleeps', 'happy: the fox sleeps'])
+    expect(outline.body).toContain('Choices: "Go the way of part 2" (to chapter 2)')
+    // the writer of chapter 4 saw only the path to it (1 and 2), and was told how readers get there and that it is an ending
+    const draft = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', `${slug}--draft--ch04--r0.md`), 'utf8')).body
+    expect(draft).toContain('### Chapter 2:')
+    expect(draft).not.toContain('### Chapter 3:')
+    expect(draft).toContain('Readers come into this chapter from: chapter 2, after choosing "Go the way of part 4".')
+    expect(draft).toContain('This chapter is an ending')
+    // reviewers (child safety too) read every path with the choices after each chapter
+    for (const role of ['line-editor', 'child-safety-reviewer']) {
+      const review = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', `${slug}--review--${role}--r0.md`), 'utf8')).body
+      expect(review).toContain('This book is a story with choices')
+      expect(review).toContain('[Choices: "Go the way of part 2" (to chapter 2); "Go the way of part 3" (to chapter 3)]')
+    }
+    const zip = await checkEpub(path.join(env.dir, 'books', slug, 'out', `${slug}.epub`), { chapters: 4, title: 'The Sleepy Fox', author: data.author as string })
+    const ch1 = await zip.file('OEBPS/chapter-01.xhtml')!.async('string')
+    expect(ch1).toContain('<li><a href="chapter-02.xhtml">Go the way of part 2</a></li>')
+    expect(ch1).toContain('class="vn-')
+    expect(await zip.file('OEBPS/chapter-03.xhtml')!.async('string')).toContain('<div class="the-end">')
+    const reader1 = await readFile(path.join(env.dir, 'books', slug, 'out', 'reader', 'chapter-01.xhtml'), 'utf8')
+    expect(reader1).toContain('href="chapter-03.xhtml"')
+    expect(reader1).not.toContain('Next chapter')
+  }, 90000)
+
   it('a forced must-pass failure (child safety) ends in rejected, with the reasons and no EPUB', async () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', revise: { 'child-safety-reviewer': [0, 1, 2] } })
     const slug = (await waitStage(env, 'rejected'))!
@@ -396,6 +438,26 @@ describe('pure parts', () => {
     expect(gate.reasons[0]).toMatch(/must-pass gate failed: child-safety-reviewer/)
   })
 
+  it('a story with choices: the chapter map is cleaned and checked, and its chapters end with links', () => {
+    const ch = (n: number, choices: { text: string; to: number }[] = [], ending = '') => ({ n, title: `C${n}`, summary: 'x', choices, ending })
+    const map = checkBranches([
+      ch(1, [{ text: 'Left', to: 2 }, { text: 'Right', to: 3 }, { text: 'Back', to: 1 }, { text: 'Nowhere', to: 9 }]),
+      ch(2, [{ text: 'On', to: 4 }, { text: 'On again', to: 4 }]),
+      ch(3, [{ text: 'Meet', to: 4 }, { text: 'Stop', to: 5 }]),
+      ch(4, [], 'happy'),
+      ch(5)
+    ])
+    expect(map.map((c) => c.choices?.map((x) => x.to) ?? c.ending)).toEqual([[2, 3], [4], [4, 5], 'happy', 'an ending'])
+    expect([...ancestors(map, 4)].sort()).toEqual([1, 2, 3])
+    expect(chapterPlace(map, 4).ways_in).toBe('Readers come into this chapter from: chapter 2, after choosing "On"; chapter 3, after choosing "Meet".')
+    expect(() => checkBranches([ch(1, [{ text: 'A', to: 3 }]), ch(2), ch(3)])).toThrow(/no choice leads to chapter\(s\) 2/)
+    expect(() => checkBranches([ch(1, [{ text: 'A', to: 2 }]), ch(2)])).toThrow(/at least two endings/)
+    expect(() => checkBranches([ch(1, [{ text: 'A', to: 2 }]), ch(2, [{ text: 'B', to: 3 }]), ch(3, [{ text: 'C', to: 4 }]), ch(4)])).toThrow()
+    expect(choicesHtml({ choices: [{ text: 'Open the *door*', to: 2 }] })).toContain('<li><a href="chapter-02.xhtml">Open the <em>door</em></a></li>')
+    expect(choicesHtml({ ending: 'happy' })).toContain('<a href="chapter-01.xhtml">')
+    expect(choicesHtml({})).toBe('')
+  })
+
   it('a visual novel script becomes scene headings, cast lines, speaker lines and narration', () => {
     const script = [
       'SCENE: The harbour wall, dusk',
@@ -530,7 +592,7 @@ b-one | Beta | nonfiction | yes |  |  |
     expect(rows.every((r) => !r.active)).toBe(true)
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length)
     expect(new Set(rows.map((r) => r.topic.toLowerCase())).size).toBe(rows.length) // names are unique too, they show in the UI
-    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(['fiction', 'juvenile-fiction', 'juvenile-nonfiction', 'nonfiction', 'visual-novel']))
+    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(['fiction', 'juvenile-fiction', 'juvenile-nonfiction', 'nonfiction', 'visual-novel', 'juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction']))
     for (const id of ['jfic-bedtime-and-dreams', 'jfic-chapter-books-everyday-adventures', 'jfic-bedtime-moon-and-stars']) expect(rows.some((r) => r.id === id), id).toBe(true)
   })
 })

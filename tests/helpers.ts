@@ -351,8 +351,15 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     const id = /Format id: ([\w-]+)/.exec(text)?.[1] ?? ''
     const [min] = (/Number of chapters: (\d+) to (\d+)/.exec(text) ?? []).slice(1).map(Number)
     const n = id.startsWith('bedtime') ? 1 : (min ?? 3)
+    // a story with choices: a binary tree, chapter k leads to 2k and 2k+1, the leaves are endings
+    const branching = text.includes('This book is a story with choices')
+    const choices = (k: number) => [2 * k, 2 * k + 1].filter((to) => to <= n).map((to) => ({ text: `Go the way of part ${to}`, to }))
     return JSON.stringify({
-      chapters: Array.from({ length: n }, (_, i) => ({ title: `Part ${i + 1}`, summary: `Fox does thing number ${i + 1} and learns something kind.` })),
+      chapters: Array.from({ length: n }, (_, i) => ({
+        title: `Part ${i + 1}`,
+        summary: `Fox does thing number ${i + 1} and learns something kind.`,
+        ...(branching ? { choices: choices(i + 1), ending: choices(i + 1).length ? '' : 'happy: the fox sleeps' } : {})
+      })),
       characters: [{ name: 'Fox', description: 'soft-spoken and sleepy', voice: 'whispers, short sentences' }],
       places: [{ name: 'Hay Barn', description: 'warm and dim' }],
       threads: o.extraThread ? ['Who left the lantern in the barn?', 'What is the fox hiding?'] : ['Who left the lantern in the barn?'],

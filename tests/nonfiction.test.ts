@@ -363,5 +363,6 @@ describe('seed files of the non-fiction variant', () => {
     expect(rows.find((r) => r.id === 'his-books-and-printing')).toMatchObject({ kind: 'nonfiction', section: 'History' })
     expect(rows.filter((r) => r.kind === 'visual-novel').every((r) => r.section === 'Visual Novels')).toBe(true)
     expect(rows.filter((r) => r.kind === 'visual-novel').length).toBeGreaterThanOrEqual(5)
+    for (const kind of ['juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction']) expect(rows.filter((r) => r.kind === kind).length, kind).toBeGreaterThanOrEqual(5)
   })
 })

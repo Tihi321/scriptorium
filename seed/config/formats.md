@@ -112,6 +112,88 @@ formats:
       in brackets when it matters. Most of the book is dialogue: every main character needs a distinct voice, and the story moves
       through what people say and do on screen. Short present-tense narration, three to six scenes per chapter, and each chapter ends
       on a moment that makes the reader want the next one. The story is linear, with no player choices. The topic sets the genre.
+  - id: choice-visual-novel
+    name: Visual novel with choices
+    enabled: true
+    script: true
+    choices: true
+    kinds: [visual-novel]
+    juvenile: false
+    age_band: null
+    words: [10000, 30000]
+    chapters: [8, 16]
+    read_aloud: false
+    guidance: |
+      A visual novel with choices, written as a script like the linear visual novel: SCENE lines, short present-tense narration,
+      ON SCREEN lines and short speaker lines with expressions. At the end of some chapters the reader decides what the main
+      character does, and each choice leads to a different chapter, so the story branches and has several endings. The choices are
+      real decisions about people (whom to trust, whom to help, what to say), each with its own consequences. Every path from the
+      first chapter to an ending is a complete story with its own climax. The topic sets the genre.
+  - id: gamebook
+    name: Choose-your-path book
+    enabled: true
+    choices: true
+    kinds: [interactive-fiction]
+    juvenile: false
+    age_band: null
+    words: [10000, 30000]
+    chapters: [10, 20]
+    read_aloud: false
+    guidance: |
+      A choose-your-path book in prose, written in the second person and the present tense ("You push the door open"). The reader is
+      the hero. At the end of most chapters the reader picks what to do next, and each choice leads to a different chapter, so the
+      book has several paths and several endings: triumphant, bittersweet and a few that end the adventure early. Short, vivid
+      chapters full of sensory detail and tension. Choices are concrete actions with real stakes, never a choice between doing
+      something and doing nothing. The topic sets the genre.
+  - id: kids-visual-story
+    name: Visual story for children
+    enabled: true
+    script: true
+    kinds: [juvenile-visual-novel]
+    juvenile: true
+    age_band: "6-9"
+    words: [2000, 6000]
+    chapters: [3, 6]
+    read_aloud: false
+    guidance: |
+      A visual story for children aged six to nine, written as a visual novel script: SCENE lines, one or two short lines of
+      narration about what the child sees, ON SCREEN lines and short speaker lines with simple expressions (happy, surprised, sad,
+      curious). Bright, friendly places and characters a child can draw. Simple words, short sentences, lots of dialogue, humour
+      and warmth. Gentle stakes only: nothing frightening, nobody gets hurt, every problem is solved kindly. Two or three scenes per
+      chapter. The story is linear, with no choices.
+  - id: kids-choice-visual-story
+    name: Visual story with choices for children
+    enabled: true
+    script: true
+    choices: true
+    kinds: [juvenile-visual-novel]
+    juvenile: true
+    age_band: "6-9"
+    words: [3000, 8000]
+    chapters: [6, 10]
+    read_aloud: false
+    guidance: |
+      A visual story with choices for children aged six to nine, written as a visual novel script: SCENE lines, short narration,
+      ON SCREEN lines and short speaker lines with simple expressions. At the end of some chapters the child decides what the
+      hero does next (which path to take, whom to ask for help, what to try), and each choice leads to a different chapter.
+      Simple words, short sentences, bright places, humour and warmth. Every ending is happy or gently funny: no bad or scary
+      endings, nobody gets hurt, and a different choice simply leads to a different adventure. Two or three scenes per chapter.
+  - id: kids-choice-book
+    name: Choose-your-path book for children
+    enabled: true
+    juvenile: true
+    choices: true
+    kinds: [juvenile-interactive-fiction]
+    age_band: "7-10"
+    words: [3000, 9000]
+    chapters: [7, 12]
+    read_aloud: false
+    guidance: |
+      A choose-your-path book for children aged seven to ten, in the second person and the present tense ("You open the little
+      green door"). The child is the hero and decides what happens at the end of most chapters; each choice leads to a different
+      chapter. Short chapters, simple words, vivid pictures, humour and warmth. Choices are fun and clear (the cave or the
+      river, ask the owl or follow the footprints). Every ending is happy, funny or surprising in a nice way: no bad or scary
+      endings, and nobody gets hurt.
   - id: nonfiction-short
     name: Short non-fiction book
     enabled: true
@@ -154,7 +236,8 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `long`: use the book memory (see below). `max_rounds`: rewrite rounds for this format (default: `quality.max_rounds`).
 - `nonfiction`: the non-fiction variant. Research for every chapter (required), a fact base in `factbase/` instead of a story bible, non-fiction prompts (`*_nf.md` in `prompts/`), the fact-checker in place of the continuity checker (it must pass), and a references section at the end of the EPUB and the reader. Non-fiction formats are short books (not `long`).
 - `research_prep`: the writer lists research questions before each chapter (one short model call per chapter, answered by the researcher before the chapter is written). `false` by default; books whose genre or topic contains a word of `research_prep_genres` in `config/factory.md` get it too, whatever the format says.
-- `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel format is for topics of kind `visual-novel`, so it is never picked for an ordinary fiction topic.
+- `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel formats are for topics of kind `visual-novel` and `juvenile-visual-novel`, so they are never picked for an ordinary fiction topic.
+- `choices`: a story with choices (a choose-your-path book or a visual novel with choices). The architect plans a map of chapters: some end with two or three choices, each leading to a later chapter, and the story has at least two endings. The writer sees only the chapters that can lead to the one it writes, the reviewers read every path, and the EPUB and the reader end those chapters with links to the chapters the choices lead to ("The End" on an ending). The extra instructions are in `prompts/_choices.md`. The choice formats are for topics of kind `interactive-fiction`, `juvenile-interactive-fiction`, `visual-novel` and `juvenile-visual-novel`. Short formats only (not `long`).
 - `reviewers`: optional list of reviewer roles to override the default set. The default set is continuity, developmental, line, copy, beta reader and originality, plus child safety for juvenile formats and read-aloud for read-aloud formats.
 
 Middle grade, novella and novel are long formats (`long: true`): they use the book memory (structured bible, chapter and act summaries, a search index), are written chapter by chapter with a continuity check each, and are reviewed one act at a time. They get one rewrite round (`max_rounds: 1`) because every round costs a lot. The editor-in-chief picks the length by genre.

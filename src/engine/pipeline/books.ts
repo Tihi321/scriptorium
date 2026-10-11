@@ -8,6 +8,8 @@ import { atomicWrite, readMd, writeMd } from '../store/atomic'
 import { buildEpub } from '../publish/epub'
 import { writeReaderDir } from '../publish/reader'
 import { buildReferences, FactBase } from '../memory/factbase'
+import { endLine, isBranching } from './branches'
+import type { Choice } from './branches'
 
 export const MADE_COLUMNS = ['job', 'task', 'role', 'unit', 'round', 'agent', 'model', 'prompt_version', 'cost_usd', 'ms']
 
@@ -52,6 +54,10 @@ export interface OutlineChapter {
   n: number
   title: string
   summary: string
+  /** A story with choices: the choices that end this chapter (none for an ending). */
+  choices?: Choice[]
+  /** A story with choices: how this ending ends. */
+  ending?: string
 }
 
 export class BookStore {
@@ -205,7 +211,13 @@ export class BookStore {
     if (t === null) return null
     const doc = parseMd(t)
     const raw = Array.isArray(doc.data.chapters) ? (doc.data.chapters as Record<string, unknown>[]) : []
-    const chapters = raw.map((c, i) => ({ n: Number(c.n ?? i + 1), title: String(c.title ?? `Chapter ${i + 1}`), summary: String(c.summary ?? '') }))
+    const chapters = raw.map((c, i): OutlineChapter => ({
+      n: Number(c.n ?? i + 1),
+      title: String(c.title ?? `Chapter ${i + 1}`),
+      summary: String(c.summary ?? ''),
+      ...(Array.isArray(c.choices) ? { choices: (c.choices as Record<string, unknown>[]).map((ch) => ({ text: String(ch.text ?? ''), to: Number(ch.to) })) } : {}),
+      ...(typeof c.ending === 'string' ? { ending: c.ending } : {})
+    }))
     return { chapters, body: doc.body }
   }
 
@@ -259,7 +271,27 @@ export class BookStore {
   async fullText(slug: string): Promise<string> {
     const chapters = await this.chapters(slug)
     if (chapters.length === 1) return `# ${chapters[0]!.title}\n\n${chapters[0]!.body}`
-    return chapters.map((c) => `## Chapter ${c.n}: ${c.title}\n\n${c.body}`).join('\n\n')
+    // a story with choices: after each chapter, where its choices lead (or that it is an ending)
+    const map = await this.branchMap(slug)
+    return chapters.map((c) => `## Chapter ${c.n}: ${c.title}\n\n${c.body}${map?.has(c.n) ? `\n\n[${endLine(map.get(c.n)!)}]` : ''}`).join('\n\n')
+  }
+
+  /** The outline chapters of a story with choices by number, or null for a book read straight through. */
+  async branchMap(slug: string): Promise<Map<number, OutlineChapter> | null> {
+    const outline = await this.outline(slug)
+    return outline && isBranching(outline.chapters) ? new Map(outline.chapters.map((c) => [c.n, c])) : null
+  }
+
+  /** The choices (`to` is the 1-based position of the target chapter) or the ending of each chapter, for the EPUB and the reader. */
+  private async choiceLinks(slug: string, chapters: ChapterFile[]): Promise<(c: ChapterFile) => { choices?: { text: string; to: number }[]; ending?: string }> {
+    const map = await this.branchMap(slug)
+    if (!map) return () => ({})
+    const pos = new Map(chapters.map((c, i) => [c.n, i + 1]))
+    return (c) => {
+      const o = map.get(c.n)
+      const choices = (o?.choices ?? []).filter((ch) => pos.has(ch.to)).map((ch) => ({ text: ch.text, to: pos.get(ch.to)! }))
+      return choices.length ? { choices } : { ending: o?.ending || 'the end' }
+    }
   }
 
   /** The references section of a non-fiction book (the sources its chapters cite), or null. */
@@ -277,6 +309,7 @@ export class BookStore {
     const chapters = [...(await this.chapters(slug))]
     const refs = await this.references(slug)
     const script = d.script === true
+    const links = await this.choiceLinks(slug, chapters)
     const cover = this.file(slug, 'out', 'cover.png')
     const dir = this.file(slug, 'out', 'reader')
     await writeReaderDir(dir, {
@@ -285,7 +318,7 @@ export class BookStore {
       blurb: typeof d.blurb === 'string' ? d.blurb : undefined,
       year: Number(d.year ?? new Date().getFullYear()),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script, ...links(c) })), ...(refs ? [refs] : [])],
       coverPngPath: await fs.access(cover).then(() => cover, () => undefined)
     })
     return dir
@@ -298,6 +331,7 @@ export class BookStore {
     const d = book.data
     const chapters = await this.chapters(slug)
     const refs = await this.references(slug)
+    const links = await this.choiceLinks(slug, chapters)
     let coverPng: Uint8Array | undefined
     try {
       coverPng = await fs.readFile(this.file(slug, 'out', 'cover.png'))
@@ -319,7 +353,7 @@ export class BookStore {
       year: Number(d.year ?? new Date().getFullYear()),
       modified: new Date(),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, ...links(c) })), ...(refs ? [refs] : [])],
       coverPng
     })
     const out = this.file(slug, 'out', `${slug}.epub`)

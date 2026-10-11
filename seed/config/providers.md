@@ -176,7 +176,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing and never count against the caps. Their tokens and time are still recorded.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
-- `concurrency`: how many requests may run at once. LM Studio is 1 because all its requests share one GPU. Strata is 4 because its configs (`D:\Strata\strata-*.json`) have `"parallel": 4`: it decodes up to four requests together in batch slots. Keep the two numbers equal.
+- `concurrency`: how many requests may run at once. LM Studio is 1 because all its requests share one GPU. Strata is 4 because the IQ2_XS and coder configs (`D:\Strata\strata-iq2_xs.json`, `strata-coder-iq1_m.json`) have `"parallel": 4`: it decodes up to four requests together in batch slots. Keep the two numbers equal: IQ3_S runs one request at a time, so set Strata to 1 when you run it.
 - `rpm`, `tpm`: optional rate limits (requests and tokens per minute). Only `rpm` is enforced for now.
 - `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here.
 - `json_schema`: `true` (the default) sends the JSON schema of a structured answer as `response_format`. Set `false` for a server that answers a bad JSON reply with an error instead of constraining it. The prompt then asks for the JSON shape and the engine checks it and repairs it.
@@ -185,7 +185,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 
 Strata (`D:\Strata`) is a fast local server for Qwen3.8-Flash-Next with an OpenAI-style API. It is the first choice in the roles that used LM Studio. Scriptorium only connects to it, you start it:
 
-- Four agents at once: every Strata config (IQ3_S, IQ2_XS and the coder IQ1_M) has `"parallel": 4` and `--batch-mtp` (MTP drafts in the batch slots too). Each slot takes about 1.8 GB of VRAM from the expert cache; all three quants leave room for four. A request alone still runs on the fast solo path.
+- Four agents at once: IQ2_XS and the coder IQ1_M have `"parallel": 4` (without `--batch-mtp`, which was slower). Measured on 2026-10-11 (2.5K-token prompt, 600 tokens out): one request about 28 tok/s, four at once about 41 tok/s in total (about 10 each); solo four in a queue about 29 tok/s; with `--batch-mtp` about 31. IQ3_S stays solo (one request at a time). Each slot takes about 1.8 GB of VRAM from the expert cache.
 - Run `D:\Strata\run-iq3_s.bat` (or `run-iq2_xs.bat`). Loading the model takes 1 to 3 minutes. Check `curl http://127.0.0.1:8080/health` and wait for `loaded: true`. Until then requests fail, and the router falls back to the next model in the role.
 - It serves one model per process, and every quant uses port 8080. It ignores the `model` field of a request, so the two ids above (no thinking, and thinking on `low`) only differ in `extra_body`. They stand in for the 27B editors and the 35B checks.
 - The IQ3_S quant takes about 84 GB, so it does not fit beside the big LM Studio models: keep only the nomic embedding model loaded in LM Studio while it runs. The IQ2_XS quant (`run-iq2_xs.bat`) takes about 48 GB, at some cost in quality. Both answer to the same model ids, so `config/roles.md` stays the same whichever you start.
