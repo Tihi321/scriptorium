@@ -12,7 +12,7 @@ import {
 import { agentsPerBook, countByProvider, countByRole, countStates, createOfficeStore, isDimmed } from '../../src/renderer/store/store'
 import { jobToText, mergeJobs, parseLog } from '../../src/renderer/store/logModel'
 import { buildShelves, emptiestFirst, groupTopics } from '../../src/renderer/store/shelves'
-import { breakSpot, placeDesks, roomForRole } from '../../src/renderer/office/layout'
+import { ROOMS, breakCapacity, breakSpot, placeDesks, roomForRole } from '../../src/renderer/office/layout'
 
 const T0 = 1_000_000
 
@@ -335,6 +335,18 @@ describe('office layout', () => {
     const spots = new Set([...placed.values()].map((p) => `${Math.round(p.x)},${Math.round(p.y)}`))
     expect(spots.size).toBe(12)
     expect(breakSpot(0)).not.toEqual(breakSpot(1))
+    // the break room holds every starter agent idle at once, each on its own spot inside the room
+    const room = ROOMS.find((r) => r.id === 'break')!
+    expect(breakCapacity()).toBeGreaterThanOrEqual(35)
+    const idle = Array.from({ length: breakCapacity() }, (_, i) => breakSpot(i))
+    expect(new Set(idle.map((s) => `${Math.round(s.x)},${Math.round(s.y)}`)).size).toBe(idle.length)
+    for (const s of idle) {
+      expect(s.x - 12).toBeGreaterThanOrEqual(room.x)
+      expect(s.x + 12).toBeLessThanOrEqual(room.x + room.w)
+      expect(s.y - 30).toBeGreaterThanOrEqual(room.y)
+      expect(s.y + 13).toBeLessThanOrEqual(room.y + room.h) // the role label under the feet
+    }
+    expect(breakSpot(breakCapacity())).not.toEqual(breakSpot(0))
   })
 })
 

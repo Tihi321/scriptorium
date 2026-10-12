@@ -1,6 +1,6 @@
 /** Where rooms and desks are. Pure data and arithmetic, so it can be tested without Phaser. */
 
-export const WORLD = { w: 960, h: 600 }
+export const WORLD = { w: 960, h: 650 }
 
 /** Vertical offsets inside a desk cell. */
 export const OFF = { bubbleBottom: 12, feet: 44, deskTop: 31, role: 64, badge: 73, tag: 82 }
@@ -27,6 +27,8 @@ export interface Room {
 }
 
 const ROW_H = 200
+/** The bottom row is taller: the break room holds every idle agent. */
+const BOTTOM_H = 250
 
 export const ROOMS: Room[] = [
   { id: 'idea', label: 'IDEA ROOM', x: 0, y: 0, w: 192, h: ROW_H, floorA: 0x6b5d8f, floorB: 0x64568a, accent: 0xb9a6f0, desks: true },
@@ -35,9 +37,9 @@ export const ROOMS: Room[] = [
   { id: 'archive', label: 'ARCHIVE', x: 0, y: ROW_H, w: 384, h: ROW_H, floorA: 0x8a7458, floorB: 0x826c51, accent: 0xe6c79a, desks: true },
   { id: 'research', label: 'RESEARCH LIBRARY', x: 384, y: ROW_H, w: 192, h: ROW_H, floorA: 0x7a6a8a, floorB: 0x726283, accent: 0xd5b8ee, desks: true },
   { id: 'children', label: "CHILDREN'S CORNER", x: 576, y: ROW_H, w: 384, h: ROW_H, floorA: 0xc08a6a, floorB: 0xb88263, accent: 0xffd1a8, desks: true },
-  { id: 'print', label: 'PRINT ROOM', x: 0, y: ROW_H * 2, w: 288, h: ROW_H, floorA: 0x6f7f8c, floorB: 0x677784, accent: 0xb7cbdb, desks: true },
-  { id: 'break', label: 'BREAK ROOM', x: 288, y: ROW_H * 2, w: 480, h: ROW_H, floorA: 0x7b9a6a, floorB: 0x739263, accent: 0xc9eab3, desks: false },
-  { id: 'library', label: 'LIBRARY', x: 768, y: ROW_H * 2, w: 192, h: ROW_H, floorA: 0x6a5446, floorB: 0x634d40, accent: 0xd9b48f, desks: false }
+  { id: 'print', label: 'PRINT ROOM', x: 0, y: ROW_H * 2, w: 192, h: BOTTOM_H, floorA: 0x6f7f8c, floorB: 0x677784, accent: 0xb7cbdb, desks: true },
+  { id: 'break', label: 'BREAK ROOM', x: 192, y: ROW_H * 2, w: 576, h: BOTTOM_H, floorA: 0x7b9a6a, floorB: 0x739263, accent: 0xc9eab3, desks: false },
+  { id: 'library', label: 'LIBRARY', x: 768, y: ROW_H * 2, w: 192, h: BOTTOM_H, floorA: 0x6a5446, floorB: 0x634d40, accent: 0xd9b48f, desks: false }
 ]
 
 export function roomById(id: RoomId): Room {
@@ -110,18 +112,47 @@ export function placeDesks(agents: { id: string; role: string }[]): Map<string, 
   return out
 }
 
-/** Standing spots in the break room for idle agents (feet position). */
-export function breakSpot(index: number): { x: number; y: number } {
+/** Feet heights of the break room's rows, from the room's top: five rows between the sofas and the bottom wall, each with room for the person and the role label under it. */
+const BREAK_ROWS = [68, 110, 152, 194, 236]
+/** Width of one standing spot: room for the longest role label. */
+const BREAK_SPOT_W = 70
+let breakSpots: { x: number; y: number }[] | undefined
+
+/** Every standing spot in the break room, row by row, leaving the front door free. */
+function allBreakSpots(): { x: number; y: number }[] {
+  if (breakSpots) return breakSpots
   const room = roomById('break')
-  const perRow = Math.max(1, Math.floor((room.w - 16) / CELL.w))
-  const col = index % perRow
-  const row = Math.floor(index / perRow)
+  const perRow = Math.max(1, Math.floor((room.w - 16) / BREAK_SPOT_W))
   const spacing = (room.w - 16) / perRow
-  return { x: room.x + 8 + spacing * (col + 0.5), y: room.y + 84 + row * 44 }
+  breakSpots = []
+  for (const dy of BREAK_ROWS) {
+    for (let col = 0; col < perRow; col++) {
+      const spot = { x: room.x + 8 + spacing * (col + 0.5), y: room.y + dy }
+      if (Math.abs(spot.x - DOOR.x) < 30 && spot.y > DOOR.y - 40) continue
+      breakSpots.push(spot)
+    }
+  }
+  return breakSpots
+}
+
+/**
+ * Standing spot in the break room for an idle agent (feet position). The spots stay inside the room; when there are
+ * more idle agents than spots, the extra ones stand a little offset on the spots from the start.
+ */
+export function breakSpot(index: number): { x: number; y: number } {
+  const spots = allBreakSpots()
+  const spot = spots[index % spots.length]!
+  const lap = Math.floor(index / spots.length)
+  return { x: spot.x + lap * 8, y: spot.y - lap * 4 }
+}
+
+/** How many idle agents the break room holds without two standing on one spot. */
+export function breakCapacity(): number {
+  return allBreakSpots().length
 }
 
 /** The front door: handovers from `you` or the engine start here. */
-export const DOOR = { x: 528, y: ROW_H * 3 - 22 }
+export const DOOR = { x: 528, y: WORLD.h - 22 }
 
 export function isRequesterOutside(id: string): boolean {
   return id === 'you' || id === 'engine' || id === 'user'

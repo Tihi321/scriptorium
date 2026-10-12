@@ -166,6 +166,8 @@ class Actor {
     }
     this.tag.setPosition(cx, placement.y + OFF.tag)
     this.badge.setVisible(!away)
+    // the break room's rows are closer than the person and its desk labels: a shorter hit area keeps the agent below from taking the click
+    if (this.zone.height !== (away ? 40 : 56)) this.zone.setSize(40, away ? 40 : 56)
 
     // bubble text
     const s = view.state
@@ -476,8 +478,8 @@ export class OfficeScene extends Phaser.Scene {
     this.deco('sofaBlue', br.x + 70, br.y + 38, 1.5, 2)
     this.deco('sofaOrange', br.x + 160, br.y + 38, 1.5, 2)
     this.deco('sofaGreen', br.x + 250, br.y + 38, 1.5, 2)
-    this.deco('vending1', br.x + 390, br.y + 52, 1.2, 2)
-    this.deco('vending2', br.x + 432, br.y + 50, 1.2, 2)
+    this.deco('vending1', br.x + br.w - 90, br.y + 52, 1.2, 2)
+    this.deco('vending2', br.x + br.w - 48, br.y + 50, 1.2, 2)
     this.deco('clock', br.x + 330, br.y + 28, 1.2, 2)
     this.deco('plant', br.x + br.w - 10, br.y + br.h - 6, 1, 2)
     this.deco('door', DOOR.x, DOOR.y + 22, 1, 2)
