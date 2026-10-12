@@ -98,7 +98,7 @@ describe('bedtime story, mock e2e', () => {
 
     expect(data.length_gate).toMatchObject({ status: 'ok' })
     expect(data).toMatchObject({ format: 'bedtime-toddler', topic: 'jfic-bedtime-and-dreams', age_band: '2-4', round: 0, stage: 'published', title: 'The Sleepy Fox', cover_png: 'pending' })
-    expect(data.author).toBe(data.writer_agent === 'writer-mara-quill' ? 'Mara Quill' : 'Tobias Wren')
+    expect(data.author).toBe({ 'writer-elena-rook': 'Elena Rook', 'writer-mara-quill': 'Mara Quill', 'writer-tobias-wren': 'Tobias Wren' }[data.writer_agent as string])
     expect(data.writer_family).toBe('wfam')
     expect(data.score).toBeGreaterThanOrEqual(7)
     expect(data.uuid).toMatch(/^[0-9a-f-]{36}$/)
@@ -119,7 +119,7 @@ describe('bedtime story, mock e2e', () => {
     expect((await readdir(dirOf('reviews'))).sort()).toEqual(
       ['child-safety-reviewer', 'continuity-checker', 'copy-editor', 'beta-reader', 'developmental-editor', 'line-editor', 'originality-checker', 'read-aloud-reviewer'].sort().map((r) => `book-${r}-r0.md`).sort()
     )
-    expect(await readFile(dirOf('out', 'cover.html'), 'utf8')).toMatch(/The Sleepy Fox[\s\S]*(Mara Quill|Tobias Wren)[\s\S]*Bedtime/)
+    expect(await readFile(dirOf('out', 'cover.html'), 'utf8')).toMatch(/The Sleepy Fox[\s\S]*(Elena Rook|Mara Quill|Tobias Wren)[\s\S]*Bedtime/)
 
     await checkEpub(dirOf('out', `${slug}.epub`), { chapters: 1, title: 'The Sleepy Fox', author: data.author as string })
 

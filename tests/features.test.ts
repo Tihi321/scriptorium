@@ -53,7 +53,7 @@ describe('snapshot', () => {
   it('has agents with resolved models, books, topics, models, role defaults and settings', async () => {
     const snap: SnapshotEvent = await env.engine.snapshot()
     expect(snap.paused).toBe(false)
-    expect(snap.agents.length).toBe(17)
+    expect(snap.agents.length).toBe(27)
     const writer = snap.agents.find((a) => a.role === 'writer')!
     expect(writer).toMatchObject({ model: null, resolvedModel: 'w/writer-model' })
     expect(snap.agents.find((a) => a.role === 'line-editor')!.resolvedModel).toBe('r/review-model')

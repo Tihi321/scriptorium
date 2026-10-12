@@ -142,7 +142,9 @@ describe('a 3-act novel on the mock provider', () => {
   })
 
   it('the whole-book reviews were read one act at a time, with the repetition report going to the line editor', async () => {
-    const log = await readFile(path.join(env.dir, 'logs', 'agents', 'line-editor-otto-hale.md'), 'utf8').catch(() => '')
+    const logsDir = path.join(env.dir, 'logs', 'agents')
+    const lineEditors = (await readdir(logsDir)).filter((f) => f.startsWith('line-editor-'))
+    const log = (await Promise.all(lineEditors.map((f) => readFile(path.join(logsDir, f), 'utf8')))).join('\n')
     expect(log).toContain('act 1 in full, summaries of the other acts')
     const jobs = await readdir(path.join(env.dir, 'jobs', 'done'))
     expect(jobs.filter((f) => f.includes('--review--line-editor--act')).length).toBe(3)

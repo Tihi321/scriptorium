@@ -40,18 +40,28 @@ const STAFF: [string, string, string, string][] = [
   ['architect', 'Ada Thorne', 'architect-ada-thorne', DS],
   ['writer', 'Mara Quill', 'writer-mara-quill', DS],
   ['writer', 'Tobias Wren', 'writer-tobias-wren', DS],
+  ['writer', 'Elena Rook', 'writer-elena-rook', DS],
   ['publisher', 'Clara Ostrow', 'publisher-clara-ostrow', DS],
   ['developmental-editor', 'Rosa Delmar', 'developmental-editor-rosa-delmar', QWEN27],
+  ['developmental-editor', 'Nadia Ferris', 'developmental-editor-nadia-ferris', QWEN27],
   ['line-editor', 'Otto Hale', 'line-editor-otto-hale', QWEN27],
+  ['line-editor', 'Lena Holt', 'line-editor-lena-holt', QWEN27],
   ['copy-editor', 'June Pryor', 'copy-editor-june-pryor', QWEN27],
+  ['copy-editor', 'Arthur Penn', 'copy-editor-arthur-penn', QWEN27],
   ['beta-reader', 'Sam Okafor', 'beta-reader-sam-okafor', QWEN27],
+  ['beta-reader', 'Priya Nair', 'beta-reader-priya-nair', QWEN27],
   ['child-safety-reviewer', 'Hazel Moore', 'child-safety-reviewer-hazel-moore', QWEN27],
   ['read-aloud-reviewer', 'Percy Lane', 'read-aloud-reviewer-percy-lane', QWEN27],
   ['continuity-checker', 'Ingrid Vale', 'continuity-checker-ingrid-vale', QWEN35],
+  ['continuity-checker', 'Theo Marsh', 'continuity-checker-theo-marsh', QWEN35],
+  ['continuity-checker', 'Anya Kerr', 'continuity-checker-anya-kerr', QWEN35],
   ['originality-checker', 'Vera Lindqvist', 'originality-checker-vera-lindqvist', QWEN35],
   ['fact-checker', 'Leo Brandt', 'fact-checker-leo-brandt', QWEN35],
   ['researcher', 'Noor Castell', 'researcher-noor-castell', QWEN35],
-  ['archivist', 'Milo Grant', 'archivist-milo-grant', QWEN35]
+  ['researcher', 'Hugo Sterne', 'researcher-hugo-sterne', QWEN35],
+  ['archivist', 'Milo Grant', 'archivist-milo-grant', QWEN35],
+  ['archivist', 'Ruth Calder', 'archivist-ruth-calder', QWEN35],
+  ['archivist', 'Owen Blake', 'archivist-owen-blake', QWEN35]
 ]
 
 const TASKS: Record<string, string[]> = {

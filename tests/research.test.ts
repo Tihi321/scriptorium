@@ -377,7 +377,7 @@ describe('questions from all five sources, in a short story', () => {
     expect(await asker(Q.plan, slug)).toBe('architect-ada-thorne')
     expect(String(await asker(Q.prep, slug))).toMatch(/^writer-/)
     expect(String(await asker(Q.marker, slug))).toMatch(/^writer-/)
-    expect(await asker(Q.review, slug)).toBe('line-editor-otto-hale')
+    expect(String(await asker(Q.review, slug))).toMatch(/^line-editor-/)
     expect(await asker(Q.youBook, slug)).toBe('you')
     expect(await asker(Q.youShared, null)).toBe('you')
     const job = await doneJob(researchJobId(slug, Q.marker))
@@ -390,12 +390,12 @@ describe('questions from all five sources, in a short story', () => {
   })
 
   it('every request shows as a handover line from the asker to the researcher, with the question as its label', () => {
-    const lines = env.events.filter((e) => e.type === 'handover' && e.to === 'researcher-noor-castell' && !e.done)
+    const lines = env.events.filter((e) => e.type === 'handover' && e.to.startsWith('researcher-') && !e.done)
     const label = (q: string) => lines.find((e) => e.type === 'handover' && e.label === q)
     expect(label(Q.plan)).toMatchObject({ from: 'architect-ada-thorne' })
     expect(label(Q.prep)).toMatchObject({ from: expect.stringMatching(/^writer-/) })
     expect(label(Q.marker)).toMatchObject({ from: expect.stringMatching(/^writer-/) })
-    expect(label(Q.review)).toMatchObject({ from: 'line-editor-otto-hale' })
+    expect(label(Q.review)).toMatchObject({ from: expect.stringMatching(/^line-editor-/) })
     expect(label(Q.youBook)).toMatchObject({ from: 'you' })
     // and the line fades when the job is done
     expect(env.events.filter((e) => e.type === 'handover' && e.label === Q.plan && e.done)).toHaveLength(1)
