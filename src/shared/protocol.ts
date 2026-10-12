@@ -16,6 +16,14 @@ export interface ModelSummary {
   enabled: boolean
 }
 
+/** A local model server the engine checks (Strata, LM Studio): running or not, and how many requests it serves at once. */
+export interface ServerStatus {
+  /** Provider id: `strata`, `lmstudio`. */
+  id: string
+  down: boolean
+  slots: number
+}
+
 export interface AgentSummary {
   id: string
   name: string
@@ -117,6 +125,7 @@ export interface SnapshotEvent {
   models: ModelSummary[]
   /** Role -> `provider/model` of the role default (first in the role's list). */
   roleDefaults: Record<string, string>
+  servers: ServerStatus[]
   spend: { today: number; month: number; dailyCap: number; monthlyCap: number }
   running: { jobId: string; agent: string }[]
   settings: SettingsSummary
@@ -151,7 +160,11 @@ export type EngineEvent =
   | { type: 'agent.updated'; agent: AgentSummary }
   | { type: 'factory.paused'; paused: boolean }
   | { type: 'job.started'; jobId: string; agent: string; task: string; book?: string; model?: string }
+  /** The job moved to another model (a fallback after a failure), so the office shows the one answering now. */
+  | { type: 'job.model'; jobId: string; agent: string; model: string }
   | { type: 'job.token'; jobId: string; agent: string; text: string }
+  /** A local model server went down, came back or changed its slot count. */
+  | { type: 'servers'; servers: ServerStatus[] }
   | { type: 'job.done'; jobId: string; agent: string; ok: boolean; result?: string; error?: string }
   | { type: 'handover'; from: string; to: string; label: string; jobId?: string; done?: boolean }
   | {
@@ -209,6 +222,8 @@ export type Command =
   | { type: 'setSecret'; name: string; value: string }
   | { type: 'snapshot' }
   | { type: 'ping'; id?: string }
+  /** Check the local model servers now (Strata was just started), instead of at the next 10-second check. */
+  | { type: 'checkServers' }
   | { type: 'coverRendered'; book: string; ok: boolean; error?: string }
 
 export type CommandType = Command['type']
@@ -225,6 +240,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   stopNow: true,
   setModel: true,
   askResearcher: true,
+  checkServers: true,
   rate: true,
   sendToKindle: true,
   setTopicActive: true,

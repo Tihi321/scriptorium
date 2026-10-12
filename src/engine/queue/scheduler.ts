@@ -62,6 +62,8 @@ interface RunningJob {
   controller: AbortController
   reason?: AbortReason
   done: Promise<void>
+  /** Providers whose slot the job holds from its start: the first model's, until the job falls back to another provider. */
+  held: Set<string>
 }
 
 interface AgentRuntime {
@@ -332,13 +334,13 @@ export class Scheduler {
   private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo): void {
     const rt = this.runtimeFor(agent.id)
     const controller = new AbortController()
-    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve() }
+    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]) }
     this.running.set(job.id, rj)
     rt.running.set(job.id, rj)
     rj.done = this.run(rj, agent, models, leased).catch((err) => { console.error('[engine] job runner failed:', err) }).finally(() => {
       this.running.delete(job.id)
       rt.running.delete(job.id)
-      this.d.router.limiter.release(leased.provider)
+      if (rj.held.delete(leased.provider.id)) this.d.router.limiter.release(leased.provider)
       for (const l of job.data.locks) this.locks.delete(l)
       void this.afterJob(rt, agent).finally(() => this.kick())
     })
@@ -370,7 +372,6 @@ export class Scheduler {
     const usedModels: string[] = []
     const totals = { calls: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, costUsd: 0 }
     const logAll = (text: string) => logs.both(agent.id, j.book, text)
-    const releaseHeld = new Set([leased.provider.id])
 
     this.setState(rt, agent, handler.opts.reviewing ? 'reviewing' : 'working', taskLabel, j)
     emit({ type: 'job.started', jobId: j.id, agent: agent.id, task: taskLabel, book: j.book ?? undefined, model: leased.ref })
@@ -410,10 +411,18 @@ export class Scheduler {
             signal: rj.controller.signal,
             meta: { role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined }
           },
-          releaseHeld
+          rj.held
         )) {
           if (ev.type === 'attempt') {
             text = ''
+            if (ev.model.ref !== (usedModels[usedModels.length - 1] ?? leased.ref)) {
+              emit({ type: 'job.model', jobId: j.id, agent: agent.id, model: ev.model.ref })
+            }
+            // fell back to another provider: give the first one's slot back, so other agents don't wait for a server this job no longer uses
+            if (ev.model.provider.id !== leased.provider.id && rj.held.delete(leased.provider.id)) {
+              this.d.router.limiter.release(leased.provider)
+              this.kick()
+            }
             usedModels.push(ev.model.ref)
             logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
           } else if (ev.type === 'delta') {

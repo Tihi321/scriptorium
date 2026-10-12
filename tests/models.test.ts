@@ -48,22 +48,22 @@ describe('seed configs', () => {
     const flash = registry.getModel('deepseek/deepseek-flash')!
     expect(flash).toMatchObject({ priceIn: 0.3, priceOut: 1.2, priceCachedIn: 0.006, family: 'deepseek' })
     expect(isPaidModel(flash)).toBe(true)
-    expect(isPaidModel(registry.getModel('lmstudio/nvidia/nemotron-3-nano-4b')!)).toBe(false)
+    expect(isPaidModel(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')!)).toBe(false)
     for (const role of Object.keys(registry.roles.roles)) for (const ref of registry.roleModelRefs(role)) expect(registry.getModel(ref), ref).toBeTruthy()
     // the seed roles use the aliases, resolved to the settings defaults
     expect(registry.roles.roles.writer?.models).toEqual(['paid', 'strata', 'lmstudio'])
-    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/google/gemma-4-e4b'])
-    expect(registry.roleModelRefs('continuity-checker')).toEqual(['strata/qwen3.8-flash-next-low', 'lmstudio/google/gemma-4-e4b', 'deepseek/deepseek-flash'])
+    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'])
+    expect(registry.roleModelRefs('continuity-checker')).toEqual(['strata/qwen3.8-flash-next-low', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', 'deepseek/deepseek-flash'])
     expect(registry.providers.get('lmstudio')?.loadModels).toBe(true)
-    expect(registry.getModel('lmstudio/google/gemma-4-e4b')?.context).toBe(131072) // loaded with the settings' window
+    expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(131072) // loaded with the settings' window
     // the big Qwen models have their own load settings in providers.md
     expect(registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp')).toEqual({ parallel: 2, context: 65536, ttlMinutes: 60 })
-    expect(registry.loadConfigFor('lmstudio', 'google/gemma-4-e4b')).toEqual({ parallel: 4, context: 131072, ttlMinutes: 60 })
+    expect(registry.loadConfigFor('lmstudio', 'gemma-4-e4b-it-ultra-uncensored-heretic')).toEqual({ parallel: 4, context: 131072, ttlMinutes: 60 })
     // another default in the settings: the roles follow, and an agent override may be an alias too
     registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-pro', strata: 'strata/qwen3.8-flash-next', lmstudio: 'lmstudio/nail-qwen3.6-35b-a3b-mtp' }, lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
     await registry.load()
     expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'])
-    expect(registry.getModel('lmstudio/google/gemma-4-e4b')?.context).toBe(16384)
+    expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(16384)
     expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(65536) // its own load_context wins
     expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
     expect(Object.keys(registry.roles.roles)).toHaveLength(16)
@@ -102,6 +102,53 @@ describe('seed configs', () => {
     for (const c of await registry.syncServerSlots()) router.limiter.wakeAll(c.provider)
     await waiting
     expect(router.limiter.inFlight('strata')).toBe(2)
+  })
+
+  it('a server that does not answer is down: jobs skip it while another model is left, and use it again once it answers', async () => {
+    let strata: Record<string, unknown> | null = null // null: Strata is not started
+    const fetchImpl = (async (url: string) => {
+      const u = String(url)
+      if (u.includes(':8080')) {
+        if (!strata) throw new Error('connection refused')
+        return new Response(JSON.stringify(strata))
+      }
+      if (u.endsWith('/v1/status')) return new Response(JSON.stringify({ error: 'Unexpected endpoint or method. (GET /v1/status)' }))
+      return new Response(JSON.stringify({ models: [] })) // LM Studio runs
+    }) as unknown as typeof fetch
+    const registry = new ModelRegistry(dir, { keys: () => undefined, fetchImpl })
+    await registry.load()
+    const router = new ModelRouter(registry, undefined)
+    const refs = () => router.candidates('line-editor').map((m) => m.ref)
+    expect(refs()).toEqual(['strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']) // not asked yet
+    await registry.syncServerSlots()
+    expect(registry.providers.get('strata')!.down).toBe(true)
+    expect(registry.providers.get('lmstudio')!.down).toBe(false)
+    expect(refs()).toEqual(['lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'])
+    await registry.load() // a config reload keeps it
+    expect(refs()).toEqual(['lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'])
+    strata = { loaded: false, auto_load: false, concurrency: { serving: 1 } } // answers, but won't load its model for a request
+    await registry.syncServerSlots()
+    expect(registry.providers.get('strata')!.down).toBe(true)
+    strata = { loaded: true, auto_load: false, concurrency: { serving: 4 } }
+    await registry.syncServerSlots()
+    expect(refs()).toEqual(['strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'])
+  })
+
+  it('discovery adds the models LM Studio lists, except the ones discover_skip names, also after a reload', async () => {
+    const fetchImpl = (async (url: string) => {
+      const u = String(url)
+      if (!u.startsWith('http://localhost:1234')) throw new Error('not running')
+      if (u.endsWith('/v1/models')) return new Response(JSON.stringify({ data: [{ id: 'nail-qwen3.6-35b-a3b-mtp' }, { id: 'qwen3.8-27b-DFlash2' }, { id: 'some-new-model' }] }))
+      return new Response('{}')
+    }) as unknown as typeof fetch
+    const registry = new ModelRegistry(dir, { keys: () => undefined, fetchImpl })
+    await registry.load()
+    await registry.discover()
+    const lm = () => [...registry.models.keys()].filter((r) => r.startsWith('lmstudio/'))
+    expect(lm()).toContain('lmstudio/some-new-model')
+    expect(lm().some((r) => /dflash/i.test(r))).toBe(false)
+    await registry.load()
+    expect(lm()).toContain('lmstudio/some-new-model')
   })
 
   it('concurrency: auto for LM Studio adds up `parallel` of the loaded chat models', async () => {
@@ -189,6 +236,64 @@ describe('router', () => {
     expect(seen).toEqual(['x', 'x', 'y', 'z']) // x twice (one retry), y once (not retryable), then z
     expect(text).toBe('from z')
     expect(events.filter((e) => e.startsWith('attempt'))).toEqual(['attempt:a/x', 'attempt:a/x', 'attempt:b/y', 'attempt:c/z'])
+  })
+
+  it('skips a provider that went down after the job picked its models, unless it is the last one left', async () => {
+    const { registry, mock } = await registryWith({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }],
+      roles: { writer: ['a/x', 'b/y'] }
+    })
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      return 'ok'
+    })
+    const r = new ModelRouter(registry, undefined)
+    const models = r.candidates('writer')
+    registry.providers.get('a')!.down = true
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['b/y'])
+    for await (const ev of r.chat(models, { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    expect(seen).toEqual(['y'])
+    registry.providers.get('b')!.down = true // everything down: try them anyway
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/y'])
+    for await (const ev of r.chat(models, { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    expect(seen).toEqual(['y', 'x'])
+  })
+
+  it('a request that cannot reach a local server marks it down for every job at once, without retries', async () => {
+    const { registry, mock } = await registryWith({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }],
+      roles: { writer: ['a/x', 'b/y'] }
+    })
+    registry.providers.get('a')!.concurrencyAuto = true // as Strata
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw new ProviderError('network error: fetch failed (ECONNREFUSED)', undefined, true, undefined, true)
+      return 'ok'
+    })
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1 })
+    const down: string[] = []
+    r.onProviderDown = (p) => down.push(p.id)
+    for await (const ev of r.chat(r.candidates('writer'), { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    expect(seen).toEqual(['x', 'y']) // no retries on a server that is not running
+    expect(down).toEqual(['a'])
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['b/y']) // the next job skips it
+  })
+
+  it('a refused connection is an unreachable server; other network errors are not', async () => {
+    const failWith = (code?: string) =>
+      new OpenAiCompatClient({
+        id: 'strata',
+        baseUrl: 'http://127.0.0.1:1/v1',
+        fetchImpl: (async () => {
+          throw Object.assign(new TypeError('fetch failed'), code ? { cause: { code } } : {})
+        }) as unknown as typeof fetch
+      })
+    const err = async (code?: string) => collect(failWith(code).chat({ model: 'm', messages: [{ role: 'user', content: 'x' }] })).catch((e: unknown) => e as ProviderError)
+    expect(await err('ECONNREFUSED')).toMatchObject({ unreachable: true, retryable: true })
+    expect(await err('ECONNRESET')).toMatchObject({ unreachable: false, retryable: true })
+    expect(await err()).toMatchObject({ unreachable: false })
   })
 
   it('a context-size error goes straight to the next model; when all fail, the error names each model', async () => {

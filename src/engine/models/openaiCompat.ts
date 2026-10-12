@@ -33,14 +33,18 @@ function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
   return signal ? AbortSignal.any([signal, t]) : t
 }
 
+/** Connection errors that mean nothing listens there (the server is not started), not a hiccup of a running one. */
+const UNREACHABLE = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'EADDRNOTAVAIL'])
+
 /** Converts network failures and timeouts to retryable ProviderErrors. Aborts by the caller pass through. */
 function wrapFetchError(err: unknown, caller?: AbortSignal): never {
   if (caller?.aborted) throw err
   if (err instanceof ProviderError) throw err
-  const e = err as Error
+  const e = err as Error & { cause?: { code?: string } }
   if (e?.name === 'TimeoutError') throw new ProviderError('request timed out', undefined, true)
   if (e?.name === 'AbortError') throw err
-  throw new ProviderError(`network error: ${e?.message ?? String(err)}`, undefined, true)
+  const code = e?.cause?.code
+  throw new ProviderError(`network error: ${e?.message ?? String(err)}${code ? ` (${code})` : ''}`, undefined, true, undefined, !!code && UNREACHABLE.has(code))
 }
 
 export class OpenAiCompatClient implements ProviderClient {

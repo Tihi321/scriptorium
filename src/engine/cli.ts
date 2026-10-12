@@ -23,7 +23,7 @@ export async function probe(argv: string[]): Promise<number> {
   const router = new ModelRouter(registry, budget, { retries: 0 })
 
   let code = 0
-  const refs = argValue(argv, 'model') ? [argValue(argv, 'model')!] : ['lmstudio/nvidia/nemotron-3-nano-4b', 'deepseek/deepseek-flash']
+  const refs = argValue(argv, 'model') ? [argValue(argv, 'model')!] : ['lmstudio/nail-qwen3.6-35b-a3b-mtp', 'deepseek/deepseek-flash']
   for (const ref of refs) {
     const model = registry.getModel(ref)
     if (!model) {

@@ -8,7 +8,7 @@ smtp_user: ""
 smtp_secure: false
 default_paid_model: deepseek/deepseek-flash
 default_strata_model: strata/qwen3.8-flash-next
-default_lmstudio_model: lmstudio/google/gemma-4-e4b
+default_lmstudio_model: lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
 lmstudio_parallel: 4
 lmstudio_context: 131072
 lmstudio_ttl_minutes: 60

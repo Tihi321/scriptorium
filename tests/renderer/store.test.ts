@@ -69,9 +69,10 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     topics: [],
     models: [],
     roleDefaults: {},
+    servers: [],
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },
     running: [],
-    settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/google/gemma-4-e4b', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60 },
+    settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60 },
     secretsSet: [],
     at: 'now',
     ...extra
@@ -110,6 +111,28 @@ describe('counts', () => {
     store.getState().applyEvent(snapshot(), T0)
     store.getState().applyEvent({ type: 'job.started', jobId: 'j', agent: 'a1', task: 'update bible', model: 'lmstudio/nail' }, T0)
     expect(providerOf(store.getState().agents.a1?.model)).toBe('lmstudio')
+  })
+
+  it('shows which local servers are off, and stops "checking" when the engine answers', () => {
+    const store = createOfficeStore()
+    store.getState().applyEvent(snapshot({ servers: [{ id: 'strata', down: true, slots: 1 }, { id: 'lmstudio', down: false, slots: 4 }] }), T0)
+    expect(store.getState().servers.find((s) => s.id === 'strata')?.down).toBe(true)
+    store.getState().setCheckingServers(true)
+    store.getState().applyEvent({ type: 'servers', servers: [{ id: 'strata', down: false, slots: 4 }, { id: 'lmstudio', down: false, slots: 4 }] }, T0)
+    expect(store.getState().servers.every((s) => !s.down)).toBe(true)
+    expect(store.getState().checkingServers).toBe(false)
+  })
+
+  it('follows a fallback to another model, and a web search does not count as the model', () => {
+    const store = createOfficeStore()
+    store.getState().applyEvent(snapshot(), T0)
+    store.getState().applyEvent({ type: 'job.started', jobId: 'j', agent: 'a1', task: 'research', model: 'strata/qwen3.8-flash-next-low' }, T0)
+    store.getState().applyEvent({ type: 'job.model', jobId: 'j', agent: 'a1', model: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic' }, T0)
+    expect(store.getState().agents.a1?.model).toBe('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')
+    expect(store.getState().jobs.j?.model).toBe('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')
+    store.getState().applyEvent({ type: 'spend', provider: 'wikipedia', model: 'search', tokensIn: 0, tokensOut: 0, costUsd: 0, agent: 'a1' }, T0)
+    expect(store.getState().agents.a1?.model).toBe('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')
+    expect(store.getState().jobs.j?.model).toBe('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')
   })
 })
 

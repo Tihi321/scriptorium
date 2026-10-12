@@ -114,6 +114,7 @@ test('the real app: office, agents at work, terminal from real logs, pause all, 
   await expect(page.getByTestId('pause-all')).toHaveText('Pause all')
 
   // the "Ask researcher" box reaches the engine: a research job for the chosen book appears (the mock model can't answer it, so it may end in failed/)
+  await page.getByTestId('tool-ask').click()
   await page.getByTestId('ask-question').fill('How long did a ship take from Lisbon to Goa?')
   await page.getByTestId('ask-book').selectOption(SLUG)
   await page.getByTestId('ask-send').click()

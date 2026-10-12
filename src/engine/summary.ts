@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { readReaderPages } from './publish/reader'
-import type { AgentSummary, BookSummary, ModelSummary, TopicSummary } from '../shared/protocol'
+import type { AgentSummary, BookSummary, ModelSummary, ServerStatus, TopicSummary } from '../shared/protocol'
 import type { AgentDef } from './agents/agents'
 import type { BookStore } from './pipeline/books'
 import type { ModelRegistry } from './models/registry'
@@ -81,6 +81,11 @@ export function modelSummaries(registry: ModelRegistry): ModelSummary[] {
     .filter((m) => !m.embedding)
     .map((m) => ({ ref: m.ref, provider: m.provider.id, model: m.id, family: m.family, local: m.provider.local, enabled: m.provider.available }))
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.ref.localeCompare(b.ref))
+}
+
+/** The local servers the engine checks (`concurrency: auto`): Strata and LM Studio. */
+export function serverStatuses(registry: ModelRegistry): ServerStatus[] {
+  return [...registry.providers.values()].filter((p) => p.concurrencyAuto && p.available).map((p) => ({ id: p.id, down: p.down, slots: p.concurrency }))
 }
 
 export function roleDefaults(registry: ModelRegistry): Record<string, string> {

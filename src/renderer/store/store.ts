@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla'
-import type { AgentSummary, BookSummary, EngineEvent, ModelSummary, SettingsSummary, TopicSummary } from '../../shared/protocol'
+import type { AgentSummary, BookSummary, EngineEvent, ModelSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
 import {
   asAgentState,
   bookColor,
@@ -28,6 +28,10 @@ export interface OfficeState {
   /** Models the pickers offer, from the snapshot. */
   models: ModelSummary[]
   roleDefaults: Record<string, string>
+  /** The local model servers (Strata, LM Studio): running or not. */
+  servers: ServerStatus[]
+  /** "Check now" was clicked and the engine has not answered yet. */
+  checkingServers: boolean
   topics: TopicSummary[]
   settings: SettingsSummary | null
   secretsSet: string[]
@@ -69,6 +73,7 @@ export interface OfficeActions {
   setReading(reading: boolean): void
   setSettingsOpen(open: boolean): void
   markKindleSending(slug: string): void
+  setCheckingServers(checking: boolean): void
   reset(): void
 }
 
@@ -89,6 +94,8 @@ function initial(): OfficeState {
     spend: { ...EMPTY_SPEND },
     models: [],
     roleDefaults: {},
+    servers: [],
+    checkingServers: false,
     topics: [],
     settings: null,
     secretsSet: [],
@@ -185,6 +192,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         spend: e.spend,
         models: e.models,
         roleDefaults: e.roleDefaults,
+        servers: e.servers ?? [],
         settings: e.settings,
         secretsSet: e.secretsSet,
         selectedAgent: s.selectedAgent && agents[s.selectedAgent] ? s.selectedAgent : null
@@ -255,6 +263,16 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         books: e.book && !s.books[e.book] ? upsertBook(s.books, e.book, {}, now) : s.books
       }
     }
+    case 'servers':
+      return { servers: e.servers, checkingServers: false }
+    case 'job.model': {
+      const prev = s.agents[e.agent]
+      const job = s.jobs[e.jobId]
+      return {
+        ...(prev ? { agents: { ...s.agents, [e.agent]: { ...prev, model: e.model } } } : {}),
+        ...(job ? { jobs: { ...s.jobs, [e.jobId]: { ...job, model: e.model } } } : {})
+      }
+    }
     case 'job.token': {
       const cur = s.jobs[e.jobId] ?? emptyJob(e.jobId, e.agent, now)
       const jobs = { ...s.jobs, [e.jobId]: { ...cur, output: appendOutput(cur.output, e.text) } }
@@ -278,7 +296,9 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       const spend: SpendView = { ...s.spend, today: s.spend.today + e.costUsd, month: s.spend.month + e.costUsd }
       const patch: Partial<OfficeState> = { spend }
       const a = e.agent ? s.agents[e.agent] : undefined
-      if (a) patch.agents = { ...s.agents, [a.id]: { ...a, model: `${e.provider}/${e.model}` } }
+      // a web search (the researcher's Wikipedia or Tavily request) is spend, but not the model the agent runs on
+      const search = e.model === 'search'
+      if (a && !search) patch.agents = { ...s.agents, [a.id]: { ...a, model: `${e.provider}/${e.model}` } }
       const jobId = a?.jobId
       const job = jobId ? s.jobs[jobId] : undefined
       if (jobId && job) {
@@ -290,7 +310,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
             tokensIn: (job.tokensIn ?? 0) + e.tokensIn,
             tokensOut: (job.tokensOut ?? 0) + e.tokensOut,
             costUsd: (job.costUsd ?? 0) + e.costUsd,
-            model: `${e.provider}/${e.model}`
+            model: search ? job.model : `${e.provider}/${e.model}`
           }
         }
       }
@@ -338,6 +358,9 @@ export function createOfficeStore() {
     },
     openDraft(slug) {
       set({ draftBook: slug, draft: get().draft?.book === slug ? get().draft : null })
+    },
+    setCheckingServers(checking) {
+      set({ checkingServers: checking })
     },
     markKindleSending(slug) {
       set({ kindle: { ...get().kindle, [slug]: { state: 'sending' } } })

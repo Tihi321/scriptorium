@@ -2,7 +2,7 @@ import { estimateCost } from '../budget/spend'
 import type { Budget } from '../budget/spend'
 import { ProviderLimiter } from './limiter'
 import { computeCost, isPaidModel } from './registry'
-import type { ModelInfo, ModelRegistry } from './registry'
+import type { ModelInfo, ModelRegistry, ProviderInfo } from './registry'
 import { BudgetError, emptyUsage, isAbortError, ProviderError } from './types'
 import type { ChatMessage, RequestMeta, Usage } from './types'
 
@@ -56,6 +56,8 @@ const defaultSleep = (ms: number, signal?: AbortSignal) =>
  */
 export class ModelRouter {
   readonly limiter: ProviderLimiter
+  /** Called when a request finds a server not running and marks it down for every job. */
+  onProviderDown?: (p: ProviderInfo) => void
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
   constructor(
@@ -68,17 +70,22 @@ export class ModelRouter {
     this.opts = { retries: opts.retries ?? 2, backoffMs: opts.backoffMs ?? 1000, sleep: opts.sleep ?? defaultSleep }
   }
 
-  /** Ordered models for a job: the agent's override, then the role's list. Unavailable providers are dropped. */
+  /**
+   * Ordered models for a job: the agent's override, then the role's list. Unavailable providers are dropped,
+   * and so are servers that are down (Strata not started), unless nothing else is left.
+   */
   candidates(role: string, o: CandidateOptions = {}): ModelInfo[] {
     const refs = [...(o.agentModel ? [this.registry.resolve(o.agentModel)] : []), ...this.registry.roleModelRefs(role)]
     const seen = new Set<string>()
-    const list: ModelInfo[] = []
+    let list: ModelInfo[] = []
     for (const ref of refs) {
       if (seen.has(ref)) continue
       seen.add(ref)
       const m = this.registry.getModel(ref)
       if (m && m.provider.available && m.provider.client && !m.embedding) list.push(m)
     }
+    const up = list.filter((m) => !m.provider.down)
+    if (up.length > 0) list = up
     if (o.avoidFamily) {
       const keep = list.filter((m) => m.family !== o.avoidFamily)
       const avoid = list.filter((m) => m.family === o.avoidFamily)
@@ -97,7 +104,9 @@ export class ModelRouter {
     let budgetRefusal: string | undefined
     let attempts = 0
     const failures: string[] = []
-    for (const model of models) {
+    for (const [i, model] of models.entries()) {
+      // a server that went down after the job started: skip it while a later model can answer
+      if (model.provider.down && models.slice(i + 1).some((m) => !m.provider.down)) continue
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
         const paid = isPaidModel(model)
@@ -161,6 +170,12 @@ export class ModelRouter {
         } catch (err) {
           if (isAbortError(err) || req.signal?.aborted) throw err
           lastError = err
+          // nothing listens there (Strata not started): mark it down for every job and go to the next model without retries
+          if (err instanceof ProviderError && err.unreachable && provider.concurrencyAuto) {
+            if (this.registry.markDown(provider)) this.onProviderDown?.(provider)
+            failures.push(`${model.ref}: ${err.message}`)
+            break
+          }
           // a request too big for this model fails the same way every time: go straight to the next model
           const retryable = err instanceof ProviderError && err.retryable && !isContextError(err)
           if (!retryable || retry === this.opts.retries) {

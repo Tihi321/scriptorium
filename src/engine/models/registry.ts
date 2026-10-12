@@ -23,8 +23,12 @@ export interface ProviderInfo {
   concurrency: number
   /** `concurrency: auto`: `concurrency` follows the server's own slot count (see `syncServerSlots`). */
   concurrencyAuto: boolean
+  /** `concurrency: auto`: the server did not answer the last check, or says its model is unloaded and won't load on request. Jobs skip it while another model is left. */
+  down: boolean
   rpm?: number
   discover: boolean
+  /** Words that keep a model out of discovery (`discover_skip`). */
+  discoverSkip: string[]
   /** Send the JSON schema as `response_format` (`openai-compat`). */
   jsonSchema: boolean
   /** LM Studio: the engine loads a model that isn't loaded yet, with `lmLoad` (see `setDefaults`). */
@@ -106,6 +110,8 @@ export class ModelRegistry {
   readonly mock: MockProvider
   /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
   private serverSlots = new Map<string, number>()
+  /** Which of them did not answer the last check, kept across config reloads. */
+  private serverDown = new Map<string, boolean>()
   /** Until settings.md is read: the defaults it has when it says nothing. */
   private defaults: ModelDefaults = modelDefaultsOf(settingsSchema.parse({ kind: 'settings' }))
 
@@ -137,8 +143,10 @@ export class ModelRegistry {
         apiKeyEnv: p.api_key_env,
         concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : p.concurrency,
         concurrencyAuto: p.concurrency === 'auto',
+        down: p.concurrency === 'auto' ? (this.serverDown.get(p.id) ?? false) : false,
         rpm: p.rpm,
         discover: p.discover,
+        discoverSkip: p.discover_skip,
         jsonSchema: p.json_schema,
         loadModels: p.load_models,
         searchEngine: p.engine ?? p.id,
@@ -175,7 +183,7 @@ export class ModelRegistry {
     // Keep what discovery found earlier, so a config reload does not forget it.
     for (const d of discoveredBefore) {
       const prov = this.providers.get(d.provider.id)
-      if (prov && !this.models.has(d.ref)) this.models.set(d.ref, { ...d, provider: prov })
+      if (prov && !this.models.has(d.ref) && !skipsDiscovered(prov, d.id)) this.models.set(d.ref, { ...d, provider: prov })
     }
   }
 
@@ -240,7 +248,7 @@ export class ModelRegistry {
         const ctxLen = await p.client.contextLengths(signal)
         for (const id of ids) {
           const ref = `${p.id}/${id}`
-          if (this.models.has(ref)) continue
+          if (this.models.has(ref) || skipsDiscovered(p, id)) continue
           this.models.set(ref, {
             ref,
             provider: p,
@@ -271,20 +279,25 @@ export class ModelRegistry {
    * Asks every `concurrency: auto` provider how many requests it serves at once and sets its `concurrency`:
    * Strata reports it as `concurrency.serving` of `GET <base_url>/status`; for LM Studio it is the sum of `parallel`
    * over the loaded chat models (`GET /api/v1/models`, set with `lms load --parallel <n>`).
-   * A server that can't be asked counts as 1. Returns the providers whose concurrency changed.
+   * A server that can't be asked counts as 1 and is marked `down`, as is a Strata whose model is unloaded without `auto_load`.
+   * Returns the providers whose concurrency changed.
    */
   async syncServerSlots(signal?: AbortSignal): Promise<{ provider: ProviderInfo; from: number; to: number }[]> {
     const changed: { provider: ProviderInfo; from: number; to: number }[] = []
     for (const p of this.providers.values()) {
       if (!p.concurrencyAuto || !p.available || !p.baseUrl) continue
       const base = p.baseUrl.replace(/\/+$/, '')
+      let answered = false
+      let unloaded = false
       const get = async (url: string) => {
         const res = await (this.opts.fetchImpl ?? fetch)(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
+        answered = true
         return res.ok ? ((await res.json()) as Record<string, unknown>) : null
       }
       let slots = 1
       try {
         const status = await get(`${base}/status`).catch(() => null)
+        unloaded = status?.loaded === false && status?.auto_load !== true
         const n = Number((status?.concurrency as { serving?: unknown } | undefined)?.serving)
         if (Number.isInteger(n) && n >= 1) slots = Math.min(n, 16)
         else {
@@ -305,12 +318,22 @@ export class ModelRegistry {
         /* the server is down or restarting: one at a time until it answers */
       }
       this.serverSlots.set(p.id, slots)
+      p.down = !answered || unloaded
+      this.serverDown.set(p.id, p.down)
       if (p.concurrency !== slots) {
         changed.push({ provider: p, from: p.concurrency, to: slots })
         p.concurrency = slots
       }
     }
     return changed
+  }
+
+  /** Marks a `concurrency: auto` server down at once (a request could not reach it), for every job. True when that is news. */
+  markDown(p: ProviderInfo): boolean {
+    if (!p.concurrencyAuto || p.down) return false
+    p.down = true
+    this.serverDown.set(p.id, true)
+    return true
   }
 
   getModel(ref: string): ModelInfo | undefined {
@@ -353,6 +376,12 @@ export class ModelRegistry {
     if (!client.embed) throw new Error(`provider ${m.provider.id} cannot embed`)
     return client.embed(m.id, texts, signal)
   }
+}
+
+/** A model the server lists but `discover_skip` keeps out (a word of it is in the id, any case). */
+function skipsDiscovered(p: ProviderInfo, id: string): boolean {
+  const s = id.toLowerCase()
+  return p.discoverSkip.some((w) => w && s.includes(w.toLowerCase()))
 }
 
 export function guessFamily(id: string): string {

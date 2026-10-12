@@ -60,6 +60,8 @@ export const providerEntrySchema = z.looseObject({
   tpm: z.number().int().positive().optional(),
   /** Ask the provider which models it has (GET /v1/models) and add the unknown ones. */
   discover: z.boolean().default(false),
+  /** Discovery leaves out models whose id contains one of these words (any case), for example `dflash`. */
+  discover_skip: z.array(z.string()).default([]),
   /** Send the JSON schema as `response_format`. Set false for servers that reject a bad JSON answer (502) instead of constraining it: the prompt and the repair step handle the JSON then. */
   json_schema: z.boolean().default(true),
   /** LM Studio: the engine loads a model that isn't loaded yet itself, with the parallel, context and idle time from config/settings.md. */
@@ -172,7 +174,7 @@ export const settingsSchema = configBase('settings').extend({
   /** What the role aliases in roles.md stand for: `paid`, `strata` and `lmstudio` (each a `provider/model`). */
   default_paid_model: z.string().default('deepseek/deepseek-flash'),
   default_strata_model: z.string().default('strata/qwen3.8-flash-next'),
-  default_lmstudio_model: z.string().default('lmstudio/google/gemma-4-e4b'),
+  default_lmstudio_model: z.string().default('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'),
   /** How the engine loads LM Studio models that aren't loaded yet: requests at once, context window, idle minutes before LM Studio unloads it. */
   lmstudio_parallel: z.number().int().min(1).max(16).default(4),
   lmstudio_context: z.number().int().min(2048).default(131072),

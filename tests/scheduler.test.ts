@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { ProviderError } from '../src/engine/models/types'
 import { parseMd } from '../src/shared/md'
 import type { EngineEvent } from '../src/shared/protocol'
 import { watchDataFolder } from '../src/engine/store/watcher'
@@ -61,6 +62,41 @@ describe('scheduler', () => {
     // the spend row for a local model: cost 0
     const spend = await readdir(path.join(env.dir, 'logs', 'spend'))
     expect(spend).toHaveLength(1)
+  })
+
+  it('tells the office when a job falls back to another model', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'alt', local: true, models: ['m2'] }],
+      roles: { writer: ['loc/m1', 'alt/m2'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+    env.mock.onAny((req) => {
+      if (req.model === 'm1') throw new ProviderError('bad request', 400, false)
+      return 'from m2'
+    })
+    registerChat(env)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done')
+    const models = env.events.flatMap((e) => (e.type === 'job.started' || e.type === 'job.model' ? [`${e.type}:${e.model}`] : []))
+    expect(models).toEqual(['job.started:loc/m1', 'job.model:alt/m2'])
+  })
+
+  it('a job that falls back to another provider gives the first one its slot back', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'loc', local: true, concurrency: 1, models: ['m1'] }, { id: 'alt', local: true, models: ['m2'] }],
+      roles: { writer: ['loc/m1', 'alt/m2'] },
+      agents: [{ role: 'writer', name: 'Ann' }, { role: 'writer', name: 'Bob' }]
+    })
+    env.mock.onAny((req) => {
+      if (req.model === 'm1') throw new ProviderError('bad request', 400, false)
+      return { text: 'slow answer '.repeat(4), chunks: 4, chunkDelayMs: 60 }
+    })
+    let active = 0
+    let max = 0
+    registerChat(env, 't', { before: () => (max = Math.max(max, ++active)), after: () => active-- })
+    for (const u of ['u1', 'u2']) await env.engine.jobs.enqueue({ id: `b1--t--${u}--r0`, task: 't', role: 'writer', book: 'b1', unit: u, requested_by: 'engine' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 2, 5000, 'jobs done')
+    expect(max).toBe(2) // the second job did not wait for loc's only slot while the first one ran on alt
   })
 
   it('3 books x parallel reviews respect provider concurrency and all finish', async () => {

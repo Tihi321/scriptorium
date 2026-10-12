@@ -25,7 +25,7 @@ import { TopicsFile } from './store/topics'
 import { readMd, writeMd } from './store/atomic'
 import { sendEpub, smtpTransport } from './publish/kindle'
 import type { TransportFactory } from './publish/kindle'
-import { agentSummary, bookSummary, modelSummaries, roleDefaults, topicSummary } from './summary'
+import { agentSummary, bookSummary, modelSummaries, roleDefaults, serverStatuses, topicSummary } from './summary'
 import type { WatchEvent } from './store/watcher'
 
 export interface EngineOptions {
@@ -99,6 +99,12 @@ export class Engine {
       }
     })
     this.router = new ModelRouter(this.registry, this.budget, opts.router)
+    // a request that finds Strata (or LM Studio) not running marks it down for every agent at once, not one agent at a time
+    this.router.onProviderDown = (p) => {
+      this.log(`models: ${p.id} is down (a request could not reach ${p.baseUrl}), jobs use the next model in their role`)
+      this.emit({ type: 'servers', servers: serverStatuses(this.registry) })
+      this.scheduler.kick()
+    }
     this.jobs = new JobStore(dir)
     this.agents = new AgentStore(dir)
     this.logs = new LogWriter(dir)
@@ -187,6 +193,7 @@ export class Engine {
   /** Asks `concurrency: auto` servers for their slot count; a higher count frees waiting requests at once. */
   private async syncSlots(): Promise<void> {
     let changed
+    const wasDown = new Map([...this.registry.providers.values()].map((p) => [p.id, p.down]))
     try {
       changed = await this.registry.syncServerSlots()
     } catch (err) {
@@ -197,7 +204,17 @@ export class Engine {
       this.log(`models: ${c.provider.id} runs ${c.to} request(s) at once (was ${c.from}), as the server reports`)
       if (c.to > c.from) this.router.limiter.wakeAll(c.provider)
     }
-    if (changed.length) this.scheduler.kick()
+    // a server that stops answering is skipped (its jobs go to the next model in the role) until it answers again
+    let upOrDown = false
+    for (const p of this.registry.providers.values()) {
+      if (!wasDown.has(p.id) || wasDown.get(p.id) === p.down) continue
+      upOrDown = true
+      this.log(p.down ? `models: ${p.id} is down (${p.baseUrl} does not answer, or has no model loaded), jobs use the next model in their role` : `models: ${p.id} answers again`)
+    }
+    if (changed.length || upOrDown) {
+      this.emit({ type: 'servers', servers: serverStatuses(this.registry) })
+      this.scheduler.kick()
+    }
   }
 
   async stop(): Promise<void> {
@@ -419,6 +436,10 @@ export class Engine {
       case 'snapshot':
         this.emit(await this.snapshot())
         return
+      case 'checkServers':
+        await this.syncSlots()
+        this.emit({ type: 'servers', servers: serverStatuses(this.registry) }) // even when nothing changed, so the button stops waiting
+        return
       case 'hire': {
         if (!(ROLES as readonly string[]).includes(cmd.role) && !(cmd.role in this.registry.roles.roles)) {
           this.log(`hire: unknown role ${cmd.role}`)
@@ -631,6 +652,7 @@ export class Engine {
       topics: topics.map(topicSummary),
       models: modelSummaries(this.registry),
       roleDefaults: roleDefaults(this.registry),
+      servers: serverStatuses(this.registry),
       spend: this.budget.snapshot(),
       running: this.scheduler.runningJobs(),
       settings: this.settingsSummary(),

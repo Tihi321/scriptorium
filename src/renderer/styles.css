@@ -664,3 +664,37 @@ textarea {
 .page-nav select {
   max-width: 320px;
 }
+
+button.small {
+  padding: 0 7px;
+  font-size: 11px;
+}
+.pill.server.off {
+  color: var(--bad);
+  font-weight: 700;
+}
+/* Budget, Ask researcher, Ideas and Role defaults: tabs at the bottom of the sidebar, the open one above them */
+.side-tools {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.side-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.side-tabs button {
+  flex: 1 1 auto;
+  font-size: 11px;
+}
+.side-tabs button.on {
+  border-color: var(--accent);
+  background: #1d3a44;
+}
+.side-tabs button.warn,
+.side-tabs button.over {
+  color: var(--warn);
+  font-weight: 700;
+}

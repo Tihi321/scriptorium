@@ -25,7 +25,15 @@ test('the office renders, an agent opens its terminal, and the controls send com
   await expect(canvas).toBeVisible()
   await expect.poll(() => page.evaluate(() => (globalThis as unknown as Dbg).__office?.agentCount() ?? 0), { timeout: 15_000 }).toBe(17)
   await expect(page.getByTestId('whiteboard')).toContainText('The Lantern and the Fox')
+  // the budget, the researcher box, the idea bucket and the role defaults are tabs, closed at first
+  await expect(page.getByTestId('meter-today')).toHaveCount(0)
+  await page.getByTestId('tool-budget').click()
   await expect(page.getByTestId('meter-today')).toBeVisible()
+  // Strata is off in the demo: "Check now" asks the engine, which finds it running
+  await expect(page.getByTestId('server-strata')).toHaveAttribute('data-down', 'true')
+  await page.getByTestId('servers-check').click()
+  await expect(page.getByTestId('server-strata')).toHaveAttribute('data-down', 'false')
+  await expect(page.getByTestId('servers-check')).toHaveCount(0)
 
   // states change as the fake engine works
   await expect(page.getByTestId('count-working')).not.toContainText('working 0', { timeout: 15_000 })
@@ -98,6 +106,7 @@ test('the office renders, an agent opens its terminal, and the controls send com
   expect((await commands(page)).some((c) => c.type === 'stopNow')).toBe(true)
 
   // ask the researcher
+  await page.getByTestId('tool-ask').click()
   await page.getByTestId('ask-question').fill('How long did a ship take from Lisbon to Goa?')
   await page.getByTestId('ask-send').click()
   expect(await commands(page)).toContainEqual({ type: 'askResearcher', question: 'How long did a ship take from Lisbon to Goa?' })
@@ -216,6 +225,7 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('settings-close').click()
 
   // the idea bucket
+  await page.getByTestId('tool-idea').click()
   await page.getByTestId('idea-text').fill('A book about a clockwork heron')
   await page.getByTestId('idea-add').click()
   expect(await commands(page)).toContainEqual({ type: 'addIdea', text: 'A book about a clockwork heron' })

@@ -104,6 +104,8 @@ export function installFakeEngine(params: URLSearchParams): void {
   const commands: Command[] = []
   const t0 = Date.now()
   let allPaused = false
+  // Strata starts off, so the "Check now" button shows; checking finds it running
+  let servers = [{ id: 'strata', down: true, slots: 1 }, { id: 'lmstudio', down: false, slots: 4 }]
   let jobCounter = 100
   const spend = { today: 0.42, month: 6.1, dailyCap: 2, monthlyCap: 30 }
   const topics = makeTopics()
@@ -123,7 +125,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     enabled: !ref.startsWith('anthropic')
   }))
   const roleDefaults: Record<string, string> = Object.fromEntries(STAFF.map(([role, , , model]) => [role, model]))
-  let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/google/gemma-4-e4b', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60 }
+  let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60 }
   const secretsSet = new Set<string>(['DEEPSEEK_API_KEY'])
 
   const summaryOf = (a: FakeAgent): AgentSummary => ({
@@ -148,6 +150,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     topics: topicSummaries(topics, books),
     models: MODELS,
     roleDefaults,
+    servers: servers.map((s) => ({ ...s })),
     spend: { ...spend },
     running: agents.filter((a) => a.jobId).map((a) => ({ jobId: a.jobId!, agent: a.id })),
     settings,
@@ -287,6 +290,10 @@ export function installFakeEngine(params: URLSearchParams): void {
       switch (command.type) {
         case 'snapshot':
           emit(snapshot())
+          break
+        case 'checkServers':
+          servers = servers.map((s) => (s.id === 'strata' ? { ...s, down: false, slots: 4 } : s))
+          setTimeout(() => emit({ type: 'servers', servers: servers.map((s) => ({ ...s })) }), 400)
           break
         case 'ping':
           emit({ type: 'pong', id: command.id, at: new Date().toISOString() })

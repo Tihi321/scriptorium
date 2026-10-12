@@ -116,9 +116,9 @@ export function RoleDefaults() {
   const current = role || roles[0] || ''
   const options = modelOptions(known, defaults[current])
   return (
-    <details className="card" data-testid="role-defaults">
-      <summary className="dim">Role defaults</summary>
-      <div className="stack" style={{ marginTop: 6 }}>
+    <div className="card" data-testid="role-defaults">
+      <h3>Role defaults</h3>
+      <div className="stack">
         <select value={current} onChange={(e) => setRole(e.target.value)}>
           {roles.map((r) => (
             <option key={r} value={r}>
@@ -146,7 +146,7 @@ export function RoleDefaults() {
         </select>
         <span className="dim">Applies from the next job. The engine writes config/roles.md.</span>
       </div>
-    </details>
+    </div>
   )
 }
 
