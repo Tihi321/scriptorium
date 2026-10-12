@@ -3,6 +3,7 @@ import { readReaderPages } from './publish/reader'
 import type { AgentSummary, BookSummary, ModelSummary, ProviderSummary, ServerStatus, TopicSummary } from '../shared/protocol'
 import type { AgentDef } from './agents/agents'
 import type { BookStore } from './pipeline/books'
+import type { ProviderLimiter } from './models/limiter'
 import type { ModelRegistry } from './models/registry'
 import type { ModelRouter } from './models/router'
 import type { Scheduler } from './queue/scheduler'
@@ -98,10 +99,24 @@ export function modelSummaries(registry: ModelRegistry): ModelSummary[] {
 }
 
 /** The model providers, for the Models dialog. */
-export function providerSummaries(registry: ModelRegistry): ProviderSummary[] {
+export function providerSummaries(registry: ModelRegistry, limiter: ProviderLimiter): ProviderSummary[] {
   return [...registry.providers.values()]
     .filter((p) => p.kind !== 'search' && p.kind !== 'mock')
-    .map((p) => ({ id: p.id, kind: p.kind, local: p.local, available: p.available, reason: p.available ? undefined : p.unavailableReason, canList: p.kind === 'openai-compat' }))
+    .map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      local: p.local,
+      available: p.available,
+      reason: p.available ? undefined : p.unavailableReason,
+      canList: p.kind === 'openai-compat',
+      concurrency: p.concurrency,
+      concurrencyAuto: p.concurrencyAuto,
+      rpm: p.rpm,
+      rpd: p.rpd,
+      requestsToday: limiter.requestsToday(p.id),
+      dayFull: limiter.dayFull(p),
+      dayResetsAt: limiter.dayResetsAt()
+    }))
 }
 
 /** The local servers the engine checks (`concurrency: auto`): Strata and LM Studio. */

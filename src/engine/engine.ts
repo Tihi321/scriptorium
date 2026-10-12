@@ -52,7 +52,7 @@ export interface EngineOptions {
 const SLOT_SYNC_MS = 10_000
 
 /** The text below the frontmatter of a config/models.md the engine creates (as in seed/config/models.md). */
-const MODELS_MD_BODY = "# Models in the pickers\n\nWhich models the model pickers offer (the agent panel, Role defaults and the default models). The app writes this file from its **Models** panel (the Models button in the top bar): pick a provider, press **Detect models** to list everything it has, and tick the models you want, or add one by its id (with its price for a paid provider). You can also edit it by hand.\n\n- `picked`: models that are not in `providers.md`, ticked from a provider's list or added by id, each with its `provider`, `id`, `context` and the price the provider listed when you picked it (or the one you typed) (`price_in`, `price_out`, `price_cached_in`, USD per 1M tokens). The budget counts them at that price. A paid model is only ticked with a listed price; for one whose price the provider doesn't list (DeepSeek's), add it by id with its price.\n- `hidden`: `provider/model` refs the pickers leave out: models from `providers.md` or found by `discover` that you unticked. A role list in `roles.md` can still name a hidden model.\n"
+const MODELS_MD_BODY = "# Models in the pickers\n\nWhich models the model pickers offer (the agent panel, Role defaults and the default models). The app writes this file from its **Models** panel (the Models button in the top bar): pick a provider, press **Detect models** to list everything it has, and tick the models you want, or add one by its id (with its price for a paid provider). You can also edit it by hand.\n\n- `picked`: models that are not in `providers.md`, ticked from a provider's list or added by id, each with its `provider`, `id`, `context` and the price the provider listed when you picked it (or the one you typed) (`price_in`, `price_out`, `price_cached_in`, USD per 1M tokens). The budget counts them at that price. A paid model is only ticked with a listed price; for one whose price the provider doesn't list (DeepSeek's), add it by id with its price.\n- `hidden`: `provider/model` refs the pickers leave out: models from `providers.md` or found by `discover` that you unticked. A role list in `roles.md` can still name a hidden model.\n- `limits`: per provider, the limits set in the Models panel, over the ones in `providers.md`: `concurrency` (requests at once), `rpm` (per minute) and `rpd` (per day, from midnight UTC). 0 means no limit.\n"
 
 /** The engine core: config, models, budget, agents, jobs and the scheduler, plus the command handler. */
 export class Engine {
@@ -114,6 +114,14 @@ export class Engine {
     this.router.onProviderDown = (p) => {
       this.log(`models: ${p.id} is down (a request could not reach ${p.baseUrl}), jobs use the next model in their role`)
       this.emit({ type: 'servers', servers: serverStatuses(this.registry) })
+      this.scheduler.kick()
+    }
+    // a provider's daily limit is used up: say so once, and show it in the Models panel
+    this.router.onProviderDayFull = (p) => {
+      const at = new Date(this.router.limiter.dayResetsAt()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      this.log(`models: ${p.id} used up its requests for today, jobs use the next model in their role until ${at}`)
+      this.emit({ type: 'engine.warning', message: `${p.id} used up its requests for today: jobs use their next model until ${at}.` })
+      void this.snapshot().then((s) => this.emit(s))
       this.scheduler.kick()
     }
     this.jobs = new JobStore(dir)
@@ -185,6 +193,8 @@ export class Engine {
     this.slotTimer = setInterval(() => void this.syncSlots(), SLOT_SYNC_MS)
     this.slotTimer.unref?.()
     await this.budget.load()
+    // daily request limits count the requests made before this start too
+    for (const p of this.registry.providers.values()) this.router.limiter.seedToday(p.id, this.budget.requestsTodayUtc(p.id))
     const rec = await this.jobs.recoverRunning()
     if (rec.requeued.length || rec.dropped.length) {
       this.log(`recovery: ${rec.requeued.length} running job(s) back to queued, ${rec.dropped.length} duplicate(s) dropped`)
@@ -330,8 +340,32 @@ export class Engine {
     })
   }
 
+  /**
+   * Sets a provider's limits in `limits` of config/models.md, over providers.md: requests at once (not for a `concurrency: auto`
+   * server), per minute and per day (0: no limit). A raised limit frees waiting requests at once.
+   */
+  async setProviderLimits(cmd: { provider: string; concurrency?: number; rpm?: number; rpd?: number }): Promise<void> {
+    const p = this.registry.providers.get(cmd.provider)
+    if (!p || p.kind === 'search') return this.log(`setProviderLimits: no provider "${cmd.provider}"`)
+    const count = (v: number | undefined, min: number) => (typeof v === 'number' && Number.isFinite(v) && v >= min ? Math.round(v) : undefined)
+    const set: Record<string, number> = {}
+    const concurrency = p.concurrencyAuto ? undefined : count(cmd.concurrency, 1)
+    if (concurrency !== undefined) set.concurrency = concurrency
+    const rpm = count(cmd.rpm, 0)
+    if (rpm !== undefined) set.rpm = rpm
+    const rpd = count(cmd.rpd, 0)
+    if (rpd !== undefined) set.rpd = rpd
+    if (!Object.keys(set).length) return
+    await this.editModelChoices((_picked, _hidden, limits) => {
+      limits[p.id] = { ...(limits[p.id] ?? {}), ...set }
+      this.log(`models: ${p.id} limits ${Object.entries(set).map(([k, v]) => `${k} ${v || 'none'}`).join(', ')}`)
+    })
+    const now = this.registry.providers.get(p.id)
+    if (now) this.router.limiter.wakeAll(now)
+  }
+
   /** Reads `picked` and `hidden` of config/models.md, lets `change` edit them, writes the file and sends the pickers the result. */
-  private async editModelChoices(change: (picked: Record<string, unknown>[], hidden: Set<string>) => void): Promise<void> {
+  private async editModelChoices(change: (picked: Record<string, unknown>[], hidden: Set<string>, limits: Record<string, Record<string, number>>) => void): Promise<void> {
     const file = this.registry.modelsFile()
     let doc
     try {
@@ -341,8 +375,9 @@ export class Engine {
     }
     const picked = Array.isArray(doc.data.picked) ? (doc.data.picked as Record<string, unknown>[]) : []
     const hidden = new Set(Array.isArray(doc.data.hidden) ? (doc.data.hidden as string[]) : [])
-    change(picked, hidden)
-    await writeMd(file, { ...doc.data, kind: 'models', picked, hidden: [...hidden].sort() }, doc.body || MODELS_MD_BODY)
+    const limits = doc.data.limits && typeof doc.data.limits === 'object' ? (doc.data.limits as Record<string, Record<string, number>>) : {}
+    change(picked, hidden, limits)
+    await writeMd(file, { ...doc.data, kind: 'models', picked, hidden: [...hidden].sort(), limits }, doc.body || MODELS_MD_BODY)
     await this.registry.load()
     this.emit(await this.snapshot()) // the pickers follow
     this.scheduler.kick()
@@ -809,6 +844,9 @@ export class Engine {
       case 'addModel':
         await this.addModel(cmd)
         return
+      case 'setProviderLimits':
+        await this.setProviderLimits(cmd)
+        return
       case 'setSecret': {
         if (!this.allowedSecrets().includes(cmd.name)) {
           this.log(`setSecret: "${cmd.name}" is not a name the app may store`)
@@ -864,7 +902,7 @@ export class Engine {
       books,
       topics: topics.map(topicSummary),
       models: modelSummaries(this.registry),
-      providers: providerSummaries(this.registry),
+      providers: providerSummaries(this.registry, this.router.limiter),
       roleDefaults: roleDefaults(this.registry),
       servers: serverStatuses(this.registry),
       spend: this.budget.snapshot(),

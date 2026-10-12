@@ -691,6 +691,10 @@ textarea {
 .model-row .free {
   color: var(--good);
 }
+.models-pane .warn {
+  color: var(--warn);
+  font-weight: 700;
+}
 
 .book-info {
   margin: 8px 0 6px;
@@ -768,3 +772,4 @@ button.small {
   color: var(--warn);
   font-weight: 700;
 }
+

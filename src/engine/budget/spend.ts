@@ -125,6 +125,8 @@ export class Budget {
   private monthByModel = new Map<string, Totals>()
   private monthByRole = new Map<string, Totals>()
   private byBook = new Map<string, Totals>()
+  /** Requests per `<UTC day>|<provider>`, for daily request limits after a restart. */
+  private utcDayRequests = new Map<string, number>()
   private reserved = new Map<number, Reservation>()
   private nextRes = 1
   private warned = new Set<string>()
@@ -152,6 +154,7 @@ export class Budget {
     this.monthByModel.clear()
     this.monthByRole.clear()
     this.byBook.clear()
+    this.utcDayRequests.clear()
     let files: string[] = []
     try {
       files = (await fs.readdir(this.spendDir())).filter((f) => /^\d{4}-\d{2}\.md$/.test(f)).sort()
@@ -190,6 +193,13 @@ export class Budget {
       add(get(this.monthByRole, e.role), e)
     }
     if (e.book) add(get(this.byBook, e.book), e)
+    const k = `${e.time.toISOString().slice(0, 10)}|${e.provider}`
+    this.utcDayRequests.set(k, (this.utcDayRequests.get(k) ?? 0) + 1)
+  }
+
+  /** Requests recorded for a provider since midnight UTC (daily request limits start again then). */
+  requestsTodayUtc(provider: string): number {
+    return this.utcDayRequests.get(`${this.now().toISOString().slice(0, 10)}|${provider}`) ?? 0
   }
 
   spentToday(): number {

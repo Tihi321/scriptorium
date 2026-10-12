@@ -142,12 +142,17 @@ export function installFakeEngine(params: URLSearchParams): void {
     priceOut: ref.startsWith('deepseek') ? 1.2 : ref.startsWith('anthropic') ? 15 : price.out
   })
   let MODELS: ModelSummary[] = [DS, QWEN27, QWEN35, 'anthropic/claude-sonnet-5', 'openrouter/google/gemma-4-31b-it:free'].map((ref) => modelOf(ref, ref.startsWith('openrouter') ? 'discovered' : 'config'))
+  const midnightUtc = () => {
+    const d = new Date()
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
+  }
+  const limits = (concurrency: number, o: Partial<ProviderSummary> = {}) => ({ concurrency, concurrencyAuto: false, requestsToday: 0, dayFull: false, dayResetsAt: midnightUtc(), ...o })
   const PROVIDERS: ProviderSummary[] = [
-    { id: 'deepseek', kind: 'openai-compat', local: false, available: true, canList: true },
-    { id: 'openrouter', kind: 'openai-compat', local: false, available: true, canList: true },
-    { id: 'anthropic', kind: 'anthropic', local: false, available: false, reason: 'no key (set ANTHROPIC_API_KEY or run: npm run key:set ANTHROPIC_API_KEY)', canList: false },
-    { id: 'lmstudio', kind: 'openai-compat', local: true, available: true, canList: true },
-    { id: 'strata', kind: 'openai-compat', local: true, available: true, canList: true }
+    { id: 'deepseek', kind: 'openai-compat', local: false, available: true, canList: true, ...limits(8, { requestsToday: 214 }) },
+    { id: 'openrouter', kind: 'openai-compat', local: false, available: true, canList: true, ...limits(4, { rpm: 20, rpd: 50, requestsToday: 37 }) },
+    { id: 'anthropic', kind: 'anthropic', local: false, available: false, reason: 'no key (set ANTHROPIC_API_KEY or run: npm run key:set ANTHROPIC_API_KEY)', canList: false, ...limits(4) },
+    { id: 'lmstudio', kind: 'openai-compat', local: true, available: true, canList: true, ...limits(4, { concurrencyAuto: true }) },
+    { id: 'strata', kind: 'openai-compat', local: true, available: true, canList: true, ...limits(4, { concurrencyAuto: true }) }
   ]
   /** What the demo providers list in the Models dialog. */
   const CATALOG: Record<string, CatalogModel[]> = {
@@ -187,7 +192,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     books: books.map((b) => summaryOfBook(b, topics)),
     topics: topicSummaries(topics, books),
     models: MODELS,
-    providers: PROVIDERS,
+    providers: PROVIDERS.map((p) => ({ ...p })),
     roleDefaults,
     servers: servers.map((s) => ({ ...s })),
     spend: { ...spend },
@@ -494,6 +499,17 @@ export function installFakeEngine(params: URLSearchParams): void {
           }
           emit(snapshot())
           break
+        case 'setProviderLimits': {
+          const p = PROVIDERS.find((x) => x.id === command.provider)
+          if (p) {
+            if (command.concurrency !== undefined && !p.concurrencyAuto) p.concurrency = command.concurrency
+            if (command.rpm !== undefined) p.rpm = command.rpm || undefined
+            if (command.rpd !== undefined) p.rpd = command.rpd || undefined
+            p.dayFull = !!p.rpd && p.requestsToday >= p.rpd
+          }
+          emit(snapshot())
+          break
+        }
         case 'setSecret':
           secretsSet.add(command.name)
           emit({ type: 'secrets.updated', secretsSet: [...secretsSet] })

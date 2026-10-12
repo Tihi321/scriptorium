@@ -11,8 +11,10 @@ import { GeminiClient } from '../src/engine/models/gemini'
 import { deleteStoredKey, getStoredKey, setStoredKey } from '../src/engine/models/keys'
 import { MockProvider } from '../src/engine/models/mock'
 import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
+import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
-import { ModelRouter } from '../src/engine/models/router'
+import type { ProviderInfo } from '../src/engine/models/registry'
+import { ModelRouter, isDailyLimitError } from '../src/engine/models/router'
 import { BudgetError, collect, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
@@ -693,5 +695,98 @@ describe('Models dialog', () => {
     await engine.handleCommand({ type: 'addModel', provider: 'deepseek', id: 'deepseek-v4-pro', priceIn: 1, priceOut: 1 })
     expect(engine.registry.isShown('deepseek/deepseek-v4-pro')).toBe(true)
     expect(engine.registry.models.get('deepseek/deepseek-v4-pro')).toMatchObject({ discovered: false, priceIn: 1.32 }) // providers.md stays, not picked
+  })
+})
+
+describe('daily request limits', () => {
+  it('counts requests per UTC day, is full at rpd, and starts again at midnight UTC', () => {
+    let t = Date.UTC(2026, 9, 12, 23, 59, 0)
+    const lim = new ProviderLimiter(() => t)
+    const p = { id: 'or', rpd: 2, concurrency: 4 } as ProviderInfo
+    expect(lim.dayFull(p)).toBe(false)
+    lim.noteRequest(p)
+    lim.noteRequest(p)
+    expect(lim.requestsToday('or')).toBe(2)
+    expect(lim.dayFull(p)).toBe(true)
+    expect(lim.hasCapacity(p)).toBe(false)
+    expect(lim.dayResetsAt()).toBe(Date.UTC(2026, 9, 13))
+    t = Date.UTC(2026, 9, 13, 0, 0, 1)
+    expect(lim.requestsToday('or')).toBe(0)
+    expect(lim.dayFull(p)).toBe(false)
+    // the provider says its daily limit is used up, whatever our own count
+    const free = { id: 'x', concurrency: 4 } as ProviderInfo
+    expect(lim.markDayFull(free)).toBe(true)
+    expect(lim.markDayFull(free)).toBe(false)
+    expect(lim.dayFull(free)).toBe(true)
+    // requests made before a restart count too
+    lim.seedToday('or', 5)
+    expect(lim.dayFull(p)).toBe(true)
+  })
+
+  it('a per-day 429 uses the provider up without retries, and its jobs go to the next model until midnight UTC', async () => {
+    const { registry, mock } = await registryWith({ providers: [{ id: 'a', models: ['x'] }, { id: 'b', models: ['y'] }], roles: { writer: ['a/x', 'b/y'] } })
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw new ProviderError('HTTP 429: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day"}}', 429, true)
+      return 'ok'
+    })
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1 })
+    const full: string[] = []
+    r.onProviderDayFull = (p) => full.push(p.id)
+    const models = r.candidates('writer')
+    const ask = async () => {
+      for await (const ev of r.chat(models, { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    }
+    await ask()
+    expect(seen).toEqual(['x', 'y']) // no retries on a
+    expect(full).toEqual(['a'])
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['b/y'])
+    await ask() // a job that picked its models earlier skips a too
+    expect(seen).toEqual(['x', 'y', 'y'])
+    expect(isDailyLimitError(new ProviderError('HTTP 429: too many requests', 429, true))).toBe(false)
+
+    // our own count: b allows 3 a day, so after that every model is used up and both are tried again
+    registry.providers.get('b')!.rpd = 3
+    await ask()
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/y'])
+  })
+
+  it('the spend files give the requests since midnight UTC, so a daily limit holds across restarts', async () => {
+    const now = new Date(Date.UTC(2026, 9, 12, 12))
+    const row = (time: Date, provider: string) => ({ time, agent: 'a', book: '', role: 'writer', provider, model: 'm', tokensIn: 1, tokensCached: 0, tokensOut: 1, costUsd: 0, ms: 1 })
+    const b = new Budget(dir, {}, () => now)
+    await b.load()
+    await b.record(row(new Date(Date.UTC(2026, 9, 12, 0, 30)), 'openrouter'))
+    await b.record(row(new Date(Date.UTC(2026, 9, 11, 23, 30)), 'openrouter')) // yesterday in UTC
+    await b.record(row(new Date(Date.UTC(2026, 9, 12, 1)), 'deepseek'))
+    expect(b.requestsTodayUtc('openrouter')).toBe(1)
+    const again = new Budget(dir, {}, () => now)
+    await again.load()
+    expect(again.requestsTodayUtc('openrouter')).toBe(1)
+    expect(again.requestsTodayUtc('deepseek')).toBe(1)
+  })
+
+  it('setProviderLimits saves the limits of a provider in models.md over providers.md, and the snapshot shows them', async () => {
+    const { Engine } = await import('../src/engine/engine')
+    const keys = (name: string) => (name === 'OPENROUTER_API_KEY' ? 'sk-test' : undefined)
+    const events: EngineEvent[] = []
+    const engine = new Engine({ dataDir: dir, emit: (e) => events.push(e), log: () => {}, registry: { keys }, discover: false })
+    await engine.registry.load()
+    expect(engine.registry.providers.get('openrouter')).toMatchObject({ concurrency: 4, rpm: 20, rpd: 50 }) // providers.md
+    await engine.handleCommand({ type: 'setProviderLimits', provider: 'openrouter', concurrency: 2, rpm: 0, rpd: 1000 })
+    expect(engine.registry.providers.get('openrouter')).toMatchObject({ concurrency: 2, rpm: undefined, rpd: 1000 })
+    // Strata's requests at once come from the server, so only its daily limit is saved
+    await engine.handleCommand({ type: 'setProviderLimits', provider: 'strata', concurrency: 9, rpd: 3 })
+    const file = parseMd(await readFile(path.join(dir, 'config', 'models.md'), 'utf8'))
+    expect(file.data.limits).toEqual({ openrouter: { concurrency: 2, rpm: 0, rpd: 1000 }, strata: { rpd: 3 } })
+    expect(file.body).toContain('# Models in the pickers')
+    const snap = [...events].reverse().find((e) => e.type === 'snapshot') as Extract<EngineEvent, { type: 'snapshot' }>
+    expect(snap.providers.find((p) => p.id === 'openrouter')).toMatchObject({ concurrency: 2, rpd: 1000, requestsToday: 0, dayFull: false })
+    expect(snap.providers.find((p) => p.id === 'openrouter')!.rpm).toBeUndefined()
+    // a new registry reads them back
+    const again = new ModelRegistry(dir, { keys })
+    await again.load()
+    expect(again.providers.get('openrouter')).toMatchObject({ concurrency: 2, rpd: 1000 })
   })
 })

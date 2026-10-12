@@ -275,6 +275,16 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('models-add').click()
   expect(await commands(page)).toContainEqual({ type: 'addModel', provider: 'openrouter', id: 'qwen/qwen3-235b-a22b:free', priceIn: 0, priceOut: 0, context: undefined })
   await expect(page.getByTestId('model-row-openrouter/qwen/qwen3-235b-a22b:free').locator('input')).toBeChecked()
+  // the provider's limits: requests at once, per minute and per day, and today's count against the daily limit
+  await expect(page.getByTestId('limit-rpm')).toHaveValue('20')
+  await expect(page.getByTestId('provider-today')).toContainText('37 of 50')
+  await page.getByTestId('limit-rpd').fill('30')
+  await page.getByTestId('limit-rpd').press('Enter')
+  expect(await commands(page)).toContainEqual({ type: 'setProviderLimits', provider: 'openrouter', rpd: 30 })
+  await expect(page.getByTestId('provider-today')).toContainText('Used up today')
+  await page.getByTestId('limit-rpm').fill('')
+  await page.getByTestId('limit-rpm').blur()
+  expect(await commands(page)).toContainEqual({ type: 'setProviderLimits', provider: 'openrouter', rpm: 0 })
   await page.getByTestId('models-provider-deepseek').click()
   await page.getByTestId('models-detect').click()
   await expect(page.getByTestId('model-row-deepseek/deepseek-chat').locator('input')).toBeDisabled()
@@ -283,6 +293,7 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await expect(page.getByTestId('models-detect')).toBeDisabled()
   await page.getByTestId('models-provider-lmstudio').click()
   await expect(page.getByTestId('models-add-in')).toHaveCount(0) // local: no price
+  await expect(page.getByTestId('provider-limits')).toHaveCount(0) // a local server sets its own requests at once
   await page.getByTestId('set-lmstudioParallel').fill('2')
   await page.getByTestId('models-close').click()
   expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', lmstudioParallel: 2 }))

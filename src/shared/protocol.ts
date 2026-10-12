@@ -35,6 +35,17 @@ export interface ProviderSummary {
   reason?: string
   /** It can list its models (`GET /models`, OpenAI-style providers). */
   canList: boolean
+  /** Requests at once. With `concurrencyAuto` the server sets it (Strata, LM Studio), so it can't be changed here. */
+  concurrency: number
+  concurrencyAuto: boolean
+  /** Requests per minute and per day; missing means no limit. */
+  rpm?: number
+  rpd?: number
+  /** Requests sent since midnight UTC, when daily limits start again. */
+  requestsToday: number
+  /** The daily limit is used up: its jobs use their next model until `dayResetsAt` (epoch ms). */
+  dayFull: boolean
+  dayResetsAt: number
 }
 
 /** A model a provider lists, from `detectModels`. */
@@ -269,6 +280,11 @@ export type Command =
   | { type: 'showModels'; refs: string[]; shown: boolean }
   /** Adds a model by its id to `picked` in config/models.md, for one the provider doesn't list. A paid provider needs both prices (USD per 1M tokens, 0 for free). */
   | { type: 'addModel'; provider: string; id: string; priceIn?: number; priceOut?: number; context?: number }
+  /**
+   * Sets a provider's limits in config/models.md, over providers.md: requests at once (not for a server that reports its own),
+   * per minute and per day. 0 for `rpm` or `rpd` means no limit; a field left out keeps its value.
+   */
+  | { type: 'setProviderLimits'; provider: string; concurrency?: number; rpm?: number; rpd?: number }
   /** The model defaults, LM Studio fields and book limit may be left out: they keep their value. */
   | ({ type: 'saveSettings' } & Omit<SettingsSummary, ModelSettingKey> & Partial<Pick<SettingsSummary, ModelSettingKey>>)
   /** Stores a secret in the Windows credential store. Only the SMTP password and the provider key variables are allowed. */
@@ -305,6 +321,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   detectModels: true,
   showModels: true,
   addModel: true,
+  setProviderLimits: true,
   snapshot: true,
   ping: true,
   coverRendered: true,

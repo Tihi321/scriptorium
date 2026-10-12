@@ -58,6 +58,8 @@ export class ModelRouter {
   readonly limiter: ProviderLimiter
   /** Called when a request finds a server not running and marks it down for every job. */
   onProviderDown?: (p: ProviderInfo) => void
+  /** Called when a provider's daily limit is used up (its `rpd`, or the provider said so): its jobs use their next model until midnight UTC. */
+  onProviderDayFull?: (p: ProviderInfo) => void
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
   constructor(
@@ -70,9 +72,14 @@ export class ModelRouter {
     this.opts = { retries: opts.retries ?? 2, backoffMs: opts.backoffMs ?? 1000, sleep: opts.sleep ?? defaultSleep }
   }
 
+  /** The provider can take requests now: its server is up and its daily limit isn't used up. */
+  private usable(p: ProviderInfo): boolean {
+    return !p.down && !this.limiter.dayFull(p)
+  }
+
   /**
    * Ordered models for a job: the agent's override, then the role's list. Unavailable providers are dropped,
-   * and so are servers that are down (Strata not started), unless nothing else is left.
+   * and so are servers that are down (Strata not started) and providers whose daily limit is used up, unless nothing else is left.
    */
   candidates(role: string, o: CandidateOptions = {}): ModelInfo[] {
     const refs = [...(o.agentModel ? [this.registry.resolve(o.agentModel)] : []), ...this.registry.roleModelRefs(role)]
@@ -84,7 +91,7 @@ export class ModelRouter {
       const m = this.registry.getModel(ref)
       if (m && m.provider.available && m.provider.client && !m.embedding) list.push(m)
     }
-    const up = list.filter((m) => !m.provider.down)
+    const up = list.filter((m) => this.usable(m.provider))
     if (up.length > 0) list = up
     if (o.avoidFamily) {
       const keep = list.filter((m) => m.family !== o.avoidFamily)
@@ -105,8 +112,8 @@ export class ModelRouter {
     let attempts = 0
     const failures: string[] = []
     for (const [i, model] of models.entries()) {
-      // a server that went down after the job started: skip it while a later model can answer
-      if (model.provider.down && models.slice(i + 1).some((m) => !m.provider.down)) continue
+      // a server that went down, or a daily limit used up, after the job started: skip it while a later model can answer
+      if (!this.usable(model.provider) && models.slice(i + 1).some((m) => this.usable(m.provider))) continue
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
         const paid = isPaidModel(model)
@@ -176,6 +183,12 @@ export class ModelRouter {
             failures.push(`${model.ref}: ${err.message}`)
             break
           }
+          // the provider's daily limit is used up (OpenRouter's free-models-per-day): retrying is no use until midnight UTC
+          if (isDailyLimitError(err)) {
+            if (this.limiter.markDayFull(provider)) this.onProviderDayFull?.(provider)
+            failures.push(`${model.ref}: ${err instanceof Error ? err.message : String(err)}`)
+            break
+          }
           // a request too big for this model fails the same way every time: go straight to the next model
           const retryable = err instanceof ProviderError && err.retryable && !isContextError(err)
           if (!retryable || retry === this.opts.retries) {
@@ -196,6 +209,12 @@ export class ModelRouter {
     if (failures.length > 1) throw new ProviderError(`all models failed. ${failures.map((f) => f.slice(0, 400)).join(' | ')}`)
     throw lastError instanceof Error ? lastError : new ProviderError('all models failed')
   }
+}
+
+/** A 429 that says a daily request limit is used up (OpenRouter: `free-models-per-day`), not a per-minute one. */
+export function isDailyLimitError(err: unknown): boolean {
+  if (!(err instanceof ProviderError) || err.status !== 429) return false
+  return /per[-_ ]day|daily/i.test(err.message)
 }
 
 /** The request is larger than the model's context window, or the model ran out of tokens before answering. */

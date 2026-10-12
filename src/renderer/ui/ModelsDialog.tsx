@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
 import { officeStore } from '../store/store'
-import type { ModelGroup, ModelSummary, SettingsSummary } from '../../shared/protocol'
+import type { ModelGroup, ModelSummary, ProviderSummary, SettingsSummary } from '../../shared/protocol'
 
 interface Row {
   ref: string
@@ -21,6 +21,20 @@ const SOURCE_LABEL = { config: 'providers.md', discovered: 'found', picked: 'add
 
 type AliasKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel'
 type LoadKey = 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes'
+type LimitKey = 'concurrency' | 'rpm' | 'rpd'
+/** A provider's limits as typed: empty per minute or per day means no limit. */
+type Limits = Record<LimitKey, string>
+
+function limitsOf(p: ProviderSummary): Limits {
+  return { concurrency: String(p.concurrency), rpm: p.rpm ? String(p.rpm) : '', rpd: p.rpd ? String(p.rpd) : '' }
+}
+
+/** Today's requests against the daily limit, and when it starts again (midnight UTC, in local time). */
+function todayText(p: ProviderSummary): string {
+  const at = new Date(p.dayResetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (p.dayFull) return `Used up today (${p.requestsToday}${p.rpd ? ` of ${p.rpd}` : ''} requests): jobs use their next model until ${at}`
+  return `Today: ${p.requestsToday}${p.rpd ? ` of ${p.rpd}` : ''} requests. The day starts again at ${at} (midnight UTC).`
+}
 
 /** The model groups behind the aliases: their name on screen, their default-model setting and which models they may point at. */
 const GROUPS: Record<ModelGroup, { label: string; key: AliasKey; pick: (m: ModelSummary) => boolean }> = {
@@ -71,6 +85,7 @@ export function ModelsDialog() {
   const [shownOnly, setShownOnly] = useState(false)
   const [add, setAdd] = useState({ id: '', priceIn: '', priceOut: '', context: '' })
   const [load, setLoad] = useState<Pick<SettingsSummary, LoadKey> | null>(null)
+  const [limits, setLimits] = useState<{ provider: string; values: Limits } | null>(null)
 
   // the LM Studio fields are filled once per opening, so a snapshot that arrives while you type doesn't undo it
   useEffect(() => {
@@ -81,6 +96,16 @@ export function ModelsDialog() {
   const current = providers.find((p) => p.id === provider) ?? providers.find((p) => p.available) ?? providers[0]
   const catalog = current ? catalogs[current.id] : undefined
   const local = !!current?.local
+
+  // today's request counts are fresh when the panel opens
+  useEffect(() => {
+    if (open) sendCommand({ type: 'snapshot' })
+  }, [open])
+  // a provider's limit fields are filled when it is opened, so a snapshot that arrives while you type doesn't undo it
+  useEffect(() => {
+    if (!open || !current) setLimits(null)
+    else if (limits?.provider !== current.id) setLimits({ provider: current.id, values: limitsOf(current) })
+  }, [open, current, limits])
 
   const rows = useMemo<Row[]>(() => {
     if (!current) return []
@@ -105,6 +130,7 @@ export function ModelsDialog() {
   }
   const close = () => {
     saveLoad()
+    saveLimits()
     officeStore.getState().setModelsOpen(false)
   }
   const detect = (id: string) => {
@@ -163,6 +189,33 @@ export function ModelsDialog() {
       </div>
     )
   }
+  /** Sends the limits that changed: an empty per minute or per day field means no limit (0). */
+  const saveLimits = () => {
+    if (!current || !limits || limits.provider !== current.id) return
+    const was = limitsOf(current)
+    const change: { concurrency?: number; rpm?: number; rpd?: number } = {}
+    const n = (v: string) => (v.trim() === '' ? 0 : Math.max(0, Math.round(Number(v))))
+    if (limits.values.concurrency !== was.concurrency && n(limits.values.concurrency) >= 1) change.concurrency = n(limits.values.concurrency)
+    if (limits.values.rpm !== was.rpm && Number.isFinite(n(limits.values.rpm))) change.rpm = n(limits.values.rpm)
+    if (limits.values.rpd !== was.rpd && Number.isFinite(n(limits.values.rpd))) change.rpd = n(limits.values.rpd)
+    if (Object.keys(change).length) sendCommand({ type: 'setProviderLimits', provider: current.id, ...change })
+  }
+  const limitField = (label: string, key: LimitKey, title: string) => (
+    <div style={{ flex: 1 }} title={title}>
+      <label>{label}</label>
+      <input
+        type="number"
+        min={key === 'concurrency' ? 1 : 0}
+        value={limits?.values[key] ?? ''}
+        placeholder="no limit"
+        disabled={key === 'concurrency' && current?.concurrencyAuto}
+        onChange={(e) => limits && setLimits({ ...limits, values: { ...limits.values, [key]: e.target.value } })}
+        onBlur={saveLimits}
+        onKeyDown={(e) => e.key === 'Enter' && saveLimits()}
+        data-testid={`limit-${key}`}
+      />
+    </div>
+  )
   const loadField = (label: string, key: LoadKey) => (
     <div style={{ flex: 1 }}>
       <label>{label}</label>
@@ -217,6 +270,18 @@ export function ModelsDialog() {
           </div>
           {current ? (
             <div className="models-pane">
+              {!local && (
+                <>
+                  <div className="row" style={{ gap: 8 }} data-testid="provider-limits">
+                    {limitField('Requests at once', 'concurrency', 'How many requests to this provider run at the same time, across every agent')}
+                    {limitField('Per minute', 'rpm', 'Requests per minute: more wait for the next minute. Empty: no limit')}
+                    {limitField('Per day', 'rpd', "Requests per day, from midnight UTC: after that, jobs use their next model. OpenRouter's free models: 50, or 1000 after buying 10 credits. Empty: no limit")}
+                  </div>
+                  <div className={current.dayFull ? 'warn' : 'dim'} data-testid="provider-today">
+                    {todayText(current)}
+                  </div>
+                </>
+              )}
               <div className="row">
                 <input value={filter} placeholder="Filter, e.g. qwen" onChange={(e) => setFilter(e.target.value)} style={{ flex: 1 }} data-testid="models-filter" />
                 <button

@@ -59,6 +59,11 @@ export const providerEntrySchema = z.looseObject({
   rpm: z.number().int().positive().optional(),
   tpm: z.number().int().positive().optional(),
   /**
+   * Requests per day, counted from midnight UTC (OpenRouter's free models: 50, or 1000 after buying 10 credits). A provider that
+   * reached it is skipped until the next midnight UTC: its jobs go to the next model in their role.
+   */
+  rpd: z.number().int().positive().optional(),
+  /**
    * Ask the provider which models it has (GET /v1/models) and add the unknown ones. `free`: only the ones it lists at price 0
    * (OpenRouter's `:free` models). A paid provider's model that comes without a price is never added, so the budget always sees its cost.
    */
@@ -78,7 +83,21 @@ export const providerEntrySchema = z.looseObject({
  */
 export const modelsConfigSchema = configBase('models').extend({
   picked: z.array(providerModelSchema.extend({ provider: z.string().min(1) })).default([]),
-  hidden: z.array(z.string()).default([])
+  hidden: z.array(z.string()).default([]),
+  /**
+   * Per provider id: limits set in the Models panel, over the ones in providers.md. `concurrency`: requests at once (not for a
+   * `concurrency: auto` server). `rpm`, `rpd`: requests per minute and per day; 0 means no limit.
+   */
+  limits: z
+    .record(
+      z.string(),
+      z.object({
+        concurrency: z.number().int().positive().optional(),
+        rpm: z.number().int().nonnegative().optional(),
+        rpd: z.number().int().nonnegative().optional()
+      })
+    )
+    .default({})
 })
 
 export const providersSchema = configBase('providers').extend({

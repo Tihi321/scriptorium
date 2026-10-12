@@ -27,6 +27,8 @@ export interface ProviderInfo {
   /** `concurrency: auto`: the server did not answer the last check, or says its model is unloaded and won't load on request. Jobs skip it while another model is left. */
   down: boolean
   rpm?: number
+  /** Requests per day, counted from midnight UTC (see `ProviderLimiter.dayFull`). */
+  rpd?: number
   /** `free`: only the models the provider lists at price 0. */
   discover: boolean | 'free'
   /** Words that keep a model out of discovery (`discover_skip`). */
@@ -115,7 +117,7 @@ export class ModelRegistry {
   /** `search_order` of providers.md: the ids of the search providers, in the order the researcher tries them. */
   searchOrder: string[] = []
   /** config/models.md: the models picked in the Models dialog and the refs the pickers leave out. */
-  modelChoices: ModelsConfig = { kind: 'models', picked: [], hidden: [] }
+  modelChoices: ModelsConfig = { kind: 'models', picked: [], hidden: [], limits: {} }
   readonly mock: MockProvider
   /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
   private serverSlots = new Map<string, number>()
@@ -144,6 +146,9 @@ export class ModelRegistry {
     const providers = new Map<string, ProviderInfo>()
     const models = new Map<string, ModelInfo>()
     for (const p of prov.data.providers) {
+      // limits set in the Models panel (config/models.md) win over providers.md; 0 there means no limit
+      const set = choices.limits[p.id] ?? {}
+      const limit = (v: number | undefined, fallback: number | undefined) => (v === undefined ? fallback : v > 0 ? v : undefined)
       const info: ProviderInfo = {
         id: p.id,
         kind: p.kind,
@@ -151,10 +156,11 @@ export class ModelRegistry {
         local: p.local,
         baseUrl: p.base_url,
         apiKeyEnv: p.api_key_env,
-        concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : p.concurrency,
+        concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : (set.concurrency ?? p.concurrency),
         concurrencyAuto: p.concurrency === 'auto',
         down: p.concurrency === 'auto' ? (this.serverDown.get(p.id) ?? false) : false,
-        rpm: p.rpm,
+        rpm: limit(set.rpm, p.rpm),
+        rpd: limit(set.rpd, p.rpd),
         discover: p.discover,
         discoverSkip: p.discover_skip,
         jsonSchema: p.json_schema,
@@ -229,7 +235,7 @@ export class ModelRegistry {
     try {
       text = await fs.readFile(this.modelsFile(), 'utf8')
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'models', picked: [], hidden: [] }
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'models', picked: [], hidden: [], limits: {} }
       throw err
     }
     return parseMdWith(text, modelsConfigSchema, this.modelsFile()).data
