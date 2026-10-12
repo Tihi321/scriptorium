@@ -17,7 +17,7 @@ import { Bible } from './memory/bible'
 import { MemoryService } from './memory/service'
 import { ResearchService, SearchService } from './research/service'
 import type { SearchServiceOptions } from './research/service'
-import { BookStore } from './pipeline/books'
+import { BookStore, TERMINAL_BOOK_STAGES } from './pipeline/books'
 import { Pipeline } from './pipeline/pipeline'
 import { Scheduler } from './queue/scheduler'
 import { IdeaStore } from './store/ideas'
@@ -81,7 +81,10 @@ export class Engine {
     // every event goes out through here: a stage change also sends the book summary, a finished job wakes the factory
     this.emit = (e) => {
       opts.emit(e)
-      if (e.type === 'book.stage') void this.emitBookUpdated(e.book)
+      if (e.type === 'book.stage') {
+        void this.emitBookUpdated(e.book)
+        if (e.stage === 'published' || e.stage === 'rejected') void this.releasePins(e.book)
+      }
       if (e.type === 'job.done') {
         this.pipeline.kick()
         // a book's job ids start with its slug: the book card shows chapters and words as they grow
@@ -270,6 +273,60 @@ export class Engine {
     if (changed) this.emit({ type: 'factory.paused', paused })
   }
 
+  /** Changes how many books are worked on at the same time (`max_books_in_progress` in config/factory.md). */
+  async setMaxBooksInProgress(n: number): Promise<void> {
+    const max = Math.min(20, Math.max(1, Math.round(n) || 1))
+    if (max === this.factory.max_books_in_progress) return
+    const file = this.factoryFile()
+    let doc
+    try {
+      doc = await readMd(file)
+    } catch {
+      doc = { data: { kind: 'factory' } as Record<string, unknown>, body: '' }
+    }
+    await writeMd(file, { ...doc.data, max_books_in_progress: max }, doc.body)
+    this.factory = { ...this.factory, max_books_in_progress: max }
+    this.pipeline.kick() // a higher limit lets the editor-in-chief start a book now
+  }
+
+  /**
+   * Assigns an agent to one book in progress, or frees it (`book: null`). The agent then only takes that book's jobs.
+   * A writer also becomes the book's writer: the book's next writer jobs go to it, and reviewers avoid its model family.
+   */
+  async assignBook(agentId: string, book: string | null): Promise<void> {
+    const def = this.agents.get(agentId)
+    if (!def) return this.log(`assignBook: no agent "${agentId}"`)
+    if (book !== null) {
+      const b = await this.books.read(book)
+      if (!b || TERMINAL_BOOK_STAGES.has(b.data.stage)) return this.log(`assignBook: "${book}" is not a book in progress`)
+      if (def.data.role === 'writer' && b.data.writer_agent !== def.id) {
+        const family = this.router.candidates('writer', { agentModel: def.data.model })[0]?.family
+        await this.books.update(book, () => ({ author: def.data.name, writer_agent: def.id, ...(family ? { writer_family: family } : {}) }))
+        // writer jobs already queued were meant for the old writer
+        for (const job of await this.jobs.list('queued')) {
+          if (job.data.book === book && job.data.role === 'writer' && job.data.agent_hint !== def.id) {
+            await this.jobs.update('queued', job.id, { agent_hint: def.id }).catch(() => undefined) // claimed meanwhile
+          }
+        }
+        this.log(`${def.id} is now the writer of ${book}`)
+        await this.emitBookUpdated(book)
+      }
+    }
+    await this.agents.patch(agentId, { pin: book })
+    this.emitAgentUpdated(agentId)
+    this.scheduler.kick()
+  }
+
+  /** A published or rejected book has no more jobs: its assigned agents go back to taking any job. */
+  private async releasePins(book: string): Promise<void> {
+    for (const def of this.agents.list()) {
+      if (def.data.pin !== book) continue
+      await this.agents.patch(def.id, { pin: null })
+      this.emitAgentUpdated(def.id)
+    }
+    this.scheduler.kick()
+  }
+
   /** Changes a role default: puts the model first in the role's list in config/roles.md. */
   async setRoleModel(role: string, model: string): Promise<void> {
     const file = path.join(this.dataDir, 'config', 'roles.md')
@@ -345,7 +402,8 @@ export class Engine {
       defaultLmstudioModel: s.default_lmstudio_model,
       lmstudioParallel: s.lmstudio_parallel,
       lmstudioContext: s.lmstudio_context,
-      lmstudioTtlMinutes: s.lmstudio_ttl_minutes
+      lmstudioTtlMinutes: s.lmstudio_ttl_minutes,
+      maxBooksInProgress: this.factory.max_books_in_progress
     }
   }
 
@@ -466,6 +524,9 @@ export class Engine {
         return
       case 'stop':
         this.scheduler.stopAgent(cmd.agent)
+        return
+      case 'assignBook':
+        await this.assignBook(cmd.agent, cmd.book)
         return
       case 'pauseAll':
         await this.setPaused(true)
@@ -591,6 +652,7 @@ export class Engine {
           },
           doc.body
         )
+        if (cmd.maxBooksInProgress !== undefined) await this.setMaxBooksInProgress(cmd.maxBooksInProgress)
         await this.loadSettings()
         await this.registry.load()
         this.scheduler.kick()

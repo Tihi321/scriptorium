@@ -23,6 +23,8 @@ export interface AgentView {
   model: string | null
   /** The agent's own override, or null when the role default applies. */
   override: string | null
+  /** The book it is assigned to (only takes that book's jobs), or null. */
+  pin: string | null
   state: AgentState
   paused: boolean
   task?: string

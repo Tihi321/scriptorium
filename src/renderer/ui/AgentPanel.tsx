@@ -5,14 +5,22 @@ import { formatDuration, modelNameOf, providerColor, providerLabel, providerOf, 
 import { officeStore } from '../store/store'
 import { KNOWN_ROLES, modelOptions } from './roles'
 
+/** Stages without jobs: an agent can't be assigned to these books. */
+const FINISHED = new Set(['idea', 'published', 'rejected', 'failed'])
+
 export function AgentPanel() {
   const id = useOffice((s) => s.selectedAgent)
   const agent = useOffice((s) => (s.selectedAgent ? s.agents[s.selectedAgent] : undefined))
   const book = useOffice((s) => (agent?.book ? s.books[agent.book] : undefined))
   const known = useOffice((s) => s.models)
   const defaults = useOffice((s) => s.roleDefaults)
+  const books = useOffice((s) => s.books)
   const now = useNow(1000)
   if (!id || !agent) return null
+  // books it can be assigned to: the ones in progress, plus its current one even if that has finished
+  const assignable = Object.values(books)
+    .filter((b) => !FINISHED.has(b.stage) || b.slug === agent.pin)
+    .sort((a, b) => a.title.localeCompare(b.title))
   const paused = agent.paused || agent.state === 'paused'
   const provider = providerOf(agent.model)
   const options = modelOptions(known, agent.override)
@@ -96,6 +104,18 @@ export function AgentPanel() {
             {options.map((m) => (
               <option key={m} value={m}>
                 {m}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="stack">
+          <span className="dim">Works on{agent.role === 'writer' ? ' (a writer takes the book over from its current writer)' : ''}</span>
+          <select data-testid="agent-book" value={agent.pin ?? ''} onChange={(e) => sendCommand({ type: 'assignBook', agent: agent.id, book: e.target.value || null })}>
+            <option value="">Any book</option>
+            {agent.pin && !books[agent.pin] && <option value={agent.pin}>{agent.pin}</option>}
+            {assignable.map((b) => (
+              <option key={b.slug} value={b.slug}>
+                {b.title}
               </option>
             ))}
           </select>

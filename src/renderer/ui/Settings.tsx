@@ -25,7 +25,8 @@ export function SettingsDialog() {
     defaultLmstudioModel: '',
     lmstudioParallel: 4,
     lmstudioContext: 32768,
-    lmstudioTtlMinutes: 60
+    lmstudioTtlMinutes: 60,
+    maxBooksInProgress: 3
   })
   const [password, setPassword] = useState('')
   const [keyName, setKeyName] = useState(KEY_NAMES[0]!)
@@ -68,7 +69,7 @@ export function SettingsDialog() {
       </>
     )
   }
-  const num = (label: string, key: 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes') => (
+  const num = (label: string, key: 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress') => (
     <div style={{ flex: 1 }}>
       <label>{label}</label>
       <input type="number" value={form[key]} onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })} data-testid={`set-${key}`} />
@@ -79,6 +80,9 @@ export function SettingsDialog() {
     <div className="dialog-backdrop" onClick={close}>
       <div className="dialog settings" onClick={(e) => e.stopPropagation()} data-testid="settings-dialog">
         <div className="panel-title">Settings</div>
+        <div className="row">{num('Books worked on at once', 'maxBooksInProgress')}</div>
+        <div className="dim">More books at once keeps more writers busy: each book's chapters are written one after the other.</div>
+        <hr />
         <div className="dim">Default models (the aliases paid, strata and lmstudio in roles.md)</div>
         {modelSelect('Paid API', 'defaultPaidModel', (m) => !m.local)}
         {modelSelect('Strata', 'defaultStrataModel', (m) => m.provider === 'strata')}

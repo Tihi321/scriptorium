@@ -64,6 +64,8 @@ interface RunningJob {
   done: Promise<void>
   /** Providers whose slot the job holds from its start: the first model's, until the job falls back to another provider. */
   held: Set<string>
+  /** The model the job calls now: the first one, then each fallback. */
+  model: string
 }
 
 interface AgentRuntime {
@@ -197,11 +199,12 @@ export class Scheduler {
     return [...this.runtimes.values()].map((r) => ({ id: r.id, state: r.state ?? 'idle' }))
   }
 
-  /** The agent's current state, task and book, for snapshots. */
-  agentInfo(id: string): { state: AgentState; task?: string; book?: string; jobId?: string } {
+  /** The agent's current state, task, book and the model its job calls now, for snapshots. */
+  agentInfo(id: string): { state: AgentState; task?: string; book?: string; jobId?: string; model?: string } {
     const r = this.runtimes.get(id)
     const state = (r?.state?.split('|')[0] ?? 'idle') as AgentState
-    return { state, task: r?.task || undefined, book: r?.book, jobId: r?.jobId }
+    const model = r?.jobId ? r.running.get(r.jobId)?.model : undefined
+    return { state, task: r?.task || undefined, book: r?.book, jobId: r?.jobId, model }
   }
 
   private abort(rj: RunningJob, reason: AbortReason): void {
@@ -334,7 +337,7 @@ export class Scheduler {
   private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo): void {
     const rt = this.runtimeFor(agent.id)
     const controller = new AbortController()
-    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]) }
+    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref }
     this.running.set(job.id, rj)
     rt.running.set(job.id, rj)
     rj.done = this.run(rj, agent, models, leased).catch((err) => { console.error('[engine] job runner failed:', err) }).finally(() => {
@@ -424,6 +427,7 @@ export class Scheduler {
               this.kick()
             }
             usedModels.push(ev.model.ref)
+            rj.model = ev.model.ref
             logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
           } else if (ev.type === 'delta') {
             text += ev.text

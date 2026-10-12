@@ -17,7 +17,7 @@ import { breakSpot, placeDesks, roomForRole } from '../../src/renderer/office/la
 const T0 = 1_000_000
 
 function agentSummary(id: string, name: string, role: string, o: Partial<AgentSummary> = {}): AgentSummary {
-  return { id, name, role, model: null, resolvedModel: null, paused: false, state: 'idle', ...o }
+  return { id, name, role, model: null, resolvedModel: null, pin: null, paused: false, state: 'idle', ...o }
 }
 
 export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSummary {
@@ -72,7 +72,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     servers: [],
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },
     running: [],
-    settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60 },
+    settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 },
     secretsSet: [],
     at: 'now',
     ...extra

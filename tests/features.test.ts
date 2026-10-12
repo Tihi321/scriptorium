@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import nodemailer from 'nodemailer'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -169,6 +169,38 @@ describe('commands', () => {
     expect(await waitFor(() => last('factory.paused'), 2000, 'factory.paused')).toMatchObject({ paused: true })
     await env.engine.handleCommand({ type: 'resumeAll' })
     await waitFor(() => env.events.filter((e) => e.type === 'factory.paused').length >= 2, 2000, 'second factory.paused')
+  })
+
+  it('assignBook pins an agent to a book in progress, and a writer takes the book over', async () => {
+    const book = 'assigned-book'
+    // paused, so the pipeline leaves it alone, and the job waits (not_before), so the scheduler doesn't take it
+    await env.engine.books.create(book, { title: 'Assigned Book', format: 'novella', target_words: 30000, stage: 'drafting', paused: true, author: 'Old Pen', writer_agent: 'writer-old-pen', writer_family: 'old' })
+    await env.engine.jobs.enqueue({ id: `${book}--draft--ch02--r0`, task: 'draft_chapter', role: 'writer', book, unit: 'ch02', agent_hint: 'writer-old-pen', requested_by: 'engine', not_before: '2999-01-01T00:00:00Z' })
+    const writer = (await env.engine.snapshot()).agents.find((a) => a.role === 'writer')!
+
+    await env.engine.handleCommand({ type: 'assignBook', agent: writer.id, book })
+    expect(env.engine.agents.get(writer.id)!.data.pin).toBe(book)
+    expect(last('agent.updated')).toMatchObject({ agent: { id: writer.id, pin: book } })
+    expect((await env.engine.books.read(book))!.data).toMatchObject({ author: writer.name, writer_agent: writer.id, writer_family: 'wfam' })
+    expect((await env.engine.jobs.list('queued')).find((j) => j.data.book === book)!.data.agent_hint).toBe(writer.id)
+
+    // a finished book can't be picked, and an agent goes free again with null
+    await env.engine.handleCommand({ type: 'assignBook', agent: writer.id, book: slug })
+    expect(env.logs.some((l) => l.includes(`"${slug}" is not a book in progress`))).toBe(true)
+    expect(env.engine.agents.get(writer.id)!.data.pin).toBe(book)
+    await env.engine.handleCommand({ type: 'assignBook', agent: writer.id, book: null })
+    expect(env.engine.agents.get(writer.id)!.data.pin).toBeNull()
+    await rm(env.engine.jobs.file('queued', `${book}--draft--ch02--r0`), { force: true })
+  })
+
+  it('the book limit is a setting, kept in config/factory.md', async () => {
+    expect((await env.engine.snapshot()).settings.maxBooksInProgress).toBe(env.engine.factory.max_books_in_progress)
+    const before = env.engine.factory.max_books_in_progress
+    await env.engine.handleCommand({ type: 'saveSettings', ...env.engine.settingsSummary(), maxBooksInProgress: before + 2 })
+    expect(env.engine.factory.max_books_in_progress).toBe(before + 2)
+    expect(parseMd(await readFile(path.join(env.dir, 'config', 'factory.md'), 'utf8')).data.max_books_in_progress).toBe(before + 2)
+    expect(last('snapshot')!.settings.maxBooksInProgress).toBe(before + 2)
+    await env.engine.handleCommand({ type: 'saveSettings', ...env.engine.settingsSummary(), maxBooksInProgress: before })
   })
 })
 

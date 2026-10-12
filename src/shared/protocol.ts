@@ -30,8 +30,10 @@ export interface AgentSummary {
   role: string
   /** The agent's own override (`provider/model`), or null. */
   model: string | null
-  /** What the agent will use for its next job: the override, else the role default (first usable model). */
+  /** The model its running job calls now, else what it will use for its next job: the override, else the role default (first usable model). */
   resolvedModel: string | null
+  /** The book the agent is assigned to (`pin` in its file): it only takes that book's jobs. Null when it takes any job. */
+  pin: string | null
   paused: boolean
   state: AgentState
   /** What it is doing now, when it has a job. */
@@ -108,9 +110,11 @@ export interface SettingsSummary {
   lmstudioParallel: number
   lmstudioContext: number
   lmstudioTtlMinutes: number
+  /** `max_books_in_progress` in config/factory.md: how many books are worked on at the same time. */
+  maxBooksInProgress: number
 }
 
-export type ModelSettingKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes'
+export type ModelSettingKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
 
 export interface SnapshotEvent {
   type: 'snapshot'
@@ -193,6 +197,8 @@ export type Command =
   | { type: 'pause'; agent: string }
   | { type: 'resume'; agent: string }
   | { type: 'stop'; agent: string }
+  /** Assigns an agent to one book in progress (`pin` in its file), or frees it with `book: null`. A writer also becomes the book's writer. */
+  | { type: 'assignBook'; agent: string; book: string | null }
   | { type: 'pauseAll' }
   | { type: 'resumeAll' }
   | { type: 'stopNow' }
@@ -216,7 +222,7 @@ export type Command =
   | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
   /** Creates an idea file in ideas/. */
   | { type: 'addIdea'; text: string; topic?: string }
-  /** The model defaults and LM Studio fields may be left out: they keep their value. */
+  /** The model defaults, LM Studio fields and book limit may be left out: they keep their value. */
   | ({ type: 'saveSettings' } & Omit<SettingsSummary, ModelSettingKey> & Partial<Pick<SettingsSummary, ModelSettingKey>>)
   /** Stores a secret in the Windows credential store. Only the SMTP password and the provider key variables are allowed. */
   | { type: 'setSecret'; name: string; value: string }
@@ -235,6 +241,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   pause: true,
   resume: true,
   stop: true,
+  assignBook: true,
   pauseAll: true,
   resumeAll: true,
   stopNow: true,

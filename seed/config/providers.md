@@ -6,6 +6,7 @@ providers:
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
     concurrency: 8
+    json_schema: false             # DeepSeek answers response_format json_schema with HTTP 400 ("unavailable now"), checked 2026-10-12
     models:
       - id: deepseek-flash
         family: deepseek
@@ -190,6 +191,10 @@ Strata (`D:\Strata`) is a fast local server for Qwen3.8-Flash-Next with an OpenA
 - `context` must match `--max-context` in the run config (131072).
 - `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. That would be retried and then sent to a paid model, while the engine's own parse-and-repair step already copes with a loose JSON answer.
 - No key is needed. `STRATA_API_KEY` is only sent if you set it.
+
+## DeepSeek
+
+- `json_schema: false`: DeepSeek answers `response_format: json_schema` with HTTP 400 ("This response_format type is unavailable now"), so every structured job failed there at once. The prompt asks for the JSON shape instead, and the engine checks and repairs the answer. Checked 2026-10-12.
 
 ## Search providers (`kind: search`)
 

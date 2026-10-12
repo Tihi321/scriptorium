@@ -61,13 +61,15 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
 
 export function agentSummary(def: AgentDef, sched: Scheduler, router: ModelRouter): AgentSummary {
   const info = sched.agentInfo(def.id)
-  const resolved = router.candidates(def.data.role, { agentModel: def.data.model })[0]?.ref ?? def.data.model ?? router.registry.roleModelRefs(def.data.role)[0] ?? null
+  // a working agent shows the model its job calls now, not the role default it would start the next job with
+  const resolved = info.model ?? router.candidates(def.data.role, { agentModel: def.data.model })[0]?.ref ?? def.data.model ?? router.registry.roleModelRefs(def.data.role)[0] ?? null
   return {
     id: def.id,
     name: def.data.name,
     role: def.data.role,
     model: def.data.model,
     resolvedModel: resolved,
+    pin: def.data.pin,
     paused: def.data.paused,
     state: def.data.paused && info.state === 'idle' ? 'paused' : info.state,
     task: info.task,
