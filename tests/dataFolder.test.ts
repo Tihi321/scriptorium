@@ -54,6 +54,21 @@ describe('initDataFolder', () => {
     expect(again.copied).toEqual([])
     expect(again.skipped).toContain('config/budget.md')
   })
+
+  it('copies the starter staff only into a data folder without agents, so a fired starter agent stays fired', async () => {
+    const data = path.join(dir, 'data')
+    await initDataFolder(data, seedDir)
+    const fired = path.join(data, 'agents', 'writer-mara-quill.md')
+    expect(existsSync(fired)).toBe(true)
+    await rm(fired)
+    const again = await initDataFolder(data, seedDir)
+    expect(existsSync(fired)).toBe(false)
+    expect(again.skipped).toContain('agents/')
+    // a data folder whose agents folder was removed gets the starter staff again
+    await rm(path.join(data, 'agents'), { recursive: true, force: true })
+    await initDataFolder(data, seedDir)
+    expect(existsSync(fired)).toBe(true)
+  })
 })
 
 describe('watchDataFolder', () => {

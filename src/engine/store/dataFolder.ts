@@ -65,13 +65,18 @@ export interface InitResult {
   skipped: string[]
 }
 
-async function copyTree(src: string, dest: string, root: string, result: InitResult): Promise<void> {
+async function copyTree(src: string, dest: string, root: string, result: InitResult, skipDirs: Set<string> = new Set()): Promise<void> {
   await fs.mkdir(dest, { recursive: true })
   for (const entry of await fs.readdir(src, { withFileTypes: true })) {
     const from = path.join(src, entry.name)
     const to = path.join(dest, entry.name)
     if (entry.isDirectory()) {
-      await copyTree(from, to, root, result)
+      const rel = path.relative(root, to).split(path.sep).join('/')
+      if (skipDirs.has(rel)) {
+        result.skipped.push(`${rel}/`)
+        continue
+      }
+      await copyTree(from, to, root, result, skipDirs)
     } else if (entry.isFile()) {
       const rel = path.relative(root, to).split(path.sep).join('/')
       try {
@@ -86,11 +91,16 @@ async function copyTree(src: string, dest: string, root: string, result: InitRes
   }
 }
 
-/** Creates the data folder layout and copies `seed/` into it. Existing files are never overwritten. */
+/**
+ * Creates the data folder layout and copies `seed/` into it. Existing files are never overwritten.
+ * The starter staff (`agents/`) is copied only while the data folder has no `agents/` folder: after that the staff is
+ * yours to hire and fire, and a fired starter agent doesn't come back at the next start.
+ */
 export async function initDataFolder(dataDir: string, seedDir: string | undefined = findSeedDir()): Promise<InitResult> {
   const result: InitResult = { dataDir, createdDirs: 0, copied: [], skipped: [] }
   await fs.mkdir(dataDir, { recursive: true })
-  if (seedDir && existsSync(seedDir)) await copyTree(seedDir, dataDir, dataDir, result)
+  const skipDirs = new Set(existsSync(path.join(dataDir, 'agents')) ? ['agents'] : [])
+  if (seedDir && existsSync(seedDir)) await copyTree(seedDir, dataDir, dataDir, result, skipDirs)
   for (const rel of DATA_LAYOUT) {
     const dir = path.join(dataDir, ...rel.split('/'))
     if (!existsSync(dir)) {
