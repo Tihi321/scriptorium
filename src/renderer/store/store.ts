@@ -173,7 +173,8 @@ function agentFromSummary(a: AgentSummary, prev: AgentView | undefined, now: num
     task: a.task,
     book: a.book,
     jobId: a.jobId,
-    since: same && prev ? prev.since : now
+    since: same && prev ? prev.since : now,
+    problem: a.problem
   }
 }
 
@@ -279,6 +280,11 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
     }
     case 'servers':
       return { servers: e.servers, checkingServers: false }
+    case 'agent.problem': {
+      const prev = s.agents[e.agent]
+      if (!prev) return {}
+      return { agents: { ...s.agents, [e.agent]: { ...prev, problem: e.problem ?? undefined } } }
+    }
     case 'job.model': {
       const prev = s.agents[e.agent]
       const job = s.jobs[e.jobId]

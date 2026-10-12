@@ -1,4 +1,4 @@
-import { formatDuration, modelNameOf, providerLabel, providerOf, roleShort } from '../store/model'
+import { formatDuration, modelNameOf, problemInfo, providerLabel, providerOf, roleShort } from '../store/model'
 import { useHover, useNow, useOffice } from '../store/hooks'
 
 export function Tooltip() {
@@ -17,6 +17,11 @@ export function Tooltip() {
       <div>Book: {book ? book.title : agent.book ?? 'none'}</div>
       <div>Task: {agent.task ?? 'none'}</div>
       <div>On it for {formatDuration(now - agent.since)}</div>
+      {agent.problem && (
+        <div className={problemInfo(agent.problem).serious ? 'bad' : 'warn'}>
+          {problemInfo(agent.problem).title}: {modelNameOf(agent.problem.model)}
+        </div>
+      )}
     </div>
   )
 }

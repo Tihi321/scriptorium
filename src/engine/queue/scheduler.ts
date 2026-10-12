@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { EngineEvent, AgentState } from '../../shared/protocol'
+import type { EngineEvent, AgentProblem, AgentState } from '../../shared/protocol'
 import type { FactoryConfig, JobFrontmatter } from '../../shared/schemas'
 import type { AgentDef, AgentStore } from '../agents/agents'
 import type { Budget } from '../budget/spend'
@@ -83,6 +83,8 @@ interface AgentRuntime {
   jobId?: string
   book?: string
   errorUntil: number
+  /** Its last failed request, until a request of it is answered again. */
+  problem?: AgentProblem
 }
 
 export interface SchedulerDeps {
@@ -232,11 +234,18 @@ export class Scheduler {
   }
 
   /** The agent's current state, task, book and the model its job calls now, for snapshots. */
-  agentInfo(id: string): { state: AgentState; task?: string; book?: string; jobId?: string; model?: string } {
+  agentInfo(id: string): { state: AgentState; task?: string; book?: string; jobId?: string; model?: string; problem?: AgentProblem } {
     const r = this.runtimes.get(id)
     const state = (r?.state?.split('|')[0] ?? 'idle') as AgentState
     const model = r?.jobId ? r.running.get(r.jobId)?.model : undefined
-    return { state, task: r?.task || undefined, book: r?.book, jobId: r?.jobId, model }
+    return { state, task: r?.task || undefined, book: r?.book, jobId: r?.jobId, model, problem: r?.problem }
+  }
+
+  /** Records an agent's failed request, or clears it (`undefined`) when one is answered again, and tells the office. */
+  private setProblem(rt: AgentRuntime, problem: AgentProblem | undefined): void {
+    if (!problem && !rt.problem) return
+    rt.problem = problem
+    this.d.emit({ type: 'agent.problem', agent: rt.id, problem: problem ?? null })
   }
 
   private abort(rj: RunningJob, reason: AbortReason): void {
@@ -476,11 +485,14 @@ export class Scheduler {
                 usedModels.push(ev.model.ref)
                 rj.model = ev.model.ref
                 logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
+              } else if (ev.type === 'problem') {
+                this.setProblem(rt, { kind: ev.kind, model: ev.model.ref, message: ev.message.slice(0, 300), at: this.now() })
               } else if (ev.type === 'delta') {
                 text += ev.text
                 emit({ type: 'job.token', jobId: j.id, agent: agent.id, text: ev.text })
                 logAll(ev.text)
               } else {
+                this.setProblem(rt, undefined)
                 totals.calls++
                 totals.tokensIn += ev.usage.inputTokens
                 totals.tokensCached += ev.usage.cachedInputTokens
@@ -555,6 +567,7 @@ export class Scheduler {
         const attempts = j.attempts + 1
         const max = j.max_attempts ?? this.d.getFactory().max_attempts
         rt.errorUntil = this.now() + 3000
+        if (rt.problem) this.setProblem(rt, { ...rt.problem, failed: true })
         if (attempts >= max) {
           await jobs.fail(j.id, { ...stats(), attempts, failure: message } as Partial<JobFrontmatter>, `${requestBody()}## Failed\n\n${message}\n`)
           logAll(`### Result\nFailed for good after ${attempts} attempt(s): ${message}\n`)

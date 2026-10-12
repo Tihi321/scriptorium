@@ -81,6 +81,33 @@ describe('scheduler', () => {
     expect(models).toEqual(['job.started:loc/m1', 'job.model:alt/m2'])
   })
 
+  it('tells the office why an agent gets no answer, and clears it once a request is answered', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'alt', local: true, models: ['m2'] }],
+      roles: { writer: ['loc/m1', 'alt/m2'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+    let fail = true
+    env.mock.onAny((req) => {
+      if (req.model === 'm1') throw new ProviderError('HTTP 429: {"error":{"message":"Rate limit exceeded: free-models-per-day"}}', 429, true)
+      if (fail) throw new ProviderError('HTTP 400: model does not support this request', 400, false)
+      return 'from m2'
+    })
+    registerChat(env)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine', max_attempts: 1 })
+    await waitFor(async () => (await jobsIn(env!, 'failed')).length === 1, 5000, 'job failed')
+    const problems = () => env!.events.flatMap((e) => (e.type === 'agent.problem' ? [e.problem ? `${e.problem.kind}:${e.problem.model}${e.problem.failed ? ':failed' : ''}` : 'cleared'] : []))
+    expect(problems()).toEqual(['day-limit:loc/m1', 'bad-request:alt/m2', 'bad-request:alt/m2:failed'])
+    // the snapshot keeps it, so a reloaded window shows it too
+    const snap = await env.engine.snapshot()
+    expect(snap.agents.find((a) => a.id === 'writer-ann')?.problem).toMatchObject({ kind: 'bad-request', model: 'alt/m2', failed: true })
+    fail = false
+    await env.engine.jobs.enqueue({ id: 'b1--t--u2--r0', task: 't', role: 'writer', book: 'b1', unit: 'u2', requested_by: 'engine' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done')
+    expect(problems().at(-1)).toBe('cleared') // loc is used up for today, so the job went straight to alt, which answered
+    expect((await env.engine.snapshot()).agents.find((a) => a.id === 'writer-ann')?.problem).toBeUndefined()
+  })
+
   it('a job that falls back to another provider gives the first one its slot back', async () => {
     env = await makeEnv({
       providers: [{ id: 'loc', local: true, concurrency: 1, models: ['m1'] }, { id: 'alt', local: true, models: ['m2'] }],

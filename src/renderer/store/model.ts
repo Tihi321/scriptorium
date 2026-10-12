@@ -1,5 +1,5 @@
 /** Pure types and helpers for the renderer state. No DOM, no React, no Phaser, so tests can run in plain Node. */
-import type { AgentState, BookSummary } from '../../shared/protocol'
+import type { AgentProblem, AgentState, BookSummary, ProblemKind } from '../../shared/protocol'
 
 export const AGENT_STATES: readonly AgentState[] = [
   'working',
@@ -32,6 +32,8 @@ export interface AgentView {
   jobId?: string
   /** When the state or task last changed (ms since epoch), used for "time on task". */
   since: number
+  /** Its last request failed and none has been answered since: why, so you know to pick another model. */
+  problem?: AgentProblem
 }
 
 export interface BookView {
@@ -210,4 +212,23 @@ export function formatDuration(ms: number): string {
 
 export function formatUsd(n: number): string {
   return n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
+}
+
+/** How each kind of failed request reads on screen: a headline, a short word for the desk badge, and what to do about it. */
+const PROBLEMS: Record<ProblemKind, { title: string; short: string; hint: string; serious: boolean }> = {
+  'day-limit': { title: 'Requests for today used up', short: 'used up', hint: 'The provider takes no more requests until midnight UTC. Pick another model below.', serious: true },
+  'rate-limit': { title: 'Rate limited', short: 'rate limit', hint: 'Too many requests right now. It retries; pick another model if it keeps happening.', serious: false },
+  down: { title: 'Server not running', short: 'server off', hint: 'Start the server, or pick another model below.', serious: true },
+  'too-big': { title: 'Request too big for this model', short: 'too big', hint: 'The request does not fit its context window or answer budget. Pick a model with a larger context.', serious: true },
+  'no-access': { title: 'No access: key missing or wrong', short: 'no key', hint: "Store the provider's key in Settings, or pick another model below.", serious: true },
+  'no-credit': { title: 'No credit left', short: 'no credit', hint: 'Top up the provider, or pick another model below.', serious: true },
+  'not-found': { title: 'Model not found', short: 'no model', hint: 'The provider does not have this model. Pick another model below.', serious: true },
+  'bad-request': { title: 'Bad request', short: 'bad request', hint: 'The provider refused the request. Pick another model below.', serious: true },
+  server: { title: 'Provider error', short: 'server error', hint: "The provider's server failed. It retries; pick another model if it keeps happening.", serious: false },
+  budget: { title: 'Over the budget', short: 'budget', hint: 'A spending cap was reached. Raise it in config/budget.md, or pick a free or local model.', serious: true },
+  other: { title: 'Request failed', short: 'error', hint: 'Pick another model if it keeps happening.', serious: false }
+}
+
+export function problemInfo(p: AgentProblem): { title: string; short: string; hint: string; serious: boolean } {
+  return PROBLEMS[p.kind] ?? PROBLEMS.other
 }

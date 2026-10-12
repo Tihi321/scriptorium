@@ -4,6 +4,7 @@ import {
   handoverAlpha,
   hexToInt,
   modelNameOf,
+  problemInfo,
   providerColor,
   providerLabel,
   providerOf,
@@ -156,6 +157,13 @@ class Actor {
     this.badge.setText(badgeText)
     this.badge.setBackgroundColor(providerColor(provider))
     this.badge.setColor(luminance(providerColor(provider)) > 0.55 ? '#101010' : '#ffffff')
+    // its requests fail: the badge says why (rate limit, used up, bad request ...), so you know to pick another model
+    if (view.problem) {
+      const info = problemInfo(view.problem)
+      this.badge.setText(`! ${info.short}`)
+      this.badge.setBackgroundColor(info.serious ? '#e5484d' : '#f2c14e')
+      this.badge.setColor(info.serious ? '#ffffff' : '#101010')
+    }
     this.badge.setPosition(cx, placement.y + OFF.badge)
     const book = view.book ? officeStore.getState().books[view.book] : undefined
     this.tag.setVisible(!!book && !away)
@@ -267,13 +275,21 @@ class Actor {
         const lift = Math.sin(t * 6 + ph) * 1.5
         this.icon.fillStyle(0xf2c9a0, 1).fillRect(this.x + 9, headY + 4 + lift, 3, 8)
         this.icon.fillRect(this.x + 8, headY + 1 + lift, 5, 4)
-        this.mark.setText('?').setPosition(this.x - 13, headY + 4).setVisible(true)
+        this.mark.setText('?').setColor('#ffd23f').setPosition(this.x - 13, headY + 4).setVisible(true)
       } else if (s === 'reviewing') {
         this.icon.fillStyle(0xffffff, 1).fillRect(this.x - 6, this.y - 12, 12, 8)
         this.icon.fillStyle(0x6a7a90, 1).fillRect(this.x - 5, this.y - 10, 10, 1).fillRect(this.x - 5, this.y - 8, 7, 1)
       } else if (s === 'error') {
         this.mark.setText('!').setColor('#ff5555').setPosition(this.x + 14, headY + 8).setVisible(true)
       }
+    }
+    if (view.problem && !this.walking && !this.mark.visible) {
+      const blink = Math.floor(t * 2) % 2 === 0
+      this.mark
+        .setText('!')
+        .setColor(problemInfo(view.problem).serious ? '#ff5555' : '#ffd23f')
+        .setPosition(this.x + 14, headY + 8)
+        .setVisible(blink || !away)
     }
     const long = selected || hoverStore.getState().hover?.id === this.id
     if (long !== this.bubbleLong) {

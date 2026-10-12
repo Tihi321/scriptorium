@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { sendCommand } from '../api'
 import { useAgentList, useNow, useOffice } from '../store/hooks'
-import { formatDuration, modelNameOf, providerColor, providerLabel, providerOf, roleShort } from '../store/model'
+import { formatDuration, modelNameOf, problemInfo, providerColor, providerLabel, providerOf, roleShort } from '../store/model'
 import { officeStore } from '../store/store'
 import { KNOWN_ROLES, modelOptions } from './roles'
 
@@ -25,6 +25,8 @@ export function AgentPanel() {
   const provider = providerOf(agent.model)
   const options = modelOptions(known, agent.override)
   const roleDefault = defaults[agent.role]
+  const problem = agent.problem
+  const info = problem ? problemInfo(problem) : undefined
   return (
     <div className="card" data-testid="agent-panel">
       <h3>
@@ -61,6 +63,18 @@ export function AgentPanel() {
             {providerLabel(provider)} · {modelNameOf(agent.model)}
           </span>
         </div>
+        {problem && info && (
+          <div className={`agent-problem${info.serious ? ' serious' : ''}`} data-testid="agent-problem">
+            <div>
+              <b>{info.title}</b> on {providerLabel(providerOf(problem.model))} · {modelNameOf(problem.model)}
+              <span className="dim"> ({formatDuration(now - problem.at)} ago{problem.failed ? ', the job failed' : ''})</span>
+            </div>
+            <div>{info.hint}</div>
+            <div className="dim problem-detail" title={problem.message}>
+              {problem.message}
+            </div>
+          </div>
+        )}
         <div className="row">
           <button
             data-testid="agent-pause"

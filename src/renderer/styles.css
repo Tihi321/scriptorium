@@ -773,3 +773,37 @@ button.small {
   font-weight: 700;
 }
 
+/* why an agent's requests fail: rate limit, used up for today, bad request, server off ... */
+.agent-problem {
+  border: 1px solid var(--warn);
+  background: rgba(242, 193, 78, 0.12);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.agent-problem b {
+  color: var(--warn);
+}
+.agent-problem.serious {
+  border-color: var(--bad);
+  background: rgba(229, 72, 77, 0.14);
+}
+.agent-problem.serious b {
+  color: var(--bad);
+}
+.agent-problem .problem-detail {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  max-height: 4.4em;
+  overflow: hidden;
+}
+.tooltip .bad {
+  color: var(--bad);
+  font-weight: 700;
+}
+.tooltip .warn {
+  color: var(--warn);
+  font-weight: 700;
+}

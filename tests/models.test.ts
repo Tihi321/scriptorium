@@ -14,7 +14,7 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
-import { ModelRouter, isDailyLimitError } from '../src/engine/models/router'
+import { ModelRouter, isDailyLimitError, problemKind } from '../src/engine/models/router'
 import { BudgetError, collect, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
@@ -244,6 +244,29 @@ describe('router', () => {
     expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/z'])
     expect(r.candidates('writer', { agentModel: 'a/y' }).map((m) => m.ref)).toEqual(['a/y', 'a/x', 'b/z'])
     expect(r.candidates('unknown-role')).toEqual([])
+  })
+
+  it("keeps the agent's own model first even in the writer's family", async () => {
+    const { registry } = await registryWith({
+      providers: [{ id: 'ds', family: 'deepseek', models: ['f'] }, { id: 'or', family: 'nemotron', models: ['n'] }],
+      roles: { 'beta-reader': ['or/n', 'ds/f'] }
+    })
+    const r = new ModelRouter(registry, undefined)
+    expect(r.candidates('beta-reader', { agentModel: 'ds/f', avoidFamily: 'deepseek' }).map((m) => m.ref)).toEqual(['ds/f', 'or/n'])
+    expect(r.candidates('beta-reader', { avoidFamily: 'deepseek' }).map((m) => m.ref)).toEqual(['or/n', 'ds/f'])
+  })
+
+  it('names the kind of each failure', () => {
+    expect(problemKind(new ProviderError('HTTP 429: free-models-per-day', 429, true))).toBe('day-limit')
+    expect(problemKind(new ProviderError('HTTP 429: slow down', 429, true))).toBe('rate-limit')
+    expect(problemKind(new ProviderError('connect ECONNREFUSED', undefined, true, undefined, true))).toBe('down')
+    expect(problemKind(new ProviderError('HTTP 400: exceeds the available context size', 400))).toBe('too-big')
+    expect(problemKind(new ProviderError('HTTP 401: invalid key', 401))).toBe('no-access')
+    expect(problemKind(new ProviderError('HTTP 402: insufficient credits', 402))).toBe('no-credit')
+    expect(problemKind(new ProviderError('HTTP 404: no such model', 404))).toBe('not-found')
+    expect(problemKind(new ProviderError('HTTP 400: bad', 400))).toBe('bad-request')
+    expect(problemKind(new ProviderError('HTTP 503: overloaded', 503, true))).toBe('server')
+    expect(problemKind(new Error('something'))).toBe('other')
   })
 
   it('avoids the writer family for reviewers', async () => {

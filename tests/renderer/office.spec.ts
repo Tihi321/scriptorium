@@ -58,6 +58,19 @@ test('the office renders, an agent opens its terminal, and the controls send com
   await expect(page.getByTestId('tooltip')).toContainText('Mara Quill')
   await page.mouse.click(box.x + pos!.x, box.y + pos!.y)
   await expect(page.getByTestId('agent-name')).toHaveText('Mara Quill')
+  // a failed request shows why, until a request is answered again
+  await expect(page.getByTestId('agent-problem')).toHaveCount(0)
+  await page.evaluate((agent) => {
+    const problem = { kind: 'day-limit', model: 'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free', message: 'HTTP 429: Rate limit exceeded: free-models-per-day', at: Date.now() }
+    ;(globalThis as unknown as { __scriptoriumFake: { emit: (e: unknown) => void } }).__scriptoriumFake.emit({ type: 'agent.problem', agent, problem })
+  }, id)
+  await expect(page.getByTestId('agent-problem')).toContainText('Requests for today used up')
+  await expect(page.getByTestId('agent-problem')).toContainText('Pick another model below')
+  await page.getByTestId('agent-panel').screenshot({ path: '.claude/temp/agent-problem.png' })
+  await page.evaluate((agent) => {
+    ;(globalThis as unknown as { __scriptoriumFake: { emit: (e: unknown) => void } }).__scriptoriumFake.emit({ type: 'agent.problem', agent, problem: null })
+  }, id)
+  await expect(page.getByTestId('agent-problem')).toHaveCount(0)
   await expect(page.getByTestId('terminal')).toBeVisible()
   // history from the stubbed file reads
   await expect(page.getByTestId('terminal-log')).toContainText('Once upon a time')

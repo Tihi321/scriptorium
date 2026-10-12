@@ -5,6 +5,7 @@ import { computeCost, isPaidModel } from './registry'
 import type { ModelInfo, ModelRegistry, ProviderInfo } from './registry'
 import { BudgetError, emptyUsage, isAbortError, ProviderError } from './types'
 import type { ChatMessage, RequestMeta, Usage } from './types'
+import type { ProblemKind } from '../../shared/protocol'
 
 export interface CandidateOptions {
   /** The agent's own `provider/model` override. Goes first. */
@@ -26,6 +27,8 @@ export type RoutedEvent =
   | { type: 'attempt'; model: ModelInfo; attempt: number }
   | { type: 'delta'; text: string }
   | { type: 'done'; model: ModelInfo; usage: Usage; costUsd: number; ms: number }
+  /** A request failed: the router retries, falls back to the next model, or gives up after this. */
+  | { type: 'problem'; model: ModelInfo; kind: ProblemKind; message: string }
 
 export interface RouterOptions {
   /** Retries on the same model for retryable errors before falling back. Default 2. */
@@ -82,7 +85,8 @@ export class ModelRouter {
    * and so are servers that are down (Strata not started) and providers whose daily limit is used up, unless nothing else is left.
    */
   candidates(role: string, o: CandidateOptions = {}): ModelInfo[] {
-    const refs = [...(o.agentModel ? [this.registry.resolve(o.agentModel)] : []), ...this.registry.roleModelRefs(role)]
+    const own = o.agentModel ? this.registry.resolve(o.agentModel) : undefined
+    const refs = [...(own ? [own] : []), ...this.registry.roleModelRefs(role)]
     const seen = new Set<string>()
     let list: ModelInfo[] = []
     for (const ref of refs) {
@@ -94,9 +98,12 @@ export class ModelRouter {
     const up = list.filter((m) => this.usable(m.provider))
     if (up.length > 0) list = up
     if (o.avoidFamily) {
-      const keep = list.filter((m) => m.family !== o.avoidFamily)
-      const avoid = list.filter((m) => m.family === o.avoidFamily)
-      return [...keep, ...avoid]
+      // the agent's own model was picked on purpose: it stays first even in the writer's family
+      const first = list[0]?.ref === own ? list.slice(0, 1) : []
+      const rest = list.slice(first.length)
+      const keep = rest.filter((m) => m.family !== o.avoidFamily)
+      const avoid = rest.filter((m) => m.family === o.avoidFamily)
+      return [...first, ...keep, ...avoid]
     }
     return list
   }
@@ -122,6 +129,7 @@ export class ModelRouter {
           const est = estimateCost(model, req.messages, req.maxTokens)
           const r = this.budget.reserve(est, req.meta.book ?? '')
           if (!r.ok) {
+            yield { type: 'problem', model, kind: 'budget', message: r.reason }
             budgetRefusal = r.reason
             break // next model
           }
@@ -177,6 +185,7 @@ export class ModelRouter {
         } catch (err) {
           if (isAbortError(err) || req.signal?.aborted) throw err
           lastError = err
+          yield { type: 'problem', model, kind: problemKind(err), message: err instanceof Error ? err.message : String(err) }
           // nothing listens there (Strata not started): mark it down for every job and go to the next model without retries
           if (err instanceof ProviderError && err.unreachable && provider.concurrencyAuto) {
             if (this.registry.markDown(provider)) this.onProviderDown?.(provider)
@@ -209,6 +218,21 @@ export class ModelRouter {
     if (failures.length > 1) throw new ProviderError(`all models failed. ${failures.map((f) => f.slice(0, 400)).join(' | ')}`)
     throw lastError instanceof Error ? lastError : new ProviderError('all models failed')
   }
+}
+
+/** What kind of failure an error is, so the office can say why an agent isn't getting answers. */
+export function problemKind(err: unknown): ProblemKind {
+  if (isDailyLimitError(err)) return 'day-limit'
+  if (err instanceof ProviderError && err.unreachable) return 'down'
+  if (isContextError(err)) return 'too-big'
+  const status = err instanceof ProviderError ? err.status : undefined
+  if (status === 429) return 'rate-limit'
+  if (status === 401 || status === 403) return 'no-access'
+  if (status === 402) return 'no-credit'
+  if (status === 404) return 'not-found'
+  if (status !== undefined && status >= 400 && status < 500) return 'bad-request'
+  if (status !== undefined && status >= 500) return 'server'
+  return 'other'
 }
 
 /** A 429 that says a daily request limit is used up (OpenRouter: `free-models-per-day`), not a per-minute one. */

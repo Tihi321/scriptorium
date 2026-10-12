@@ -5,6 +5,27 @@
 
 export type AgentState = 'working' | 'reviewing' | 'waiting-provider' | 'waiting-research' | 'idle' | 'error' | 'paused'
 
+/**
+ * Why a model didn't answer an agent: `day-limit` (the provider's requests for today are used up), `rate-limit` (too many
+ * requests now, HTTP 429), `down` (the server isn't running), `too-big` (the request doesn't fit the model's context or answer
+ * budget), `no-access` (401/403: key missing or wrong), `no-credit` (402), `not-found` (404: no such model), `bad-request`
+ * (another 4xx), `server` (5xx), `budget` (a paid model over a spending cap), `other`.
+ */
+export type ProblemKind = 'day-limit' | 'rate-limit' | 'down' | 'too-big' | 'no-access' | 'no-credit' | 'not-found' | 'bad-request' | 'server' | 'budget' | 'other'
+
+/** The last failed request of an agent, kept until one of its requests is answered again. */
+export interface AgentProblem {
+  kind: ProblemKind
+  /** `provider/model` that failed. */
+  model: string
+  /** The error, shortened. */
+  message: string
+  /** When it happened (ms since epoch). */
+  at: number
+  /** The job failed for good on it (every model of the role failed), rather than retrying or falling back. */
+  failed?: boolean
+}
+
 export interface ModelSummary {
   /** `provider/model`, the id used in `setModel` and in config files. */
   ref: string
@@ -85,6 +106,8 @@ export interface AgentSummary {
   task?: string
   book?: string
   jobId?: string
+  /** Its last request failed and none has been answered since. */
+  problem?: AgentProblem
 }
 
 export interface BookSummary {
@@ -214,6 +237,8 @@ export type EngineEvent =
   | { type: 'agent.updated'; agent: AgentSummary }
   | { type: 'factory.paused'; paused: boolean }
   | { type: 'job.started'; jobId: string; agent: string; task: string; book?: string; model?: string }
+  /** A request of the agent failed (`problem`), or one was answered again after that (`null`). */
+  | { type: 'agent.problem'; agent: string; problem: AgentProblem | null }
   /** The job moved to another model (a fallback after a failure), so the office shows the one answering now. */
   | { type: 'job.model'; jobId: string; agent: string; model: string }
   | { type: 'job.token'; jobId: string; agent: string; text: string }

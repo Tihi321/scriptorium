@@ -75,7 +75,8 @@ export function agentSummary(def: AgentDef, sched: Scheduler, router: ModelRoute
     state: def.data.paused && info.state === 'idle' ? 'paused' : info.state,
     task: info.task,
     book: info.book,
-    jobId: info.jobId
+    jobId: info.jobId,
+    problem: info.problem
   }
 }
 
