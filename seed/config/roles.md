@@ -39,7 +39,7 @@ roles:
 
 The default models for each role, as an ordered list of `provider/model` or an alias. The first model is the default. If it fails, is rate-limited or is over budget, the next one is tried. An agent's own `model` field (in `agents/<agent>.md`) goes in front of this list.
 
-The aliases `paid`, `strata` and `lmstudio` stand for the default models in `config/settings.md` (also in the app's settings): DeepSeek V4.1 Flash, Strata's Qwen3.8-Flash-Next and LM Studio's Gemma 4 E4B to start with. Change a default there and every role that uses the alias follows.
+The aliases `paid`, `strata` and `lmstudio` stand for the default models in `config/settings.md` (also in the app's Models panel): DeepSeek V4.1 Flash, Strata's Qwen3.8-Flash-Next and LM Studio's Gemma 4 E4B to start with. Change a default there and every role that uses the alias follows.
 
 Starting choices, all of them first guesses to be tuned in the model picker:
 - Writers, architect, editor-in-chief, idea generator, publisher: the paid default, with Strata and then LM Studio as fallbacks.

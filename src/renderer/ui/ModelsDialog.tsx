@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
 import { officeStore } from '../store/store'
+import type { ModelSummary, SettingsSummary } from '../../shared/protocol'
 
 interface Row {
   ref: string
@@ -11,14 +12,15 @@ interface Row {
   priceOut?: number
   /** In the pickers now. */
   shown: boolean
-  /** The engine knows it (providers.md, discovery or picked); otherwise it is only in the provider's list. */
-  known: boolean
   source?: 'config' | 'discovered' | 'picked'
   /** It can be ticked: known, local, or listed with a price. */
   pickable: boolean
 }
 
-const SOURCE_LABEL = { config: 'providers.md', discovered: 'found', picked: 'picked' } as const
+const SOURCE_LABEL = { config: 'providers.md', discovered: 'found', picked: 'added' } as const
+
+type AliasKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel'
+type LoadKey = 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes'
 
 /** A short word for why a provider can't be used: its key is missing, or it is switched off. */
 function shortReason(reason?: string): string {
@@ -40,84 +42,151 @@ function formatPrice(r: Row, local: boolean): string {
   return `${f(r.priceIn)} / ${f(r.priceOut)}`
 }
 
-/** Settings → Choose models: every model a provider has, and which ones the model pickers offer (config/models.md). */
+/** Saves one or more of the model settings, keeping the rest as they are. */
+function saveModelSettings(settings: SettingsSummary, change: Partial<SettingsSummary>) {
+  sendCommand({ type: 'saveSettings', ...settings, ...change })
+}
+
+/**
+ * The Models panel (top bar → Models): the default models behind the aliases, every model a provider has, which ones the model
+ * pickers offer (config/models.md), adding a model by its id, and how LM Studio loads its models.
+ */
 export function ModelsDialog() {
   const open = useOffice((s) => s.modelsOpen)
   const providers = useOffice((s) => s.providers)
   const models = useOffice((s) => s.models)
   const catalogs = useOffice((s) => s.catalogs)
+  const settings = useOffice((s) => s.settings)
   const [provider, setProvider] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [freeOnly, setFreeOnly] = useState(false)
   const [shownOnly, setShownOnly] = useState(false)
+  const [add, setAdd] = useState({ id: '', priceIn: '', priceOut: '', context: '' })
+  const [load, setLoad] = useState<Pick<SettingsSummary, LoadKey> | null>(null)
+
+  // the LM Studio fields are filled once per opening, so a snapshot that arrives while you type doesn't undo it
+  useEffect(() => {
+    if (!open) setLoad(null)
+    else if (settings && !load) setLoad({ lmstudioParallel: settings.lmstudioParallel, lmstudioContext: settings.lmstudioContext, lmstudioTtlMinutes: settings.lmstudioTtlMinutes })
+  }, [open, settings, load])
 
   const current = providers.find((p) => p.id === provider) ?? providers.find((p) => p.available) ?? providers[0]
   const catalog = current ? catalogs[current.id] : undefined
-  const detect = (id: string) => {
-    officeStore.getState().markCatalogLoading(id)
-    sendCommand({ type: 'detectModels', provider: id })
-  }
-  // a provider that can list its models lists them the first time it is opened here
-  useEffect(() => {
-    if (open && current?.available && current.canList && !catalogs[current.id]) detect(current.id)
-  }, [open, current, catalogs])
+  const local = !!current?.local
 
   const rows = useMemo<Row[]>(() => {
     if (!current) return []
     const out = new Map<string, Row>()
     for (const m of models) {
       if (m.provider !== current.id) continue
-      out.set(m.ref, { ref: m.ref, id: m.model, context: m.context, priceIn: m.priceIn, priceOut: m.priceOut, shown: m.shown !== false, known: true, source: m.source, pickable: true })
+      out.set(m.ref, { ref: m.ref, id: m.model, context: m.context, priceIn: m.priceIn, priceOut: m.priceOut, shown: m.shown !== false, source: m.source, pickable: true })
     }
     for (const c of catalog?.models ?? []) {
       const known = out.get(c.ref)
       if (known) out.set(c.ref, { ...known, context: known.context ?? c.context })
-      else out.set(c.ref, { ref: c.ref, id: c.id, context: c.context, priceIn: c.priceIn, priceOut: c.priceOut, shown: false, known: false, pickable: c.pickable })
+      else out.set(c.ref, { ref: c.ref, id: c.id, context: c.context, priceIn: c.priceIn, priceOut: c.priceOut, shown: false, pickable: c.pickable })
     }
     return [...out.values()].sort((a, b) => a.id.localeCompare(b.id))
   }, [current, models, catalog])
 
   if (!open) return null
-  const close = () => officeStore.getState().setModelsOpen(false)
+  const saveLoad = () => {
+    if (!settings || !load) return
+    const changed = (Object.keys(load) as LoadKey[]).some((k) => load[k] !== settings[k])
+    if (changed) saveModelSettings(settings, load)
+  }
+  const close = () => {
+    saveLoad()
+    officeStore.getState().setModelsOpen(false)
+  }
+  const detect = (id: string) => {
+    officeStore.getState().markCatalogLoading(id)
+    sendCommand({ type: 'detectModels', provider: id })
+  }
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean)
   const visible = rows.filter(
-    (r) =>
-      words.every((w) => r.id.toLowerCase().includes(w)) &&
-      (!freeOnly || current?.local || (r.priceIn === 0 && r.priceOut === 0)) &&
-      (!shownOnly || r.shown)
+    (r) => words.every((w) => r.id.toLowerCase().includes(w)) && (!freeOnly || local || (r.priceIn === 0 && r.priceOut === 0)) && (!shownOnly || r.shown)
   )
   const toShow = visible.filter((r) => !r.shown && r.pickable).map((r) => r.ref)
   const toHide = visible.filter((r) => r.shown).map((r) => r.ref)
-  const local = !!current?.local
+
+  const num = (v: string) => (v.trim() === '' ? undefined : Number(v))
+  const addPriceOk = local || (num(add.priceIn) !== undefined && num(add.priceIn)! >= 0 && num(add.priceOut) !== undefined && num(add.priceOut)! >= 0)
+  const canAdd = !!current && add.id.trim() !== '' && addPriceOk
+  const addModel = () => {
+    if (!current || !canAdd) return
+    sendCommand({ type: 'addModel', provider: current.id, id: add.id.trim(), priceIn: num(add.priceIn), priceOut: num(add.priceOut), context: num(add.context) })
+    setAdd({ id: '', priceIn: '', priceOut: '', context: '' })
+  }
+
+  /** A picker for one alias: the ticked models it may point at, plus the current value if it isn't one of them. */
+  const aliasSelect = (label: string, key: AliasKey, pick: (m: ModelSummary) => boolean) => {
+    if (!settings) return null
+    const refs = models.filter((m) => m.shown !== false && pick(m)).map((m) => m.ref)
+    if (settings[key] && !refs.includes(settings[key])) refs.unshift(settings[key])
+    return (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <label>{label}</label>
+        <select value={settings[key]} onChange={(e) => saveModelSettings(settings, { [key]: e.target.value })} data-testid={`set-${key}`}>
+          {refs.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </div>
+    )
+  }
+  const loadField = (label: string, key: LoadKey) => (
+    <div style={{ flex: 1 }}>
+      <label>{label}</label>
+      <input
+        type="number"
+        value={load?.[key] ?? ''}
+        onChange={(e) => load && setLoad({ ...load, [key]: Number(e.target.value) })}
+        onBlur={saveLoad}
+        data-testid={`set-${key}`}
+      />
+    </div>
+  )
 
   return (
     <div className="dialog-backdrop" onClick={close}>
       <div className="dialog models" onClick={(e) => e.stopPropagation()} data-testid="models-dialog">
-        <div className="panel-title">Models in the pickers</div>
-        <div className="dim">Tick the models the model pickers offer. Detect models asks the provider for everything it has. Saved in config/models.md.</div>
+        <div className="panel-title">Models</div>
+        <div className="dim">Default models: the aliases paid, strata and lmstudio in roles.md. Every role that names one follows it.</div>
+        <div className="row" style={{ gap: 8 }}>
+          {aliasSelect('Paid API', 'defaultPaidModel', (m) => !m.local)}
+          {aliasSelect('Strata', 'defaultStrataModel', (m) => m.provider === 'strata')}
+          {aliasSelect('LM Studio', 'defaultLmstudioModel', (m) => m.provider === 'lmstudio')}
+        </div>
+        <hr />
+        <div className="dim">Tick the models the pickers offer. Saved in config/models.md.</div>
         <div className="models-body">
           <div className="models-providers">
-            {providers.map((p) => {
-              const ofP = models.filter((m) => m.provider === p.id)
-              return (
-                <button
-                  key={p.id}
-                  className={p.id === current?.id ? 'primary' : ''}
-                  onClick={() => setProvider(p.id)}
-                  data-testid={`models-provider-${p.id}`}
-                  title={p.available ? undefined : p.reason}
-                >
-                  <span>{p.id}</span>
-                  <span className="dim">{p.available ? `${ofP.filter((m) => m.shown !== false).length} ticked` : shortReason(p.reason)}</span>
-                </button>
-              )
-            })}
+            {providers.map((p) => (
+              <button
+                key={p.id}
+                className={p.id === current?.id ? 'primary' : ''}
+                onClick={() => setProvider(p.id)}
+                data-testid={`models-provider-${p.id}`}
+                title={p.available ? undefined : p.reason}
+              >
+                <span>{p.id}</span>
+                <span className="dim">{p.available ? `${models.filter((m) => m.provider === p.id && m.shown !== false).length} ticked` : shortReason(p.reason)}</span>
+              </button>
+            ))}
           </div>
           {current ? (
             <div className="models-pane">
               <div className="row">
-                <input value={filter} placeholder="Filter, e.g. qwen free" onChange={(e) => setFilter(e.target.value)} style={{ flex: 1 }} data-testid="models-filter" />
-                <button disabled={!current.available || !current.canList || catalog?.loading} onClick={() => detect(current.id)} data-testid="models-detect">
+                <input value={filter} placeholder="Filter, e.g. qwen" onChange={(e) => setFilter(e.target.value)} style={{ flex: 1 }} data-testid="models-filter" />
+                <button
+                  disabled={!current.available || !current.canList || catalog?.loading}
+                  onClick={() => detect(current.id)}
+                  title={current.canList ? `Ask ${current.id} for every model it has` : `${current.id} can't list its models: add them by id below`}
+                  data-testid="models-detect"
+                >
                   {catalog?.loading ? 'Detecting...' : 'Detect models'}
                 </button>
               </div>
@@ -138,12 +207,12 @@ export function ModelsDialog() {
                       ? 'No key: store it in Settings, under Provider API key'
                       : (current.reason ?? 'not available')
                     : !current.canList
-                      ? 'This provider can\'t list its models: add them to providers.md'
+                      ? "Can't list its models: add them by id below"
                       : catalog?.error
                         ? `Could not list: ${catalog.error}`
                         : catalog?.at
                           ? `${catalog.models.length} listed, ${rows.filter((r) => r.shown).length} ticked`
-                          : ''}
+                          : 'Detect models lists everything it has'}
                 </span>
               </div>
               <div className="row" style={{ gap: 6 }}>
@@ -157,7 +226,12 @@ export function ModelsDialog() {
               </div>
               <div className="models-list" data-testid="models-list">
                 {visible.map((r) => (
-                  <label key={r.ref} className={`model-row${r.pickable ? '' : ' disabled'}`} title={r.pickable ? r.ref : 'No listed price, so the budget could not count it: add it to providers.md with its price'} data-testid={`model-row-${r.ref}`}>
+                  <label
+                    key={r.ref}
+                    className={`model-row${r.pickable ? '' : ' disabled'}`}
+                    title={r.pickable ? r.ref : 'No listed price, so the budget could not count it: add it by id below with its price'}
+                    data-testid={`model-row-${r.ref}`}
+                  >
                     <input type="checkbox" checked={r.shown} disabled={!r.pickable} onChange={(e) => sendCommand({ type: 'showModels', refs: [r.ref], shown: e.target.checked })} />
                     <span className="model-id">{r.id}</span>
                     <span className="dim">{formatContext(r.context)}</span>
@@ -167,13 +241,44 @@ export function ModelsDialog() {
                 ))}
                 {!visible.length && <div className="dim">{catalog?.loading ? 'Asking the provider...' : 'No models here.'}</div>}
               </div>
-              <div className="dim">Prices are USD per 1M tokens in / out, as the provider lists them. A ticked model the engine didn't know is saved with that price, and the budget counts it.</div>
+              <div className="dim">Add a model by its id{local ? '' : ', with its price in USD per 1M tokens (0 and 0 for a free one)'}:</div>
+              <div className="row" style={{ gap: 6 }}>
+                <input
+                  value={add.id}
+                  placeholder={current.id === 'openrouter' ? 'e.g. qwen/qwen3-235b-a22b:free' : 'model id'}
+                  onChange={(e) => setAdd({ ...add, id: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && addModel()}
+                  style={{ flex: 3 }}
+                  data-testid="models-add-id"
+                />
+                {!local && (
+                  <>
+                    <input type="number" min={0} step="any" value={add.priceIn} placeholder="$ in" onChange={(e) => setAdd({ ...add, priceIn: e.target.value })} style={{ flex: 1 }} data-testid="models-add-in" />
+                    <input type="number" min={0} step="any" value={add.priceOut} placeholder="$ out" onChange={(e) => setAdd({ ...add, priceOut: e.target.value })} style={{ flex: 1 }} data-testid="models-add-out" />
+                  </>
+                )}
+                <input type="number" min={0} value={add.context} placeholder="context" onChange={(e) => setAdd({ ...add, context: e.target.value })} style={{ flex: 1 }} data-testid="models-add-context" />
+                <button disabled={!canAdd} onClick={addModel} data-testid="models-add">
+                  Add
+                </button>
+              </div>
+              {current.id === 'lmstudio' && (
+                <>
+                  <div className="dim" style={{ marginTop: 4 }}>Loading LM Studio models (a model LM Studio has loaded already keeps its own settings)</div>
+                  <div className="row" style={{ gap: 8 }}>
+                    {loadField('Requests at once', 'lmstudioParallel')}
+                    {loadField('Context window', 'lmstudioContext')}
+                    {loadField('Unload after idle min', 'lmstudioTtlMinutes')}
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="dim">No model providers in providers.md.</div>
           )}
         </div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+        <div className="row spread" style={{ marginTop: 10 }}>
+          <span className="dim">Prices are USD per 1M tokens in / out. A model added here is saved with its price, and the budget counts it.</span>
           <button onClick={close} data-testid="models-close">
             Close
           </button>

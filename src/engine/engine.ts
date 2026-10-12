@@ -52,7 +52,7 @@ export interface EngineOptions {
 const SLOT_SYNC_MS = 10_000
 
 /** The text below the frontmatter of a config/models.md the engine creates (as in seed/config/models.md). */
-const MODELS_MD_BODY = "# Models in the pickers\n\nWhich models the model pickers offer (the agent panel, Role defaults and Settings). The app writes this file from its **Models** dialog (Settings, then **Choose models**): pick a provider, press **Detect models** to list everything it has, and tick the models you want. You can also edit it by hand.\n\n- `picked`: models a provider lists that are not in `providers.md`, each with its `provider`, `id`, `context` and the price the provider listed when you picked it (`price_in`, `price_out`, `price_cached_in`, USD per 1M tokens). The budget counts them at that price. A paid model is only picked with a listed price; to use one whose price the provider doesn't list (DeepSeek's), add it to `providers.md` with its price.\n- `hidden`: `provider/model` refs the pickers leave out: models from `providers.md` or found by `discover` that you unticked. A role list in `roles.md` can still name a hidden model.\n"
+const MODELS_MD_BODY = "# Models in the pickers\n\nWhich models the model pickers offer (the agent panel, Role defaults and the default models). The app writes this file from its **Models** panel (the Models button in the top bar): pick a provider, press **Detect models** to list everything it has, and tick the models you want, or add one by its id (with its price for a paid provider). You can also edit it by hand.\n\n- `picked`: models that are not in `providers.md`, ticked from a provider's list or added by id, each with its `provider`, `id`, `context` and the price the provider listed when you picked it (or the one you typed) (`price_in`, `price_out`, `price_cached_in`, USD per 1M tokens). The budget counts them at that price. A paid model is only ticked with a listed price; for one whose price the provider doesn't list (DeepSeek's), add it by id with its price.\n- `hidden`: `provider/model` refs the pickers leave out: models from `providers.md` or found by `discover` that you unticked. A role list in `roles.md` can still name a hidden model.\n"
 
 /** The engine core: config, models, budget, agents, jobs and the scheduler, plus the command handler. */
 export class Engine {
@@ -305,6 +305,33 @@ export class Engine {
    * with the context and price its provider listed; a paid model without a listed price is refused. Hiding a picked model removes it.
    */
   async showModels(refs: string[], shown: boolean): Promise<void> {
+    await this.editModelChoices((picked, hidden) => this.applyShowModels(picked, hidden, refs, shown))
+  }
+
+  /**
+   * Adds a model the provider doesn't list (or that can't be listed: Anthropic, Gemini) to `picked` in config/models.md.
+   * A paid provider's model needs both prices, so the budget can count it; a known model is only shown again.
+   */
+  async addModel(cmd: { provider: string; id: string; priceIn?: number; priceOut?: number; context?: number }): Promise<void> {
+    const id = cmd.id.trim()
+    const p = this.registry.providers.get(cmd.provider)
+    if (!id || !p || p.kind === 'search') return this.log(`addModel: no provider "${cmd.provider}" or an empty id`)
+    const price = (v?: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
+    const priceIn = p.local ? 0 : price(cmd.priceIn)
+    const priceOut = p.local ? 0 : price(cmd.priceOut)
+    if (priceIn === undefined || priceOut === undefined) return this.log(`addModel: ${cmd.provider}/${id} needs its price in and out (USD per 1M tokens, 0 for a free model)`)
+    const ref = `${cmd.provider}/${id}`
+    await this.editModelChoices((picked, hidden) => {
+      hidden.delete(ref)
+      if (this.registry.models.has(ref) || picked.some((m) => `${String(m.provider)}/${String(m.id)}` === ref)) return
+      const context = typeof cmd.context === 'number' && cmd.context > 0 ? Math.round(cmd.context) : undefined
+      picked.push({ provider: cmd.provider, id, family: guessFamily(id), ...(context ? { context } : {}), price_in: priceIn, price_out: priceOut })
+      this.log(`models: added ${ref}`)
+    })
+  }
+
+  /** Reads `picked` and `hidden` of config/models.md, lets `change` edit them, writes the file and sends the pickers the result. */
+  private async editModelChoices(change: (picked: Record<string, unknown>[], hidden: Set<string>) => void): Promise<void> {
     const file = this.registry.modelsFile()
     let doc
     try {
@@ -314,6 +341,14 @@ export class Engine {
     }
     const picked = Array.isArray(doc.data.picked) ? (doc.data.picked as Record<string, unknown>[]) : []
     const hidden = new Set(Array.isArray(doc.data.hidden) ? (doc.data.hidden as string[]) : [])
+    change(picked, hidden)
+    await writeMd(file, { ...doc.data, kind: 'models', picked, hidden: [...hidden].sort() }, doc.body || MODELS_MD_BODY)
+    await this.registry.load()
+    this.emit(await this.snapshot()) // the pickers follow
+    this.scheduler.kick()
+  }
+
+  private applyShowModels(picked: Record<string, unknown>[], hidden: Set<string>, refs: string[], shown: boolean): void {
     const isPicked = (ref: string) => picked.findIndex((m) => `${String(m.provider)}/${String(m.id)}` === ref)
     for (const ref of new Set(refs)) {
       const slash = ref.indexOf('/')
@@ -352,10 +387,6 @@ export class Engine {
         ...(!p.local && m.price!.cachedIn !== undefined ? { price_cached_in: m.price!.cachedIn } : {})
       })
     }
-    await writeMd(file, { ...doc.data, kind: 'models', picked, hidden: [...hidden].sort() }, doc.body || MODELS_MD_BODY)
-    await this.registry.load()
-    this.emit(await this.snapshot()) // the pickers follow
-    this.scheduler.kick()
   }
 
   /** Persists pause all in config/factory.md. */
@@ -765,6 +796,9 @@ export class Engine {
         return
       case 'showModels':
         await this.showModels(cmd.refs, cmd.shown)
+        return
+      case 'addModel':
+        await this.addModel(cmd)
         return
       case 'setSecret': {
         if (!this.allowedSecrets().includes(cmd.name)) {

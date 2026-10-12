@@ -263,6 +263,8 @@ export type Command =
   | { type: 'detectModels'; provider: string }
   /** Shows models in the pickers, or hides them (config/models.md). A listed model that isn't known yet is added with its listed price. */
   | { type: 'showModels'; refs: string[]; shown: boolean }
+  /** Adds a model by its id to `picked` in config/models.md, for one the provider doesn't list. A paid provider needs both prices (USD per 1M tokens, 0 for free). */
+  | { type: 'addModel'; provider: string; id: string; priceIn?: number; priceOut?: number; context?: number }
   /** The model defaults, LM Studio fields and book limit may be left out: they keep their value. */
   | ({ type: 'saveSettings' } & Omit<SettingsSummary, ModelSettingKey> & Partial<Pick<SettingsSummary, ModelSettingKey>>)
   /** Stores a secret in the Windows credential store. Only the SMTP password and the provider key variables are allowed. */
@@ -298,6 +300,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   setSecret: true,
   detectModels: true,
   showModels: true,
+  addModel: true,
   snapshot: true,
   ping: true,
   coverRendered: true,

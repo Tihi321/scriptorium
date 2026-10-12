@@ -12,7 +12,6 @@ export function SettingsDialog() {
   const open = useOffice((s) => s.settingsOpen)
   const settings = useOffice((s) => s.settings)
   const secretsSet = useOffice((s) => s.secretsSet)
-  const models = useOffice((s) => s.models)
   const [form, setForm] = useState<SettingsSummary>({
     kindleAddress: '',
     fromAddress: '',
@@ -34,22 +33,28 @@ export function SettingsDialog() {
   const [login, setLogin] = useState<boolean | null>(null)
 
   // filled once per opening: a snapshot that arrives while the dialog is open (a model was discovered) must not undo your edits
-  const [loaded, setLoaded] = useState(false)
+  const [initial, setInitial] = useState<SettingsSummary | null>(null)
   useEffect(() => {
-    if (!open) setLoaded(false)
-    else if (settings && !loaded) {
+    if (!open) setInitial(null)
+    else if (settings && !initial) {
       setForm({ ...settings })
-      setLoaded(true)
+      setInitial(settings)
     }
-  }, [open, settings, loaded])
+  }, [open, settings, initial])
   useEffect(() => {
     if (open) void getStartWithWindows().then(setLogin)
   }, [open])
 
   if (!open) return null
-  /** Closing keeps what you changed: Close, a click outside and Save all save it. */
+  /**
+   * Closing keeps what you changed: Close, a click outside and Save all save it. Only the fields you edited are sent, over the
+   * latest settings, so a change made meanwhile elsewhere (the Models panel) is not undone.
+   */
   const close = (save = false) => {
-    if (loaded && settings && (save || (Object.keys(form) as (keyof SettingsSummary)[]).some((k) => form[k] !== settings[k]))) sendCommand({ type: 'saveSettings', ...form })
+    if (initial && settings) {
+      const edited = Object.fromEntries((Object.keys(form) as (keyof SettingsSummary)[]).filter((k) => form[k] !== initial[k]).map((k) => [k, form[k]]))
+      if (save || Object.keys(edited).length) sendCommand({ type: 'saveSettings', ...settings, ...edited })
+    }
     if (password) sendCommand({ type: 'setSecret', name: SMTP_PASSWORD, value: password })
     setPassword('')
     setKeyValue('')
@@ -61,24 +66,7 @@ export function SettingsDialog() {
       <input type={type} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} data-testid={`set-${key}`} />
     </>
   )
-  /** A model picker for one alias: the provider's models (or every paid one), plus the current value if it isn't in the list. */
-  const modelSelect = (label: string, key: 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel', pick: (m: (typeof models)[number]) => boolean) => {
-    const refs = models.filter((m) => m.shown !== false && pick(m)).map((m) => m.ref)
-    if (form[key] && !refs.includes(form[key])) refs.unshift(form[key])
-    return (
-      <>
-        <label>{label}</label>
-        <select value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} data-testid={`set-${key}`}>
-          {refs.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </>
-    )
-  }
-  const num = (label: string, key: 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress') => (
+  const num = (label: string, key: 'maxBooksInProgress') => (
     <div style={{ flex: 1 }}>
       <label>{label}</label>
       <input type="number" value={form[key]} onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })} data-testid={`set-${key}`} />
@@ -91,29 +79,6 @@ export function SettingsDialog() {
         <div className="panel-title">Settings</div>
         <div className="row">{num('Books worked on at once', 'maxBooksInProgress')}</div>
         <div className="dim">More books at once keeps more writers busy: each book's chapters are written one after the other.</div>
-        <hr />
-        <div className="dim">Default models (the aliases paid, strata and lmstudio in roles.md)</div>
-        {modelSelect('Paid API', 'defaultPaidModel', (m) => !m.local)}
-        {modelSelect('Strata', 'defaultStrataModel', (m) => m.provider === 'strata')}
-        {modelSelect('LM Studio', 'defaultLmstudioModel', (m) => m.provider === 'lmstudio')}
-        <div className="row spread" style={{ marginTop: 6 }}>
-          <span className="dim">The pickers offer the models ticked there.</span>
-          <button
-            data-testid="settings-models"
-            onClick={() => {
-              close()
-              officeStore.getState().setModelsOpen(true)
-            }}
-          >
-            Choose models
-          </button>
-        </div>
-        <div className="dim" style={{ marginTop: 6 }}>Loading LM Studio models</div>
-        <div className="row">
-          {num('Requests at once', 'lmstudioParallel')}
-          {num('Context window', 'lmstudioContext')}
-          {num('Unload after idle min', 'lmstudioTtlMinutes')}
-        </div>
         <hr />
         <div className="dim">Send to Kindle</div>
         {field('Kindle address', 'kindleAddress')}

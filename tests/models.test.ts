@@ -674,4 +674,24 @@ describe('Models dialog', () => {
     expect(engine.registry.isShown('deepseek/deepseek-v4-pro')).toBe(true)
     expect(engine.registry.isShown('openrouter/openai/gpt-6')).toBe(true) // removed, not hidden
   })
+
+  it('addModel adds a model by its id: a paid provider needs both prices, a local one none', async () => {
+    const { Engine } = await import('../src/engine/engine')
+    const keys = (name: string) => (name === 'ANTHROPIC_API_KEY' ? 'sk-test' : undefined)
+    const logs: string[] = []
+    const engine = new Engine({ dataDir: dir, emit: () => {}, log: (m) => logs.push(m), registry: { keys }, discover: false })
+    await engine.registry.load()
+    await engine.handleCommand({ type: 'addModel', provider: 'anthropic', id: 'claude-opus-5-5' }) // no price: refused
+    expect(engine.registry.models.has('anthropic/claude-opus-5-5')).toBe(false)
+    expect(logs.join(' ')).toMatch(/needs its price/)
+    await engine.handleCommand({ type: 'addModel', provider: 'anthropic', id: ' claude-opus-5-5 ', priceIn: 5, priceOut: 25, context: 200000 })
+    expect(engine.registry.models.get('anthropic/claude-opus-5-5')).toMatchObject({ picked: true, family: 'claude', context: 200000, priceIn: 5, priceOut: 25, priceCachedIn: 5 })
+    await engine.handleCommand({ type: 'addModel', provider: 'lmstudio', id: 'qwen3.8-27b-new', priceIn: 9, priceOut: 9 })
+    expect(engine.registry.models.get('lmstudio/qwen3.8-27b-new')).toMatchObject({ picked: true, family: 'qwen', priceIn: 0, priceOut: 0 })
+    // adding a hidden known model shows it again
+    await engine.handleCommand({ type: 'showModels', refs: ['deepseek/deepseek-v4-pro'], shown: false })
+    await engine.handleCommand({ type: 'addModel', provider: 'deepseek', id: 'deepseek-v4-pro', priceIn: 1, priceOut: 1 })
+    expect(engine.registry.isShown('deepseek/deepseek-v4-pro')).toBe(true)
+    expect(engine.registry.models.get('deepseek/deepseek-v4-pro')).toMatchObject({ discovered: false, priceIn: 1.32 }) // providers.md stays, not picked
+  })
 })

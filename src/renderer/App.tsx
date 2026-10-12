@@ -32,6 +32,9 @@ export function App() {
               Library
             </button>
           </span>
+          <button onClick={() => officeStore.getState().setModelsOpen(true)} data-testid="models-open">
+            Models
+          </button>
           <button onClick={() => officeStore.getState().setSettingsOpen(true)} data-testid="settings-open">
             Settings
           </button>

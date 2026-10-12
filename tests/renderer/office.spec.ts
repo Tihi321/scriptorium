@@ -234,11 +234,19 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('settings-close').click()
   expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', maxBooksInProgress: 4 }))
 
-  // Choose models: a provider lists its models, ticking one shows it in the pickers, a model without a price can't be ticked
+  // the Models panel: the alias defaults, a provider lists its models on Detect, ticking one shows it in the pickers,
+  // a model without a price can't be ticked, a model can be added by its id, and LM Studio's load settings
   await page.getByTestId('settings-open').click()
-  await page.getByTestId('settings-models').click()
+  await expect(page.getByTestId('set-defaultPaidModel')).toHaveCount(0) // moved to the Models panel
+  await page.getByTestId('settings-close').click()
+  await page.getByTestId('models-open').click()
   await expect(page.getByTestId('models-dialog')).toBeVisible()
+  await page.getByTestId('set-defaultPaidModel').selectOption('openrouter/google/gemma-4-31b-it:free')
+  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', defaultPaidModel: 'openrouter/google/gemma-4-31b-it:free', kindleAddress: 'reader@kindle.com' }))
+  await expect(page.getByTestId('set-defaultPaidModel')).toHaveValue('openrouter/google/gemma-4-31b-it:free')
   await page.getByTestId('models-provider-openrouter').click()
+  expect(await commands(page)).not.toContainEqual({ type: 'detectModels', provider: 'openrouter' }) // only on the button
+  await page.getByTestId('models-detect').click()
   expect(await commands(page)).toContainEqual({ type: 'detectModels', provider: 'openrouter' })
   const gpt = page.getByTestId('model-row-openrouter/openai/gpt-6')
   await expect(gpt).toContainText('$3 / $15')
@@ -248,13 +256,27 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('models-free').uncheck()
   await gpt.locator('input').click() // the box follows the engine's answer, not the click
   expect(await commands(page)).toContainEqual({ type: 'showModels', refs: ['openrouter/openai/gpt-6'], shown: true })
-  await expect(gpt).toContainText('picked')
+  await expect(gpt).toContainText('added')
   await expect(gpt.locator('input')).toBeChecked()
+  // add by id: a paid provider needs both prices
+  await page.getByTestId('models-add-id').fill('qwen/qwen3-235b-a22b:free')
+  await expect(page.getByTestId('models-add')).toBeDisabled()
+  await page.getByTestId('models-add-in').fill('0')
+  await page.getByTestId('models-add-out').fill('0')
+  await page.getByTestId('models-add').click()
+  expect(await commands(page)).toContainEqual({ type: 'addModel', provider: 'openrouter', id: 'qwen/qwen3-235b-a22b:free', priceIn: 0, priceOut: 0, context: undefined })
+  await expect(page.getByTestId('model-row-openrouter/qwen/qwen3-235b-a22b:free').locator('input')).toBeChecked()
   await page.getByTestId('models-provider-deepseek').click()
+  await page.getByTestId('models-detect').click()
   await expect(page.getByTestId('model-row-deepseek/deepseek-chat').locator('input')).toBeDisabled()
   await page.getByTestId('models-provider-anthropic').click()
   await expect(page.getByTestId('models-status')).toContainText('No key')
+  await expect(page.getByTestId('models-detect')).toBeDisabled()
+  await page.getByTestId('models-provider-lmstudio').click()
+  await expect(page.getByTestId('models-add-in')).toHaveCount(0) // local: no price
+  await page.getByTestId('set-lmstudioParallel').fill('2')
   await page.getByTestId('models-close').click()
+  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', lmstudioParallel: 2 }))
   await expect(page.getByTestId('models-dialog')).toHaveCount(0)
 
   // the idea bucket

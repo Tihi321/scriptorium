@@ -461,6 +461,7 @@ export function installFakeEngine(params: URLSearchParams): void {
         case 'saveSettings': {
           const { type: _type, ...rest } = command
           settings = { ...settings, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) }
+          emit(snapshot())
           break
         }
         case 'detectModels':
@@ -477,6 +478,12 @@ export function installFakeEngine(params: URLSearchParams): void {
           emit(snapshot())
           break
         }
+        case 'addModel':
+          if (!MODELS.some((m) => m.ref === `${command.provider}/${command.id}`)) {
+            MODELS = [...MODELS, modelOf(`${command.provider}/${command.id}`, 'picked', { in: command.priceIn ?? 0, out: command.priceOut ?? 0 })]
+          }
+          emit(snapshot())
+          break
         case 'setSecret':
           secretsSet.add(command.name)
           emit({ type: 'secrets.updated', secretsSet: [...secretsSet] })

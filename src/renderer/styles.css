@@ -623,7 +623,8 @@ textarea {
 }
 .dialog.models {
   width: min(900px, 96vw);
-  max-height: 92vh;
+  max-height: 94vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
@@ -662,7 +663,7 @@ textarea {
   width: auto;
 }
 .models-list {
-  height: min(52vh, 460px);
+  height: min(38vh, 380px);
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 6px;

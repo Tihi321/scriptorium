@@ -24,7 +24,7 @@ Sending books to your Kindle by email.
 
 ## Default models
 
-The role lists in `roles.md` can name these aliases instead of a model: `paid`, `strata` and `lmstudio`. Change a default here (or in the app's settings) and every role that uses the alias follows. An agent's own model, picked in the app, still goes first.
+The role lists in `roles.md` can name these aliases instead of a model: `paid`, `strata` and `lmstudio`. Change a default here (or in the app's Models panel) and every role that uses the alias follows. An agent's own model, picked in the app, still goes first.
 
 - `default_paid_model`: the paid API model behind `paid` (DeepSeek V4.1 Flash).
 - `default_strata_model`: the Strata model behind `strata`.
@@ -32,7 +32,7 @@ The role lists in `roles.md` can name these aliases instead of a model: `paid`, 
 
 ## LM Studio loading
 
-When a request goes to an LM Studio model that isn't loaded, the engine loads it first with these settings (through `lms load`, or LM Studio's API when the `lms` command isn't installed). A model that is already loaded is used as it is.
+When a request goes to an LM Studio model that isn't loaded, the engine loads it first with these settings (also in the app's Models panel, under lmstudio) (through `lms load`, or LM Studio's API when the `lms` command isn't installed). A model that is already loaded is used as it is.
 
 - `lmstudio_parallel`: how many requests the model serves at once (`--parallel`). 1 means one at a time.
 - `lmstudio_context`: the context window (`-c`). The parallel requests share it: one request may use all of it (checked 2026-10-11). A long-book check takes about 23,000 tokens with its answer, so plan about 25,000 per request that runs at once: 131072 suits Gemma 4 E4B with 4 at once. A model in `providers.md` can have its own `load_context` and `load_parallel` (the big Qwen models use 65536 and 2).
