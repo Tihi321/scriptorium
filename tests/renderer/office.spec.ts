@@ -176,6 +176,16 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   const frame = page.getByTestId('reader-frame')
   await expect(frame).toHaveAttribute('sandbox', '')
   await expect(page.frameLocator('[data-testid=reader-frame]').getByRole('heading', { name: 'Chapter 1' })).toBeVisible()
+  // turn the pages: the arrows, the arrow keys and the page list
+  await expect(page.getByTestId('reader-prev')).toBeDisabled()
+  await page.getByTestId('reader-next').click()
+  await expect(page.getByTestId('reader-page')).toHaveValue('chapter-01.xhtml')
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByTestId('reader-page')).toHaveValue('chapter-02.xhtml')
+  await expect(page.frameLocator('[data-testid=reader-frame]').getByRole('heading', { name: 'Chapter 2' })).toBeVisible()
+  await expect(page.getByTestId('reader-next')).toBeDisabled()
+  await page.getByTestId('reader-page').selectOption('index.html')
+  await expect(page.getByTestId('reader-prev')).toBeDisabled()
   await page.getByTestId('reader-back').click()
 
   // rate it

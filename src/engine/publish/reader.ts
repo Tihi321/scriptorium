@@ -69,3 +69,15 @@ ${links.join('\n')}
 `
   )
 }
+
+/** The pages of a reader folder in reading order, from the links in its `index.html` (cover, title page, chapters ...). */
+export async function readReaderPages(dir: string): Promise<{ file: string; title: string }[]> {
+  let html: string
+  try {
+    html = await fs.readFile(path.join(dir, 'index.html'), 'utf8')
+  } catch {
+    return []
+  }
+  const unescape = (s: string) => s.replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&')
+  return [...html.matchAll(/<li><a href="([^"]+)">([^<]*)<\/a><\/li>/g)].map((m) => ({ file: unescape(m[1]!), title: unescape(m[2]!) }))
+}

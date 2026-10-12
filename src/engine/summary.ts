@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs'
+import { readReaderPages } from './publish/reader'
 import type { AgentSummary, BookSummary, ModelSummary, TopicSummary } from '../shared/protocol'
 import type { AgentDef } from './agents/agents'
 import type { BookStore } from './pipeline/books'
@@ -53,6 +54,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     coverPng: (await exists(books.file(slug, 'out', 'cover.png'))) ? rel('out', 'cover.png') : null,
     epub: (await exists(books.file(slug, epub))) ? rel(epub) : null,
     readerDir: (await exists(books.file(slug, 'out', 'reader', 'index.html'))) ? rel('out', 'reader') : null,
+    readerPages: await readReaderPages(books.file(slug, 'out', 'reader')),
     publishedAt: typeof d.published === 'string' ? d.published : null
   }
 }

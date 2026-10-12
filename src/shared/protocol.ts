@@ -69,6 +69,8 @@ export interface BookSummary {
   epub: string | null
   /** Folder with the unzipped XHTML chapters and `index.html`, for the in-app reader. */
   readerDir: string | null
+  /** The reader's pages in reading order (cover, title page, chapters ...); its `index.html` is the contents. */
+  readerPages: { file: string; title: string }[]
   publishedAt: string | null
 }
 

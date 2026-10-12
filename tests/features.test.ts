@@ -71,6 +71,11 @@ describe('snapshot', () => {
       readerDir: `books/${slug}/out/reader`,
       coverPng: null
     })
+    expect(book.readerPages.slice(0, 3)).toEqual([
+      { file: 'cover.xhtml', title: 'Cover' },
+      { file: 'title.xhtml', title: 'Title page' },
+      { file: 'chapter-01.xhtml', title: expect.any(String) }
+    ])
     expect(book.words).toBeGreaterThan(250)
     expect(book.score).toBeGreaterThanOrEqual(7)
     expect(book.scores.age_fit).toBe(8)

@@ -4,6 +4,7 @@ import { useOffice } from '../store/hooks'
 import { formatUsd } from '../store/model'
 import { officeStore } from '../store/store'
 import { CoverImage } from './Library'
+import { PageNav } from './PageNav'
 
 function Stars({ value, onPick }: { value: number; onPick(n: number): void }) {
   return (
@@ -25,6 +26,8 @@ export function BookCard() {
   const [rating, setRating] = useState(0)
   const [note, setNote] = useState('')
   const [saved, setSaved] = useState(false)
+  /** The reader page showing: a file of the reader folder (index.html is the contents). */
+  const [page, setPage] = useState('index.html')
 
   useEffect(() => {
     setRating(book?.rating ?? 0)
@@ -32,16 +35,21 @@ export function BookCard() {
     setSaved(false)
   }, [slug, book?.rating, book?.ratingNote])
 
+  useEffect(() => setPage('index.html'), [slug, reading])
+
   if (!slug || !book) return null
   const close = () => officeStore.getState().openBookCard(null)
 
   if (reading) {
-    const src = book.readerDir ? bookUrl(`${book.readerDir.replace(/\/+$/, '')}/index.html`) : null
+    const pages = book.readerPages
+    const current = pages.some((p) => p.file === page) ? page : 'index.html'
+    const src = book.readerDir ? bookUrl(`${book.readerDir.replace(/\/+$/, '')}/${current}`) : null
     return (
       <div className="dialog-backdrop" onClick={close}>
         <div className="reader" onClick={(e) => e.stopPropagation()} data-testid="reader">
           <div className="row spread reader-bar">
             <b>{book.title}</b>
+            {src && <PageNav pages={pages} current={current} onGo={setPage} testId="reader" />}
             <span className="row">
               <button onClick={() => officeStore.getState().setReading(false)} data-testid="reader-back">
                 Back to card

@@ -94,9 +94,16 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     coverPng: published ? `books/${b.slug}/out/cover.png` : null,
     epub: published ? `books/${b.slug}/out/${b.slug}.epub` : null,
     readerDir: published ? `books/${b.slug}/out/reader` : null,
+    readerPages: published ? READER_PAGES : [],
     publishedAt: published ? '2026-10-08T12:00:00Z' : null
   }
 }
+
+/** The demo reader's pages after the contents. */
+const READER_PAGES = [
+  { file: 'chapter-01.xhtml', title: 'Chapter 1' },
+  { file: 'chapter-02.xhtml', title: 'Chapter 2' }
+]
 
 function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -118,15 +125,20 @@ export function makeBookUrl(books: FakeBook[]): (rel: string) => string {
         `<text x="120" y="300" text-anchor="middle" font-family="Georgia" font-size="14" fill="#fff">Mara Quill</text></svg>`
       return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
     }
-    if (m[2] === 'reader/index.html') {
-      let url = blobs.get(book.slug)
+    const page = /^reader\/(.+)$/.exec(m[2]!)?.[1]
+    if (page === 'index.html' || READER_PAGES.some((p) => p.file === page)) {
+      const key = `${book.slug}/${page}`
+      let url = blobs.get(key)
       if (!url) {
-        const html =
-          `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Georgia,serif;max-width:34em;margin:2em auto;line-height:1.5}</style></head><body>` +
-          `<h1>${esc(book.title)}</h1><p><i>Mara Quill</i></p><nav><h2>Contents</h2><ol><li><a href="#ch1">Chapter 1</a></li></ol></nav>` +
-          `<h2 id="ch1">Chapter 1</h2><p>Once upon a time a small fox carried a lantern through the quiet fields.</p></body></html>`
+        const n = READER_PAGES.findIndex((p) => p.file === page) + 1
+        const body =
+          n === 0
+            ? `<h1>${esc(book.title)}</h1><p><i>Mara Quill</i></p><nav><h2>Contents</h2><ol>${READER_PAGES.map((p) => `<li><a href="${p.file}">${p.title}</a></li>`).join('')}</ol></nav>` +
+              `<h2 id="ch1">Chapter 1</h2><p>Once upon a time a small fox carried a lantern through the quiet fields.</p>`
+            : `<h2>Chapter ${n}</h2><p>${n === 1 ? 'Once upon a time a small fox carried a lantern through the quiet fields.' : 'The fox set the lantern down and the fields went to sleep.'}</p>`
+        const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Georgia,serif;max-width:34em;margin:2em auto;line-height:1.5}</style></head><body>${body}</body></html>`
         url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
-        blobs.set(book.slug, url)
+        blobs.set(key, url)
       }
       return url
     }
