@@ -244,6 +244,15 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('set-defaultPaidModel').selectOption('openrouter/google/gemma-4-31b-it:free')
   expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', defaultPaidModel: 'openrouter/google/gemma-4-31b-it:free', kindleAddress: 'reader@kindle.com' }))
   await expect(page.getByTestId('set-defaultPaidModel')).toHaveValue('openrouter/google/gemma-4-31b-it:free')
+  // one fallback order for every role: moving a group turns it on, unticking goes back to each role's own order
+  await expect(page.getByTestId('order-shared')).not.toBeChecked()
+  await page.getByTestId('order-up-lmstudio').click()
+  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', modelOrder: ['paid', 'lmstudio', 'strata'] }))
+  await expect(page.getByTestId('order-shared')).toBeChecked()
+  await expect(page.locator('[data-testid="order-paid"], [data-testid="order-lmstudio"], [data-testid="order-strata"]').nth(1)).toHaveAttribute('data-testid', 'order-lmstudio')
+  await page.getByTestId('order-shared').click() // follows the engine's snapshot, so not uncheck()
+  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', modelOrder: [] }))
+  await expect(page.getByTestId('order-shared')).not.toBeChecked()
   await page.getByTestId('models-provider-openrouter').click()
   expect(await commands(page)).not.toContainEqual({ type: 'detectModels', provider: 'openrouter' }) // only on the button
   await page.getByTestId('models-detect').click()

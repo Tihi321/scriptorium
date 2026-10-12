@@ -47,4 +47,4 @@ Starting choices, all of them first guesses to be tuned in the model picker:
 - Archivist, researcher and the checks (continuity, originality, fact): Strata with thinking on `low` (named directly, it is not the Strata default), then LM Studio, then the paid default.
 - Embeddings: the local nomic model in LM Studio. Strata has no embeddings, so LM Studio keeps nomic loaded while Strata runs.
 
-Reviewer jobs prefer a model family different from the book's writer. Changing a default here applies from the next job. The engine rewrites this file when you change a role default in the UI, so comments in the YAML are not kept. The text below the frontmatter is.
+Reviewer jobs prefer a model family different from the book's writer. Changing a default here applies at once: a running job asks its current request again on the new model. `model_order` in `config/settings.md` (the Models panel) can sort every list here by group (API, Strata, LM Studio) instead. The engine rewrites this file when you change a role default in the UI, so comments in the YAML are not kept. The text below the frontmatter is.

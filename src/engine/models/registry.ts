@@ -94,6 +94,8 @@ export function computeCost(m: Pick<ModelInfo, 'priceIn' | 'priceOut' | 'priceCa
 /** Role aliases (`paid`, `strata`, `lmstudio`) -> `provider/model`, and how LM Studio models are loaded. From config/settings.md. */
 export interface ModelDefaults {
   aliases: Record<string, string>
+  /** The groups `paid`, `strata`, `lmstudio` in the order every role tries them. Empty: each role's list keeps its own order. */
+  order?: string[]
   lmLoad: { parallel: number; context: number; ttlMinutes: number }
 }
 
@@ -101,6 +103,7 @@ export interface ModelDefaults {
 export function modelDefaultsOf(s: SettingsConfig): ModelDefaults {
   return {
     aliases: { paid: s.default_paid_model, strata: s.default_strata_model, lmstudio: s.default_lmstudio_model },
+    order: s.model_order,
     lmLoad: { parallel: s.lmstudio_parallel, context: s.lmstudio_context, ttlMinutes: s.lmstudio_ttl_minutes }
   }
 }
@@ -431,7 +434,31 @@ export class ModelRegistry {
 
   /** Model refs in the roles file for a role, in order, with aliases resolved. */
   roleModelRefs(role: string): string[] {
-    return (this.roles.roles[role]?.models ?? []).map((r) => this.resolve(r))
+    return this.roleEntries(role).map((r) => this.resolve(r))
+  }
+
+  /**
+   * A role's list as roles.md writes it (aliases kept). With a `model_order`, the list is sorted by group (`paid` is every API
+   * model, `strata`, `lmstudio`), keeping the role's own order inside a group; a model in no group (Ollama) goes last.
+   */
+  roleEntries(role: string): string[] {
+    const list = this.roles.roles[role]?.models ?? []
+    const order = this.defaults.order ?? []
+    if (order.length === 0) return list
+    const rank = (ref: string) => {
+      const g = this.groupOf(ref)
+      const i = g ? order.indexOf(g) : -1
+      return i < 0 ? order.length : i
+    }
+    return list.map((ref, i) => ({ ref, i, r: rank(ref) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.ref)
+  }
+
+  /** The group of an alias or a `provider/model`: `strata`, `lmstudio`, `paid` for an API provider, undefined for another local one. */
+  groupOf(ref: string): string | undefined {
+    const provider = this.resolve(ref).split('/')[0]!
+    if (provider === 'strata' || provider === 'lmstudio') return provider
+    const p = this.providers.get(provider)
+    return p && !p.local ? 'paid' : undefined
   }
 
   embeddingModel(): ModelInfo | undefined {

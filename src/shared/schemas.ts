@@ -187,6 +187,8 @@ export const settingsSchema = configBase('settings').extend({
   default_paid_model: z.string().default('deepseek/deepseek-flash'),
   default_strata_model: z.string().default('strata/qwen3.8-flash-next'),
   default_lmstudio_model: z.string().default('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'),
+  /** One fallback order for every role: the groups `paid` (any API model), `strata` and `lmstudio`, first one first. Empty: each role keeps the order of its list in roles.md. */
+  model_order: z.array(z.enum(['paid', 'strata', 'lmstudio'])).default([]),
   /** How the engine loads LM Studio models that aren't loaded yet: requests at once, context window, idle minutes before LM Studio unloads it. */
   lmstudio_parallel: z.number().int().min(1).max(16).default(4),
   lmstudio_context: z.number().int().min(2048).default(131072),

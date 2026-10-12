@@ -94,7 +94,7 @@ export function AgentPanel() {
           </button>
         </div>
         <label className="stack">
-          <span className="dim">Model for this agent (from the next job)</span>
+          <span className="dim">Model for this agent (the job it works on now switches too)</span>
           <select
             data-testid="agent-model"
             value={agent.override ?? ''}
@@ -131,6 +131,7 @@ export function RoleDefaults() {
   const agents = useAgentList()
   const known = useOffice((s) => s.models)
   const defaults = useOffice((s) => s.roleDefaults)
+  const order = useOffice((s) => s.settings?.modelOrder ?? [])
   const roles = [...new Set([...agents.map((a) => a.role)])]
   const [role, setRole] = useState('')
   const current = role || roles[0] || ''
@@ -164,7 +165,10 @@ export function RoleDefaults() {
             </option>
           ))}
         </select>
-        <span className="dim">Applies from the next job. The engine writes config/roles.md.</span>
+        <span className="dim">
+          Running jobs of the role switch at once. The engine writes config/roles.md.
+          {order.length > 0 ? ' With one fallback order for every role (Models panel), the model goes first within its group.' : ''}
+        </span>
       </div>
     </div>
   )

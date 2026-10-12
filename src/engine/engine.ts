@@ -484,6 +484,7 @@ export class Engine {
         const name = path.basename(e.rel, '.md')
         if (name === 'providers' || name === 'roles' || name === 'models') {
           await this.registry.load()
+          if (name !== 'providers') this.scheduler.changeModel() // running jobs follow a changed role list
           this.emit(await this.snapshot()) // the pickers show the models and role defaults
           if (name === 'providers') void this.discoverModels()
         }
@@ -495,6 +496,7 @@ export class Engine {
         } else if (name === 'settings') {
           await this.loadSettings()
           await this.registry.load() // the role aliases and the LM Studio context may have changed
+          this.scheduler.changeModel() // running jobs follow changed default models or their order
         }
         else if (name === 'quality' || name === 'formats') await this.loadQualityAndFormats()
       }
@@ -532,6 +534,7 @@ export class Engine {
       defaultPaidModel: s.default_paid_model,
       defaultStrataModel: s.default_strata_model,
       defaultLmstudioModel: s.default_lmstudio_model,
+      modelOrder: s.model_order,
       lmstudioParallel: s.lmstudio_parallel,
       lmstudioContext: s.lmstudio_context,
       lmstudioTtlMinutes: s.lmstudio_ttl_minutes,
@@ -680,8 +683,12 @@ export class Engine {
         if (cmd.agent) {
           await this.agents.patch(cmd.agent, { model: cmd.model })
           this.emitAgentUpdated(cmd.agent)
+          // the job it works on now changes too: a request in flight on another model starts again on the new one
+          const moved = this.scheduler.changeModel({ agent: cmd.agent })
+          if (moved) this.log(`agent ${cmd.agent}: model changed in ${moved} running job(s)`)
         } else if (cmd.role && cmd.model !== null) {
           await this.setRoleModel(cmd.role, cmd.model)
+          this.scheduler.changeModel({ role: cmd.role })
           this.emit(await this.snapshot()) // the new role default for the pickers
         }
         this.scheduler.kick()
@@ -778,6 +785,7 @@ export class Engine {
             default_paid_model: cmd.defaultPaidModel?.trim() || s.default_paid_model,
             default_strata_model: cmd.defaultStrataModel?.trim() || s.default_strata_model,
             default_lmstudio_model: cmd.defaultLmstudioModel?.trim() || s.default_lmstudio_model,
+            model_order: cmd.modelOrder ? [...new Set(cmd.modelOrder.filter((g) => g === 'paid' || g === 'strata' || g === 'lmstudio'))] : s.model_order,
             lmstudio_parallel: Math.min(16, Math.max(1, Math.round(cmd.lmstudioParallel ?? s.lmstudio_parallel) || 1)),
             lmstudio_context: Math.max(2048, Math.round(cmd.lmstudioContext ?? s.lmstudio_context) || 32768),
             lmstudio_ttl_minutes: Math.max(1, Math.round(cmd.lmstudioTtlMinutes ?? s.lmstudio_ttl_minutes) || 60)
@@ -787,6 +795,7 @@ export class Engine {
         if (cmd.maxBooksInProgress !== undefined) await this.setMaxBooksInProgress(cmd.maxBooksInProgress)
         await this.loadSettings()
         await this.registry.load()
+        this.scheduler.changeModel() // running jobs follow changed default models or their order
         this.scheduler.kick()
         this.emit(await this.snapshot()) // the role defaults shown in the pickers follow the new aliases
         return

@@ -111,7 +111,10 @@ export function serverStatuses(registry: ModelRegistry): ServerStatus[] {
 
 export function roleDefaults(registry: ModelRegistry): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [role, v] of Object.entries(registry.roles.roles)) if (v.models[0]) out[role] = v.models[0]
+  for (const role of Object.keys(registry.roles.roles)) {
+    const first = registry.roleEntries(role)[0]
+    if (first) out[role] = first
+  }
   return out
 }
 

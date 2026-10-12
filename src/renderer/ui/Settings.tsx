@@ -22,6 +22,7 @@ export function SettingsDialog() {
     defaultPaidModel: '',
     defaultStrataModel: '',
     defaultLmstudioModel: '',
+    modelOrder: [],
     lmstudioParallel: 4,
     lmstudioContext: 32768,
     lmstudioTtlMinutes: 60,

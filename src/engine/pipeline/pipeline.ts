@@ -378,7 +378,7 @@ export class Pipeline {
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {
-        this.warnOnce('targets-reached', 'every active topic has reached its target. Raise a target in topics.md or switch on another topic.')
+        this.warnOnce('targets-reached', 'no new book starts: every active topic has reached its target (books in progress count toward it, and they go on). Raise a target in topics.md or switch on another topic.')
       }
       return
     }

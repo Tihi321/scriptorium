@@ -66,6 +66,12 @@ interface RunningJob {
   held: Set<string>
   /** The model the job calls now: the first one, then each fallback. */
   model: string
+  /** Aborts only the request in flight, for a model change. The job goes on. */
+  request?: AbortController
+  /** The first model of the list the request in flight was sent with. */
+  first?: string
+  /** The agent's or role's model changed: the job's next request builds its model list again. */
+  modelChanged?: boolean
 }
 
 interface AgentRuntime {
@@ -167,6 +173,32 @@ export class Scheduler {
       n++
     }
     return n
+  }
+
+  /**
+   * The model of running jobs changed (an agent's own model, a role default, the default models or their order). Each matching job
+   * takes the new model list from its next request; a request in flight on a model that is no longer first starts again on the new one.
+   * Earlier requests of the job are kept. Returns how many requests were restarted.
+   */
+  changeModel(match: { agent?: string; role?: string } = {}): number {
+    let n = 0
+    for (const rj of this.running.values()) {
+      if (match.agent && rj.agentId !== match.agent) continue
+      if (match.role && rj.job.data.role !== match.role) continue
+      rj.modelChanged = true
+      const first = this.modelsFor(rj)[0]
+      if (rj.request && first && first.ref !== rj.first) {
+        rj.request.abort()
+        n++
+      }
+    }
+    return n
+  }
+
+  /** The models a running job may use now: the agent's own model (as its file says now), then its role's list. */
+  private modelsFor(rj: RunningJob): ModelInfo[] {
+    const def = this.d.agents.get(rj.agentId)
+    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family })
   }
 
   /** Fire: graceful lets the current job finish, then removes the file. Now aborts it and removes the file at once. */
@@ -362,7 +394,8 @@ export class Scheduler {
     }
   }
 
-  private async run(rj: RunningJob, agent: AgentDef, models: ModelInfo[], leased: ModelInfo): Promise<void> {
+  private async run(rj: RunningJob, agent: AgentDef, startModels: ModelInfo[], leased: ModelInfo): Promise<void> {
+    let models = startModels
     const { jobs, logs, emit } = this.d
     const { job } = rj
     const j = job.data
@@ -404,52 +437,77 @@ export class Scheduler {
         let text = ''
         let result: ChatResult | undefined
         logAll(`### Output\n`)
-        for await (const ev of this.d.router.chat(
-          models,
-          {
-            messages: o.messages,
-            schema: o.schema,
-            maxTokens: o.maxTokens,
-            temperature: o.temperature,
-            signal: rj.controller.signal,
-            meta: { role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined }
-          },
-          rj.held
-        )) {
-          if (ev.type === 'attempt') {
-            text = ''
-            if (ev.model.ref !== (usedModels[usedModels.length - 1] ?? leased.ref)) {
-              emit({ type: 'job.model', jobId: j.id, agent: agent.id, model: ev.model.ref })
+        for (;;) {
+          if (rj.modelChanged) {
+            rj.modelChanged = false
+            const next = this.modelsFor(rj)
+            if (next.length > 0) models = next
+          }
+          // a model change aborts only this request; stopping the job aborts it too
+          const request = new AbortController()
+          const onStop = () => request.abort()
+          rj.controller.signal.addEventListener('abort', onStop, { once: true })
+          if (rj.controller.signal.aborted) request.abort()
+          rj.request = request
+          rj.first = models[0]?.ref
+          try {
+            for await (const ev of this.d.router.chat(
+              models,
+              {
+                messages: o.messages,
+                schema: o.schema,
+                maxTokens: o.maxTokens,
+                temperature: o.temperature,
+                signal: request.signal,
+                meta: { role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined }
+              },
+              rj.held
+            )) {
+              if (ev.type === 'attempt') {
+                text = ''
+                if (ev.model.ref !== (usedModels[usedModels.length - 1] ?? leased.ref)) {
+                  emit({ type: 'job.model', jobId: j.id, agent: agent.id, model: ev.model.ref })
+                }
+                // fell back to another provider: give the first one's slot back, so other agents don't wait for a server this job no longer uses
+                if (ev.model.provider.id !== leased.provider.id && rj.held.delete(leased.provider.id)) {
+                  this.d.router.limiter.release(leased.provider)
+                  this.kick()
+                }
+                usedModels.push(ev.model.ref)
+                rj.model = ev.model.ref
+                logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
+              } else if (ev.type === 'delta') {
+                text += ev.text
+                emit({ type: 'job.token', jobId: j.id, agent: agent.id, text: ev.text })
+                logAll(ev.text)
+              } else {
+                totals.calls++
+                totals.tokensIn += ev.usage.inputTokens
+                totals.tokensCached += ev.usage.cachedInputTokens
+                totals.tokensOut += ev.usage.outputTokens
+                totals.costUsd += ev.costUsd
+                result = { text, usage: ev.usage, model: ev.model, costUsd: ev.costUsd }
+                emit({
+                  type: 'spend',
+                  provider: ev.model.provider.id,
+                  model: ev.model.id,
+                  tokensIn: ev.usage.inputTokens,
+                  tokensOut: ev.usage.outputTokens,
+                  costUsd: ev.costUsd,
+                  agent: agent.id,
+                  book: j.book ?? undefined
+                })
+              }
             }
-            // fell back to another provider: give the first one's slot back, so other agents don't wait for a server this job no longer uses
-            if (ev.model.provider.id !== leased.provider.id && rj.held.delete(leased.provider.id)) {
-              this.d.router.limiter.release(leased.provider)
-              this.kick()
-            }
-            usedModels.push(ev.model.ref)
-            rj.model = ev.model.ref
-            logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
-          } else if (ev.type === 'delta') {
-            text += ev.text
-            emit({ type: 'job.token', jobId: j.id, agent: agent.id, text: ev.text })
-            logAll(ev.text)
-          } else {
-            totals.calls++
-            totals.tokensIn += ev.usage.inputTokens
-            totals.tokensCached += ev.usage.cachedInputTokens
-            totals.tokensOut += ev.usage.outputTokens
-            totals.costUsd += ev.costUsd
-            result = { text, usage: ev.usage, model: ev.model, costUsd: ev.costUsd }
-            emit({
-              type: 'spend',
-              provider: ev.model.provider.id,
-              model: ev.model.id,
-              tokensIn: ev.usage.inputTokens,
-              tokensOut: ev.usage.outputTokens,
-              costUsd: ev.costUsd,
-              agent: agent.id,
-              book: j.book ?? undefined
-            })
+            break
+          } catch (err) {
+            // only a model change aborts the request without stopping the job: ask again, on the new model list
+            if (rj.controller.signal.aborted || !request.signal.aborted) throw err
+            rj.modelChanged = true
+            logAll(`\n_model changed, this request starts again_\n\n`)
+          } finally {
+            rj.controller.signal.removeEventListener('abort', onStop)
+            rj.request = undefined
           }
         }
         logAll('\n')

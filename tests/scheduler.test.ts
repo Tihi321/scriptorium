@@ -376,6 +376,55 @@ describe('agent controls and hot reload', () => {
     expect(env.logs.some((l) => l.includes('unknown model'))).toBe(true)
   })
 
+  it('setModel on a busy agent switches its running job: the request in flight starts again on the new model, earlier ones are kept', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }],
+      roles: { writer: ['a/x'] },
+      agents: [{ role: 'writer', name: 'W' }]
+    })
+    env.mock.onAny((req) => {
+      const second = req.messages[0]!.content === 'second'
+      return second && req.model === 'x' ? { text: 'slow '.repeat(40), chunkDelayMs: 50, chunks: 40 } : `${req.model} answers`
+    })
+    env.engine.scheduler.register('t', async (ctx) => {
+      const one = await ctx.chat({ messages: [{ role: 'user', content: 'first' }] })
+      const two = await ctx.chat({ messages: [{ role: 'user', content: 'second' }] })
+      return { result: `${one.text} / ${two.text}` }
+    })
+    await env.engine.jobs.enqueue({ id: 'j1', task: 't', role: 'writer' })
+    await waitFor(() => env!.mock.calls.length === 2 && env!.events.filter((e) => e.type === 'job.token').length > 1, 5000, 'second request streaming')
+    await env.engine.handleCommand({ type: 'setModel', agent: 'writer-w', model: 'b/y' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'done on the new model')
+    const done = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'j1.md'), 'utf8'))
+    expect(done.data.model).toBe('b/y')
+    expect(done.data.attempts).toBe(0)
+    expect(done.body).toContain('x answers / y answers') // the first request is not asked again
+    expect(env.mock.calls.map((c) => c.model)).toEqual(['x', 'x', 'y'])
+    expect(env.events.some((e) => e.type === 'job.model' && e.model === 'b/y')).toBe(true)
+  })
+
+  it('model_order sorts every role list by group (API, Strata, LM Studio), and an empty order keeps each role its own', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'api', price: 1, models: ['p'] }, { id: 'strata', local: true, models: ['s'] }, { id: 'lmstudio', local: true, models: ['l'] }],
+      roles: { 'line-editor': ['strata/s', 'lmstudio/l', 'api/p'], writer: ['api/p', 'strata/s'] },
+      agents: []
+    })
+    const save = (modelOrder: ('paid' | 'strata' | 'lmstudio')[]) =>
+      env!.engine.handleCommand({ type: 'saveSettings', kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, modelOrder })
+    expect(env.engine.registry.roleModelRefs('line-editor')).toEqual(['strata/s', 'lmstudio/l', 'api/p'])
+
+    await save(['paid', 'lmstudio', 'strata'])
+    expect(parseMd(await readFile(path.join(env.dir, 'config', 'settings.md'), 'utf8')).data.model_order).toEqual(['paid', 'lmstudio', 'strata'])
+    expect(env.engine.registry.roleModelRefs('line-editor')).toEqual(['api/p', 'lmstudio/l', 'strata/s'])
+    expect(env.engine.registry.roleModelRefs('writer')).toEqual(['api/p', 'strata/s'])
+    const snap = await env.engine.snapshot()
+    expect(snap.roleDefaults['line-editor']).toBe('api/p')
+    expect(snap.settings.modelOrder).toEqual(['paid', 'lmstudio', 'strata'])
+
+    await save([])
+    expect(env.engine.registry.roleModelRefs('line-editor')).toEqual(['strata/s', 'lmstudio/l', 'api/p'])
+  })
+
   it('edits to agent and config files apply without a restart (watcher)', async () => {
     env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [] })
     registerChat(env)

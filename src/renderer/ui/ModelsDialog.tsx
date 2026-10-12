@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
 import { officeStore } from '../store/store'
-import type { ModelSummary, SettingsSummary } from '../../shared/protocol'
+import type { ModelGroup, ModelSummary, SettingsSummary } from '../../shared/protocol'
 
 interface Row {
   ref: string
@@ -21,6 +21,14 @@ const SOURCE_LABEL = { config: 'providers.md', discovered: 'found', picked: 'add
 
 type AliasKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel'
 type LoadKey = 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes'
+
+/** The model groups behind the aliases: their name on screen, their default-model setting and which models they may point at. */
+const GROUPS: Record<ModelGroup, { label: string; key: AliasKey; pick: (m: ModelSummary) => boolean }> = {
+  paid: { label: 'API', key: 'defaultPaidModel', pick: (m) => !m.local },
+  strata: { label: 'Strata', key: 'defaultStrataModel', pick: (m) => m.provider === 'strata' },
+  lmstudio: { label: 'LM Studio', key: 'defaultLmstudioModel', pick: (m) => m.provider === 'lmstudio' }
+}
+const DEFAULT_ORDER: ModelGroup[] = ['paid', 'strata', 'lmstudio']
 
 /** A short word for why a provider can't be used: its key is missing, or it is switched off. */
 function shortReason(reason?: string): string {
@@ -119,21 +127,39 @@ export function ModelsDialog() {
     setAdd({ id: '', priceIn: '', priceOut: '', context: '' })
   }
 
-  /** A picker for one alias: the ticked models it may point at, plus the current value if it isn't one of them. */
-  const aliasSelect = (label: string, key: AliasKey, pick: (m: ModelSummary) => boolean) => {
+  // the order every role tries the groups in; empty means each role keeps the order of its own list
+  const shared = (settings?.modelOrder.length ?? 0) > 0
+  const order: ModelGroup[] = shared ? [...settings!.modelOrder, ...DEFAULT_ORDER.filter((g) => !settings!.modelOrder.includes(g))] : DEFAULT_ORDER
+  const move = (i: number, by: number) => {
+    if (!settings) return
+    const next = [...order]
+    ;[next[i], next[i + by]] = [next[i + by]!, next[i]!]
+    saveModelSettings(settings, { modelOrder: next })
+  }
+
+  /** One group's row: its place in the order, the default model behind its alias (the ticked models it may point at), and moving it. */
+  const groupRow = (g: ModelGroup, i: number) => {
     if (!settings) return null
+    const { label, key, pick } = GROUPS[g]
     const refs = models.filter((m) => m.shown !== false && pick(m)).map((m) => m.ref)
     if (settings[key] && !refs.includes(settings[key])) refs.unshift(settings[key])
     return (
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <label>{label}</label>
-        <select value={settings[key]} onChange={(e) => saveModelSettings(settings, { [key]: e.target.value })} data-testid={`set-${key}`}>
+      <div key={g} className="row" style={{ gap: 6 }} data-testid={`order-${g}`}>
+        <span className="dim" style={{ width: 16 }}>{shared ? `${i + 1}.` : ''}</span>
+        <span style={{ width: 70 }}>{label}</span>
+        <select value={settings[key]} onChange={(e) => saveModelSettings(settings, { [key]: e.target.value })} style={{ flex: 1, minWidth: 0 }} data-testid={`set-${key}`}>
           {refs.map((r) => (
             <option key={r} value={r}>
               {r}
             </option>
           ))}
         </select>
+        <button disabled={i === 0} onClick={() => move(i, -1)} title="Try this group earlier" data-testid={`order-up-${g}`}>
+          ↑
+        </button>
+        <button disabled={i === order.length - 1} onClick={() => move(i, 1)} title="Try this group later" data-testid={`order-down-${g}`}>
+          ↓
+        </button>
       </div>
     )
   }
@@ -154,11 +180,23 @@ export function ModelsDialog() {
     <div className="dialog-backdrop" onClick={close}>
       <div className="dialog models" onClick={(e) => e.stopPropagation()} data-testid="models-dialog">
         <div className="panel-title">Models</div>
-        <div className="dim">Default models: the aliases paid, strata and lmstudio in roles.md. Every role that names one follows it.</div>
-        <div className="row" style={{ gap: 8 }}>
-          {aliasSelect('Paid API', 'defaultPaidModel', (m) => !m.local)}
-          {aliasSelect('Strata', 'defaultStrataModel', (m) => m.provider === 'strata')}
-          {aliasSelect('LM Studio', 'defaultLmstudioModel', (m) => m.provider === 'lmstudio')}
+        <div className="dim">Default models: the aliases paid (API, free or paid), strata and lmstudio in roles.md. Every role that names one follows it.</div>
+        <label className="inline">
+          <input
+            type="checkbox"
+            checked={shared}
+            onChange={(e) => settings && saveModelSettings(settings, { modelOrder: e.target.checked ? order : [] })}
+            data-testid="order-shared"
+          />
+          One fallback order for every role
+        </label>
+        <div className="stack" style={{ gap: 4 }}>
+          {order.map(groupRow)}
+        </div>
+        <div className="dim">
+          {shared
+            ? "Every role tries the groups top to bottom: the first is the primary, the rest are fallbacks. An agent's own model still goes first. Running jobs switch at once."
+            : 'Each role keeps the order of its list in roles.md. Move a group up or down to use one order for every role.'}
         </div>
         <hr />
         <div className="dim">Tick the models the pickers offer. Saved in config/models.md.</div>

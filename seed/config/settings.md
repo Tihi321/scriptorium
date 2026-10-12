@@ -9,6 +9,7 @@ smtp_secure: false
 default_paid_model: deepseek/deepseek-flash
 default_strata_model: strata/qwen3.8-flash-next
 default_lmstudio_model: lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
+model_order: []
 lmstudio_parallel: 4
 lmstudio_context: 131072
 lmstudio_ttl_minutes: 60
@@ -26,9 +27,10 @@ Sending books to your Kindle by email.
 
 The role lists in `roles.md` can name these aliases instead of a model: `paid`, `strata` and `lmstudio`. Change a default here (or in the app's Models panel) and every role that uses the alias follows. An agent's own model, picked in the app, still goes first.
 
-- `default_paid_model`: the paid API model behind `paid` (DeepSeek V4.1 Flash).
+- `default_paid_model`: the API model behind `paid` (DeepSeek V4.1 Flash). It can be a free one, such as an OpenRouter `:free` model.
 - `default_strata_model`: the Strata model behind `strata`.
 - `default_lmstudio_model`: the LM Studio model behind `lmstudio`.
+- `model_order`: one fallback order for every role, for example `[paid, lmstudio, strata]`. The groups are `paid` (every API model, free or paid), `strata` and `lmstudio`. Each role's list is sorted by group and keeps its own order inside a group, so a role that names Strata's `-low` model still uses that one when Strata's turn comes. A group left out goes last. `[]` keeps each role's own order from `roles.md`. Set it in the Models panel (One fallback order for every role, and the up and down buttons) or here. A change applies at once, to running jobs too.
 
 ## LM Studio loading
 

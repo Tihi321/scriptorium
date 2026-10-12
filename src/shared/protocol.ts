@@ -140,6 +140,8 @@ export interface SettingsSummary {
   defaultPaidModel: string
   defaultStrataModel: string
   defaultLmstudioModel: string
+  /** `model_order` in settings.md: the groups `paid`, `strata`, `lmstudio` in the order every role tries them. Empty: each role's own order. */
+  modelOrder: ModelGroup[]
   /** How the engine loads LM Studio models: requests at once, context window, idle minutes before unloading. */
   lmstudioParallel: number
   lmstudioContext: number
@@ -148,7 +150,9 @@ export interface SettingsSummary {
   maxBooksInProgress: number
 }
 
-export type ModelSettingKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
+export type ModelGroup = 'paid' | 'strata' | 'lmstudio'
+
+export type ModelSettingKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel' | 'modelOrder' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
 
 export interface SnapshotEvent {
   type: 'snapshot'

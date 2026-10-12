@@ -152,7 +152,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     ]
   }
   const roleDefaults: Record<string, string> = Object.fromEntries(STAFF.map(([role, , , model]) => [role, model]))
-  let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 }
+  let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', modelOrder: [], lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 }
   const secretsSet = new Set<string>(['DEEPSEEK_API_KEY'])
 
   const summaryOf = (a: FakeAgent): AgentSummary => ({
