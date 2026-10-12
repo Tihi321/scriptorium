@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseMdWith } from '../../shared/md'
-import { providersSchema, rolesSchema, settingsSchema } from '../../shared/schemas'
-import type { ProviderEntry, RolesConfig, SettingsConfig } from '../../shared/schemas'
+import { modelsConfigSchema, providersSchema, rolesSchema, settingsSchema } from '../../shared/schemas'
+import type { ModelsConfig, ProviderEntry, RolesConfig, SettingsConfig } from '../../shared/schemas'
 import { promises as fs } from 'node:fs'
 import { AnthropicClient } from './anthropic'
 import { GeminiClient } from './gemini'
@@ -11,6 +11,7 @@ import { resolveKey } from './keys'
 import type { KeyResolver } from './keys'
 import { MockProvider } from './mock'
 import { OpenAiCompatClient } from './openaiCompat'
+import type { ListedModel } from './openaiCompat'
 import type { ProviderClient } from './types'
 
 export interface ProviderInfo {
@@ -26,7 +27,8 @@ export interface ProviderInfo {
   /** `concurrency: auto`: the server did not answer the last check, or says its model is unloaded and won't load on request. Jobs skip it while another model is left. */
   down: boolean
   rpm?: number
-  discover: boolean
+  /** `free`: only the models the provider lists at price 0. */
+  discover: boolean | 'free'
   /** Words that keep a model out of discovery (`discover_skip`). */
   discoverSkip: string[]
   /** Send the JSON schema as `response_format` (`openai-compat`). */
@@ -57,6 +59,8 @@ export interface ModelInfo {
   embedding: boolean
   extraBody: Record<string, unknown> | null
   discovered: boolean
+  /** Added from `picked` in config/models.md (the Models dialog), not from providers.md. */
+  picked?: boolean
   /** LM Studio: this model's own load settings (`load_context`, `load_parallel`), over the settings' ones. */
   loadContext?: number
   loadParallel?: number
@@ -107,6 +111,8 @@ export class ModelRegistry {
   roles: RolesConfig = { kind: 'roles', roles: {} }
   /** `search_order` of providers.md: the ids of the search providers, in the order the researcher tries them. */
   searchOrder: string[] = []
+  /** config/models.md: the models picked in the Models dialog and the refs the pickers leave out. */
+  modelChoices: ModelsConfig = { kind: 'models', picked: [], hidden: [] }
   readonly mock: MockProvider
   /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
   private serverSlots = new Map<string, number>()
@@ -128,6 +134,7 @@ export class ModelRegistry {
     const rolesFile = path.join(this.dataDir, 'config', 'roles.md')
     const prov = parseMdWith(await fs.readFile(provFile, 'utf8'), providersSchema, provFile)
     const roles = parseMdWith(await fs.readFile(rolesFile, 'utf8'), rolesSchema, rolesFile)
+    const choices = await this.readModelChoices()
     const keys = this.opts.keys ?? resolveKey
     const discoveredBefore = [...this.models.values()].filter((m) => m.discovered)
 
@@ -180,11 +187,66 @@ export class ModelRegistry {
     this.models = models
     this.roles = roles.data
     this.searchOrder = prov.data.search_order
+    this.modelChoices = choices
+    // models picked in the Models dialog, with the price the provider listed then; providers.md wins for a model in both
+    for (const m of choices.picked) {
+      const p = providers.get(m.provider)
+      const ref = `${m.provider}/${m.id}`
+      if (!p || models.has(ref) || p.kind === 'search') continue
+      models.set(ref, {
+        ref,
+        provider: p,
+        id: m.id,
+        family: m.family === 'unknown' ? guessFamily(m.id) : m.family,
+        context: m.context,
+        maxOutput: m.max_output,
+        priceIn: m.price_in,
+        priceOut: m.price_out,
+        priceCachedIn: m.price_cached_in ?? m.price_in,
+        embedding: m.embedding,
+        extraBody: m.extra_body ?? null,
+        discovered: false,
+        picked: true
+      })
+    }
     // Keep what discovery found earlier, so a config reload does not forget it.
     for (const d of discoveredBefore) {
       const prov = this.providers.get(d.provider.id)
       if (prov && !this.models.has(d.ref) && !skipsDiscovered(prov, d.id)) this.models.set(d.ref, { ...d, provider: prov })
     }
+  }
+
+  modelsFile(): string {
+    return path.join(this.dataDir, 'config', 'models.md')
+  }
+
+  /** config/models.md, or nothing picked or hidden when it is missing. An invalid file throws, so `load` keeps the previous state. */
+  private async readModelChoices(): Promise<ModelsConfig> {
+    let text: string
+    try {
+      text = await fs.readFile(this.modelsFile(), 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'models', picked: [], hidden: [] }
+      throw err
+    }
+    return parseMdWith(text, modelsConfigSchema, this.modelsFile()).data
+  }
+
+  /** The pickers offer this model (it is not in `hidden` of config/models.md). */
+  isShown(ref: string): boolean {
+    return !this.modelChoices.hidden.includes(ref)
+  }
+
+  /**
+   * Every chat model a provider lists (`GET /models`), whether it is in the pickers or not, for the Models dialog.
+   * `pickable` is false for a paid provider's model without a listed price: the budget could not count it.
+   */
+  async catalog(providerId: string, signal?: AbortSignal): Promise<ListedModel[]> {
+    const p = this.providers.get(providerId)
+    if (!p) throw new Error(`no provider "${providerId}"`)
+    if (!p.available) throw new Error(p.unavailableReason ?? 'not available')
+    if (!(p.client instanceof OpenAiCompatClient)) throw new Error(`a ${p.kind} provider can't list its models here: add them to providers.md`)
+    return (await p.client.listModelInfo(signal)).filter((m) => m.textOnly && !/embed/i.test(m.id) && !skipsDiscovered(p, m.id))
   }
 
   private setupClient(info: ProviderInfo, keys: KeyResolver): void {
@@ -238,26 +300,36 @@ export class ModelRegistry {
     info.available = true
   }
 
-  /** `GET /models` on every provider with `discover: true`. Adds unknown models, family guessed from the id. */
+  /**
+   * `GET /models` on every provider with `discover` set. Adds unknown models, family guessed from the id.
+   * A paid provider's model is only added with the price the provider lists (`discover: free`: only at price 0), so the budget sees its cost.
+   */
   async discover(signal?: AbortSignal): Promise<{ provider: string; found: number; error?: string }[]> {
     const out: { provider: string; found: number; error?: string }[] = []
     for (const p of this.providers.values()) {
       if (!p.discover || !p.available || !(p.client instanceof OpenAiCompatClient)) continue
       try {
-        const ids = await p.client.listModels(signal)
-        const ctxLen = await p.client.contextLengths(signal)
-        for (const id of ids) {
-          const ref = `${p.id}/${id}`
-          if (this.models.has(ref) || skipsDiscovered(p, id)) continue
+        const listed = await p.client.listModelInfo(signal)
+        const ctxLen = p.local ? await p.client.contextLengths(signal) : new Map<string, number>() // LM Studio's loaded windows
+        let found = 0
+        for (const m of listed) {
+          const ref = `${p.id}/${m.id}`
+          if (skipsDiscovered(p, m.id) || !m.textOnly) continue
+          const free = !!m.price && m.price.in === 0 && m.price.out === 0
+          if (p.discover === 'free' ? !free : !p.local && !m.price) continue
+          found++
+          if (this.models.has(ref)) continue
           this.models.set(ref, {
             ref,
             provider: p,
-            id,
-            family: guessFamily(id),
-            priceIn: 0,
-            priceOut: 0,
-            priceCachedIn: 0,
-            embedding: /embed/i.test(id),
+            id: m.id,
+            family: guessFamily(m.id),
+            context: m.context,
+            maxOutput: m.maxOutput,
+            priceIn: p.local ? 0 : (m.price?.in ?? 0),
+            priceOut: p.local ? 0 : (m.price?.out ?? 0),
+            priceCachedIn: p.local ? 0 : (m.price?.cachedIn ?? m.price?.in ?? 0),
+            embedding: /embed/i.test(m.id),
             extraBody: null,
             discovered: true
           })
@@ -267,7 +339,7 @@ export class ModelRegistry {
           const m = this.models.get(`${p.id}/${id}`)
           if (m && (m.context === undefined || p.loadModels)) m.context = len
         }
-        out.push({ provider: p.id, found: ids.length })
+        out.push({ provider: p.id, found })
       } catch (err) {
         out.push({ provider: p.id, found: 0, error: (err as Error).message })
       }
@@ -386,8 +458,9 @@ function skipsDiscovered(p: ProviderInfo, id: string): boolean {
 
 export function guessFamily(id: string): string {
   const s = id.toLowerCase()
-  for (const f of ['qwen', 'nemotron', 'poolside', 'laguna', 'deepseek', 'llama', 'mistral', 'gemma', 'nomic', 'glm', 'kimi']) {
+  for (const f of ['qwen', 'nemotron', 'poolside', 'laguna', 'deepseek', 'llama', 'mistral', 'gemma', 'gemini', 'claude', 'gpt', 'grok', 'nomic', 'glm', 'kimi']) {
     if (s.includes(f)) return f === 'laguna' ? 'poolside' : f
   }
-  return 'unknown'
+  // OpenRouter ids start with the maker (`thinkingmachines/inkling:free`): the closest thing to a family
+  return s.includes('/') ? s.slice(0, s.indexOf('/')) : 'unknown'
 }

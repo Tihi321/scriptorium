@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla'
-import type { AgentSummary, BookSummary, EngineEvent, ModelSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
+import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, ModelSummary, ProviderSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
 import {
   asAgentState,
   bookColor,
@@ -25,8 +25,11 @@ export interface OfficeState {
   books: Record<string, BookView>
   handovers: HandoverView[]
   spend: SpendView
-  /** Models the pickers offer, from the snapshot. */
+  /** Every model the engine knows, from the snapshot. The pickers offer the `shown` ones. */
   models: ModelSummary[]
+  providers: ProviderSummary[]
+  /** What each provider listed in the Models dialog (`detectModels`), or why it couldn't. `loading` until it answers. */
+  catalogs: Record<string, { models: CatalogModel[]; error?: string; at?: string; loading?: boolean }>
   roleDefaults: Record<string, string>
   /** The local model servers (Strata, LM Studio): running or not. */
   servers: ServerStatus[]
@@ -43,6 +46,7 @@ export interface OfficeState {
   openBook: string | null
   reading: boolean
   settingsOpen: boolean
+  modelsOpen: boolean
   /** The book whose draft reader is open, and the last draft the engine built for it. */
   draftBook: string | null
   draft: Extract<EngineEvent, { type: 'draft.ready' }> | null
@@ -72,6 +76,9 @@ export interface OfficeActions {
   openBookCard(slug: string | null, reading?: boolean): void
   setReading(reading: boolean): void
   setSettingsOpen(open: boolean): void
+  setModelsOpen(open: boolean): void
+  /** The Models dialog asked a provider for its models: show it as loading until `models.catalog` comes. */
+  markCatalogLoading(provider: string): void
   markKindleSending(slug: string): void
   setCheckingServers(checking: boolean): void
   reset(): void
@@ -93,6 +100,8 @@ function initial(): OfficeState {
     handovers: [],
     spend: { ...EMPTY_SPEND },
     models: [],
+    providers: [],
+    catalogs: {},
     roleDefaults: {},
     servers: [],
     checkingServers: false,
@@ -104,6 +113,7 @@ function initial(): OfficeState {
     openBook: null,
     reading: false,
     settingsOpen: false,
+    modelsOpen: false,
     draftBook: null,
     draft: null,
     selectedAgent: null,
@@ -192,6 +202,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         topics: e.topics,
         spend: e.spend,
         models: e.models,
+        providers: e.providers ?? [],
         roleDefaults: e.roleDefaults,
         servers: e.servers ?? [],
         settings: e.settings,
@@ -230,6 +241,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       return { kindle: { ...s.kindle, [e.book]: e.ok ? { state: 'ok' } : { state: 'error', error: e.error } } }
     case 'secrets.updated':
       return { secretsSet: e.secretsSet }
+    case 'models.catalog':
+      return { catalogs: { ...s.catalogs, [e.provider]: { models: e.models, error: e.error, at: e.at } } }
     case 'agent.state': {
       const prev = s.agents[e.agent]
       const state = e.state
@@ -356,6 +369,12 @@ export function createOfficeStore() {
     },
     setSettingsOpen(open) {
       set({ settingsOpen: open })
+    },
+    setModelsOpen(open) {
+      set({ modelsOpen: open })
+    },
+    markCatalogLoading(provider) {
+      set({ catalogs: { ...get().catalogs, [provider]: { ...(get().catalogs[provider] ?? { models: [] }), loading: true, error: undefined } } })
     },
     openDraft(slug) {
       set({ draftBook: slug, draft: get().draft?.book === slug ? get().draft : null })

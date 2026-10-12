@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -16,6 +16,8 @@ import { ModelRouter } from '../src/engine/models/router'
 import { BudgetError, collect, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
+import { parseMd } from '../src/shared/md'
+import type { EngineEvent } from '../src/shared/protocol'
 import { seedDir, writeTestConfig } from './helpers'
 
 let dir: string
@@ -149,6 +151,44 @@ describe('seed configs', () => {
     expect(lm().some((r) => /dflash/i.test(r))).toBe(false)
     await registry.load()
     expect(lm()).toContain('lmstudio/some-new-model')
+  })
+
+  it('discover: free adds the models OpenRouter lists at price 0, with their context, and nothing without a price', async () => {
+    const price = (p: string, c: string) => ({ prompt: p, completion: c })
+    const listed = [
+      { id: 'thinkingmachines/inkling:free', context_length: 1048576, top_provider: { max_completion_tokens: 262144 }, pricing: price('0', '0'), architecture: { output_modalities: ['text'] } },
+      { id: 'google/gemma-4-31b-it:free', context_length: 262144, pricing: price('0', '0') },
+      { id: 'google/lyria-3-pro-preview', pricing: price('0', '0'), architecture: { output_modalities: ['text', 'audio'] } }, // music
+      { id: 'nvidia/nemotron-3.5-content-safety:free', pricing: price('0', '0') }, // discover_skip
+      { id: 'openai/gpt-6', context_length: 400000, pricing: { ...price('0.000003', '0.000015'), input_cache_read: '0.0000003' } },
+      { id: 'openrouter/auto', pricing: price('-1', '-1') }, // "varies": no usable price
+      { id: 'no-price/model' }
+    ]
+    const fetchImpl = (async (url: string) => {
+      if (String(url) === 'https://openrouter.ai/api/v1/models') return new Response(JSON.stringify({ data: listed }))
+      throw new Error('not running')
+    }) as unknown as typeof fetch
+    const keys = (name: string) => (name === 'OPENROUTER_API_KEY' ? 'sk-or-test' : undefined)
+    const registry = new ModelRegistry(dir, { keys, fetchImpl })
+    await registry.load()
+    expect((await registry.discover()).find((d) => d.provider === 'openrouter')).toEqual({ provider: 'openrouter', found: 2 })
+    const or = () => [...registry.models.keys()].filter((r) => r.startsWith('openrouter/') && registry.models.get(r)!.discovered).sort()
+    expect(or()).toEqual(['openrouter/google/gemma-4-31b-it:free', 'openrouter/thinkingmachines/inkling:free'])
+    const inkling = registry.models.get('openrouter/thinkingmachines/inkling:free')!
+    expect(inkling).toMatchObject({ family: 'thinkingmachines', context: 1048576, maxOutput: 262144, priceIn: 0, priceOut: 0 })
+    expect(isPaidModel(inkling)).toBe(false)
+    expect(registry.models.get('openrouter/google/gemma-4-31b-it:free')!.family).toBe('gemma')
+
+    // discover: true adds the paid ones too, with the price OpenRouter lists, but never one without a price
+    const file = path.join(dir, 'config', 'providers.md')
+    await writeFile(file, (await readFile(file, 'utf8')).replace('discover: free ', 'discover: true '))
+    await registry.load()
+    await registry.discover()
+    expect(or()).toEqual(['openrouter/google/gemma-4-31b-it:free', 'openrouter/openai/gpt-6', 'openrouter/thinkingmachines/inkling:free'])
+    const gpt = registry.models.get('openrouter/openai/gpt-6')!
+    expect(gpt).toMatchObject({ family: 'gpt', priceIn: 3, priceOut: 15 })
+    expect(gpt.priceCachedIn).toBeCloseTo(0.3)
+    expect(isPaidModel(gpt)).toBe(true)
   })
 
   it('concurrency: auto for LM Studio adds up `parallel` of the loaded chat models', async () => {
@@ -571,5 +611,67 @@ describe('credential store', () => {
     } finally {
       deleteStoredKey(account, service)
     }
+  })
+})
+
+describe('Models dialog', () => {
+  it('detectModels lists what a provider has; showModels picks a priced model, hides others, and refuses one without a price', async () => {
+    const { Engine } = await import('../src/engine/engine')
+    const listed = {
+      'https://openrouter.ai/api/v1/models': [
+        { id: 'thinkingmachines/inkling:free', context_length: 1048576, pricing: { prompt: '0', completion: '0' } },
+        { id: 'openai/gpt-6', context_length: 400000, top_provider: { max_completion_tokens: 128000 }, pricing: { prompt: '0.000003', completion: '0.000015', input_cache_read: '0.0000003' } },
+        { id: 'google/lyria-3-pro-preview', pricing: { prompt: '0', completion: '0' }, architecture: { output_modalities: ['text', 'audio'] } }
+      ],
+      'https://api.deepseek.com/models': [{ id: 'deepseek-flash' }, { id: 'deepseek-chat' }]
+    } as Record<string, unknown[]>
+    const fetchImpl = (async (url: string) => {
+      const data = listed[String(url)]
+      if (!data) throw new Error('not running')
+      return new Response(JSON.stringify({ data }))
+    }) as unknown as typeof fetch
+    const keys = (name: string) => (name === 'OPENROUTER_API_KEY' || name === 'DEEPSEEK_API_KEY' ? 'sk-test' : undefined)
+    const events: EngineEvent[] = []
+    const engine = new Engine({ dataDir: dir, emit: (e) => events.push(e), log: () => {}, registry: { keys, fetchImpl }, discover: false })
+    await engine.registry.load()
+    const catalog = (provider: string) => [...events].reverse().find((e) => e.type === 'models.catalog' && e.provider === provider) as Extract<EngineEvent, { type: 'models.catalog' }>
+    const snap = () => [...events].reverse().find((e) => e.type === 'snapshot') as Extract<EngineEvent, { type: 'snapshot' }>
+
+    await engine.handleCommand({ type: 'detectModels', provider: 'openrouter' })
+    expect(catalog('openrouter').models).toEqual([
+      { id: 'thinkingmachines/inkling:free', ref: 'openrouter/thinkingmachines/inkling:free', context: 1048576, priceIn: 0, priceOut: 0, pickable: true },
+      { id: 'openai/gpt-6', ref: 'openrouter/openai/gpt-6', context: 400000, priceIn: 3, priceOut: 15, pickable: true }
+    ])
+    await engine.handleCommand({ type: 'detectModels', provider: 'deepseek' })
+    expect(catalog('deepseek').models.map((m) => m.pickable)).toEqual([false, false]) // DeepSeek lists no prices
+    await engine.handleCommand({ type: 'detectModels', provider: 'anthropic' })
+    expect(catalog('anthropic').error).toMatch(/no key/)
+
+    // tick a paid OpenRouter model and the unpriced DeepSeek one, untick a model from providers.md
+    await engine.handleCommand({ type: 'showModels', refs: ['openrouter/openai/gpt-6', 'deepseek/deepseek-chat'], shown: true })
+    await engine.handleCommand({ type: 'showModels', refs: ['deepseek/deepseek-v4-pro'], shown: false })
+    const gpt = engine.registry.models.get('openrouter/openai/gpt-6')!
+    expect(gpt).toMatchObject({ picked: true, family: 'gpt', context: 400000, maxOutput: 128000, priceIn: 3, priceOut: 15 })
+    expect(gpt.priceCachedIn).toBeCloseTo(0.3)
+    expect(engine.registry.models.has('deepseek/deepseek-chat')).toBe(false)
+    const file = parseMd(await readFile(path.join(dir, 'config', 'models.md'), 'utf8'))
+    expect(file.data.hidden).toEqual(['deepseek/deepseek-v4-pro'])
+    expect((file.data.picked as { id: string }[]).map((m) => m.id)).toEqual(['openai/gpt-6'])
+    expect(file.body).toContain('# Models in the pickers')
+    const summary = (ref: string) => snap().models.find((m) => m.ref === ref)
+    expect(summary('openrouter/openai/gpt-6')).toMatchObject({ shown: true, source: 'picked', priceIn: 3 })
+    expect(summary('deepseek/deepseek-v4-pro')).toMatchObject({ shown: false, source: 'config' })
+    expect(snap().providers.find((p) => p.id === 'anthropic')).toMatchObject({ available: false, canList: false })
+
+    // a new registry reads the file back; unticking a picked model removes it, ticking a hidden one shows it again
+    const again = new ModelRegistry(dir, { keys, fetchImpl })
+    await again.load()
+    expect(again.models.get('openrouter/openai/gpt-6')?.priceOut).toBe(15)
+    expect(again.isShown('deepseek/deepseek-v4-pro')).toBe(false)
+    await engine.handleCommand({ type: 'showModels', refs: ['openrouter/openai/gpt-6'], shown: false })
+    await engine.handleCommand({ type: 'showModels', refs: ['deepseek/deepseek-v4-pro'], shown: true })
+    expect(engine.registry.models.has('openrouter/openai/gpt-6')).toBe(false)
+    expect(engine.registry.isShown('deepseek/deepseek-v4-pro')).toBe(true)
+    expect(engine.registry.isShown('openrouter/openai/gpt-6')).toBe(true) // removed, not hidden
   })
 })

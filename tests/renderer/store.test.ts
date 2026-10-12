@@ -68,6 +68,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     books: [bookSummary('fox-book', { title: 'Fox Book' })],
     topics: [],
     models: [],
+    providers: [],
     roleDefaults: {},
     servers: [],
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },

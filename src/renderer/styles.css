@@ -621,6 +621,75 @@ textarea {
   max-height: 92vh;
   overflow-y: auto;
 }
+.dialog.models {
+  width: min(900px, 96vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.models-body {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+  margin-top: 8px;
+  min-height: 0;
+}
+.models-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+.models-providers button {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+}
+.models-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.dialog label.inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+.dialog input[type='checkbox'] {
+  width: auto;
+}
+.models-list {
+  height: min(52vh, 460px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.dialog label.model-row {
+  display: grid;
+  grid-template-columns: auto 1fr 48px 120px 84px;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0;
+  color: var(--text);
+  cursor: pointer;
+}
+.model-row.disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.model-row .model-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-row .free {
+  color: var(--good);
+}
 
 .book-info {
   margin: 8px 0 6px;

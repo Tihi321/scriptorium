@@ -33,15 +33,24 @@ export function SettingsDialog() {
   const [keyValue, setKeyValue] = useState('')
   const [login, setLogin] = useState<boolean | null>(null)
 
+  // filled once per opening: a snapshot that arrives while the dialog is open (a model was discovered) must not undo your edits
+  const [loaded, setLoaded] = useState(false)
   useEffect(() => {
-    if (open && settings) setForm({ ...settings })
-  }, [open, settings])
+    if (!open) setLoaded(false)
+    else if (settings && !loaded) {
+      setForm({ ...settings })
+      setLoaded(true)
+    }
+  }, [open, settings, loaded])
   useEffect(() => {
     if (open) void getStartWithWindows().then(setLogin)
   }, [open])
 
   if (!open) return null
-  const close = () => {
+  /** Closing keeps what you changed: Close, a click outside and Save all save it. */
+  const close = (save = false) => {
+    if (loaded && settings && (save || (Object.keys(form) as (keyof SettingsSummary)[]).some((k) => form[k] !== settings[k]))) sendCommand({ type: 'saveSettings', ...form })
+    if (password) sendCommand({ type: 'setSecret', name: SMTP_PASSWORD, value: password })
     setPassword('')
     setKeyValue('')
     officeStore.getState().setSettingsOpen(false)
@@ -54,7 +63,7 @@ export function SettingsDialog() {
   )
   /** A model picker for one alias: the provider's models (or every paid one), plus the current value if it isn't in the list. */
   const modelSelect = (label: string, key: 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel', pick: (m: (typeof models)[number]) => boolean) => {
-    const refs = models.filter(pick).map((m) => m.ref)
+    const refs = models.filter((m) => m.shown !== false && pick(m)).map((m) => m.ref)
     if (form[key] && !refs.includes(form[key])) refs.unshift(form[key])
     return (
       <>
@@ -77,7 +86,7 @@ export function SettingsDialog() {
   )
   const keySet = secretsSet.includes(keyName)
   return (
-    <div className="dialog-backdrop" onClick={close}>
+    <div className="dialog-backdrop" onClick={() => close()}>
       <div className="dialog settings" onClick={(e) => e.stopPropagation()} data-testid="settings-dialog">
         <div className="panel-title">Settings</div>
         <div className="row">{num('Books worked on at once', 'maxBooksInProgress')}</div>
@@ -87,6 +96,18 @@ export function SettingsDialog() {
         {modelSelect('Paid API', 'defaultPaidModel', (m) => !m.local)}
         {modelSelect('Strata', 'defaultStrataModel', (m) => m.provider === 'strata')}
         {modelSelect('LM Studio', 'defaultLmstudioModel', (m) => m.provider === 'lmstudio')}
+        <div className="row spread" style={{ marginTop: 6 }}>
+          <span className="dim">The pickers offer the models ticked there.</span>
+          <button
+            data-testid="settings-models"
+            onClick={() => {
+              close()
+              officeStore.getState().setModelsOpen(true)
+            }}
+          >
+            Choose models
+          </button>
+        </div>
         <div className="dim" style={{ marginTop: 6 }}>Loading LM Studio models</div>
         <div className="row">
           {num('Requests at once', 'lmstudioParallel')}
@@ -112,15 +133,11 @@ export function SettingsDialog() {
         <label>SMTP password {secretsSet.includes(SMTP_PASSWORD) ? '(set, not shown)' : '(not set)'}</label>
         <input type="password" autoComplete="off" value={password} placeholder="Type a new password to replace it" onChange={(e) => setPassword(e.target.value)} data-testid="set-password" />
         <div className="row spread" style={{ marginTop: 6 }}>
-          <span className="dim">Passwords go to the Windows credential store.</span>
+          <span className="dim">Closing saves too. Passwords go to the Windows credential store.</span>
           <button
             className="primary"
             data-testid="settings-save"
-            onClick={() => {
-              sendCommand({ type: 'saveSettings', ...form })
-              if (password) sendCommand({ type: 'setSecret', name: SMTP_PASSWORD, value: password })
-              close()
-            }}
+            onClick={() => close(true)}
           >
             Save
           </button>
@@ -163,7 +180,7 @@ export function SettingsDialog() {
           Start Scriptorium with Windows{login === null ? ' (only in the desktop app)' : ''}
         </label>
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
-          <button onClick={close} data-testid="settings-close">
+          <button onClick={() => close()} data-testid="settings-close">
             Close
           </button>
         </div>

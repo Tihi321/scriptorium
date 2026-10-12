@@ -58,8 +58,11 @@ export const providerEntrySchema = z.looseObject({
   price_per_request: z.number().nonnegative().default(0),
   rpm: z.number().int().positive().optional(),
   tpm: z.number().int().positive().optional(),
-  /** Ask the provider which models it has (GET /v1/models) and add the unknown ones. */
-  discover: z.boolean().default(false),
+  /**
+   * Ask the provider which models it has (GET /v1/models) and add the unknown ones. `free`: only the ones it lists at price 0
+   * (OpenRouter's `:free` models). A paid provider's model that comes without a price is never added, so the budget always sees its cost.
+   */
+  discover: z.union([z.boolean(), z.literal('free')]).default(false),
   /** Discovery leaves out models whose id contains one of these words (any case), for example `dflash`. */
   discover_skip: z.array(z.string()).default([]),
   /** Send the JSON schema as `response_format`. Set false for servers that reject a bad JSON answer (502) instead of constraining it: the prompt and the repair step handle the JSON then. */
@@ -67,6 +70,15 @@ export const providerEntrySchema = z.looseObject({
   /** LM Studio: the engine loads a model that isn't loaded yet itself, with the parallel, context and idle time from config/settings.md. */
   load_models: z.boolean().default(false),
   models: z.array(providerModelSchema).default([])
+})
+
+/**
+ * config/models.md: which models the pickers offer, set in the app's Models dialog. `picked`: models a provider lists that are
+ * not in providers.md, with the price it listed when you picked them. `hidden`: `provider/model` refs the pickers leave out.
+ */
+export const modelsConfigSchema = configBase('models').extend({
+  picked: z.array(providerModelSchema.extend({ provider: z.string().min(1) })).default([]),
+  hidden: z.array(z.string()).default([])
 })
 
 export const providersSchema = configBase('providers').extend({
@@ -289,6 +301,7 @@ export type ProviderEntry = z.output<typeof providerEntrySchema>
 export type ProviderModelEntry = z.output<typeof providerModelSchema>
 export type RolesConfig = z.output<typeof rolesSchema>
 export type SettingsConfig = z.output<typeof settingsSchema>
+export type ModelsConfig = z.output<typeof modelsConfigSchema>
 export type FactoryConfig = z.output<typeof factorySchema>
 export type AgentFrontmatter = z.output<typeof agentSchema>
 export type QualityConfig = z.output<typeof qualitySchema>

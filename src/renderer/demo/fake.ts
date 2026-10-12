@@ -5,7 +5,7 @@
  * Query flags: `seed=N` (random seed), `tick=MS` (simulation step, default 400; 0 stops the clock, use `__scriptoriumFake.step()`).
  * Recorded commands are in `window.__scriptoriumFake.commands`.
  */
-import type { AgentState, AgentSummary, Command, EngineEvent, ModelSummary } from '../../shared/protocol'
+import type { AgentState, AgentSummary, CatalogModel, Command, EngineEvent, ModelSummary, ProviderSummary } from '../../shared/protocol'
 import { bookSummary as summaryOfBook, makeBookUrl, makeBooks, makeTopics, topicSummaries } from './library'
 import type { RendererApi } from '../api'
 
@@ -118,14 +118,39 @@ export function installFakeEngine(params: URLSearchParams): void {
   const emit = (e: EngineEvent) => {
     for (const h of [...handlers]) h(e)
   }
-  const MODELS: ModelSummary[] = [DS, QWEN27, QWEN35, 'anthropic/claude-sonnet-5'].map((ref) => ({
+  const modelOf = (ref: string, source: ModelSummary['source'] = 'config', price = { in: 0, out: 0 }): ModelSummary => ({
     ref,
-    provider: ref.split('/')[0]!,
-    model: ref.split('/')[1]!,
-    family: ref.split('/')[0]!,
+    provider: ref.slice(0, ref.indexOf('/')),
+    model: ref.slice(ref.indexOf('/') + 1),
+    family: ref.slice(0, ref.indexOf('/')),
     local: ref.startsWith('lmstudio') || ref.startsWith('strata'),
-    enabled: !ref.startsWith('anthropic')
-  }))
+    enabled: !ref.startsWith('anthropic'),
+    shown: true,
+    source,
+    context: 131072,
+    priceIn: ref.startsWith('deepseek') ? 0.3 : ref.startsWith('anthropic') ? 3 : price.in,
+    priceOut: ref.startsWith('deepseek') ? 1.2 : ref.startsWith('anthropic') ? 15 : price.out
+  })
+  let MODELS: ModelSummary[] = [DS, QWEN27, QWEN35, 'anthropic/claude-sonnet-5', 'openrouter/google/gemma-4-31b-it:free'].map((ref) => modelOf(ref, ref.startsWith('openrouter') ? 'discovered' : 'config'))
+  const PROVIDERS: ProviderSummary[] = [
+    { id: 'deepseek', kind: 'openai-compat', local: false, available: true, canList: true },
+    { id: 'openrouter', kind: 'openai-compat', local: false, available: true, canList: true },
+    { id: 'anthropic', kind: 'anthropic', local: false, available: false, reason: 'no key (set ANTHROPIC_API_KEY or run: npm run key:set ANTHROPIC_API_KEY)', canList: false },
+    { id: 'lmstudio', kind: 'openai-compat', local: true, available: true, canList: true },
+    { id: 'strata', kind: 'openai-compat', local: true, available: true, canList: true }
+  ]
+  /** What the demo providers list in the Models dialog. */
+  const CATALOG: Record<string, CatalogModel[]> = {
+    openrouter: [
+      { id: 'google/gemma-4-31b-it:free', ref: 'openrouter/google/gemma-4-31b-it:free', context: 262144, priceIn: 0, priceOut: 0, pickable: true },
+      { id: 'thinkingmachines/inkling:free', ref: 'openrouter/thinkingmachines/inkling:free', context: 1048576, priceIn: 0, priceOut: 0, pickable: true },
+      { id: 'openai/gpt-6', ref: 'openrouter/openai/gpt-6', context: 400000, priceIn: 3, priceOut: 15, pickable: true }
+    ],
+    deepseek: [
+      { id: 'deepseek-flash', ref: 'deepseek/deepseek-flash', pickable: false },
+      { id: 'deepseek-chat', ref: 'deepseek/deepseek-chat', pickable: false }
+    ]
+  }
   const roleDefaults: Record<string, string> = Object.fromEntries(STAFF.map(([role, , , model]) => [role, model]))
   let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 }
   const secretsSet = new Set<string>(['DEEPSEEK_API_KEY'])
@@ -152,6 +177,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     books: books.map((b) => summaryOfBook(b, topics)),
     topics: topicSummaries(topics, books),
     models: MODELS,
+    providers: PROVIDERS,
     roleDefaults,
     servers: servers.map((s) => ({ ...s })),
     spend: { ...spend },
@@ -435,6 +461,20 @@ export function installFakeEngine(params: URLSearchParams): void {
         case 'saveSettings': {
           const { type: _type, ...rest } = command
           settings = { ...settings, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) }
+          break
+        }
+        case 'detectModels':
+          setTimeout(() => emit({ type: 'models.catalog', provider: command.provider, models: CATALOG[command.provider] ?? [], at: new Date().toISOString() }), 150)
+          break
+        case 'showModels': {
+          for (const ref of command.refs) {
+            const known = MODELS.find((m) => m.ref === ref)
+            const listed = Object.values(CATALOG).flat().find((c) => c.ref === ref)
+            if (known && !command.shown && known.source === 'picked') MODELS = MODELS.filter((m) => m !== known)
+            else if (known) MODELS = MODELS.map((m) => (m === known ? { ...m, shown: command.shown } : m))
+            else if (command.shown && listed?.pickable) MODELS = [...MODELS, modelOf(ref, 'picked', { in: listed.priceIn ?? 0, out: listed.priceOut ?? 0 })]
+          }
+          emit(snapshot())
           break
         }
         case 'setSecret':

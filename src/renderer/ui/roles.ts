@@ -20,9 +20,9 @@ export const KNOWN_ROLES = [
   'archivist'
 ]
 
-/** The refs the pickers offer: every enabled model from the snapshot, plus the one in use. */
+/** The refs the pickers offer: every enabled model shown in the Models dialog, plus the one in use. */
 export function modelOptions(known: ModelSummary[], current: string | null | undefined): string[] {
-  const set = new Set<string>(known.filter((m) => m.enabled).map((m) => m.ref))
+  const set = new Set<string>(known.filter((m) => m.enabled && m.shown !== false).map((m) => m.ref))
   if (current) set.add(current)
   return [...set]
 }

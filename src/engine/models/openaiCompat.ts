@@ -202,10 +202,50 @@ export class OpenAiCompatClient implements ProviderClient {
 
   /** Lists the model ids the server offers (`GET /models`). */
   async listModels(signal?: AbortSignal): Promise<string[]> {
-    const res = await this.f(`${this.base}/models`, { headers: headers(this.opts.apiKey), signal: withTimeout(signal, 5000) })
+    return (await this.listModelInfo(signal)).map((m) => m.id)
+  }
+
+  /** The models the server offers, with the context, output limit and prices when it lists them (OpenRouter does, LM Studio doesn't). */
+  async listModelInfo(signal?: AbortSignal): Promise<ListedModel[]> {
+    const res = await this.f(`${this.base}/models`, { headers: headers(this.opts.apiKey), signal: withTimeout(signal, 15000) })
     if (!res.ok) throw httpError(res.status, await res.text().catch(() => ''))
-    const json = (await res.json()) as { data?: { id: string }[] }
-    return (json.data ?? []).map((m) => m.id)
+    const json = (await res.json()) as { data?: OpenAiModelEntry[] }
+    return (json.data ?? []).filter((m) => typeof m?.id === 'string').map(listedModel)
+  }
+}
+
+/** One model of a `GET /models` answer. Only `id` is standard; OpenRouter adds the rest. */
+interface OpenAiModelEntry {
+  id: string
+  context_length?: number
+  top_provider?: { max_completion_tokens?: number | null } | null
+  /** USD per token, as strings. */
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string } | null
+  architecture?: { output_modalities?: string[] } | null
+}
+
+export interface ListedModel {
+  id: string
+  context?: number
+  maxOutput?: number
+  /** USD per 1M tokens, when the server lists prices. */
+  price?: { in: number; out: number; cachedIn?: number }
+  /** False when the server says the model answers with something besides text (music, images). */
+  textOnly: boolean
+}
+
+function listedModel(m: OpenAiModelEntry): ListedModel {
+  const perM = (v: string | undefined) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v) * 1_000_000)
+  const pIn = perM(m.pricing?.prompt)
+  const pOut = perM(m.pricing?.completion)
+  const out = m.architecture?.output_modalities
+  return {
+    id: m.id,
+    context: typeof m.context_length === 'number' && m.context_length > 0 ? m.context_length : undefined,
+    maxOutput: m.top_provider?.max_completion_tokens || undefined,
+    // a negative price is OpenRouter's "varies" (its auto router): not a price the budget can use
+    price: pIn !== undefined && pOut !== undefined && pIn >= 0 && pOut >= 0 ? { in: pIn, out: pOut, cachedIn: perM(m.pricing?.input_cache_read) } : undefined,
+    textOnly: !out || (out.length === 1 && out[0] === 'text')
   }
 }
 

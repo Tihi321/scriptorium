@@ -14,6 +14,40 @@ export interface ModelSummary {
   local: boolean
   /** True when the provider is switched on and usable (has a key, or is local). */
   enabled: boolean
+  /** The pickers offer it: not hidden in the Models dialog (config/models.md). */
+  shown: boolean
+  /** Where it comes from: providers.md, the provider's own list (`discover`), or picked in the Models dialog. */
+  source: 'config' | 'discovered' | 'picked'
+  context?: number
+  /** USD per 1M tokens. */
+  priceIn: number
+  priceOut: number
+}
+
+/** A model provider for the Models dialog (search services are left out). */
+export interface ProviderSummary {
+  id: string
+  kind: string
+  local: boolean
+  /** Switched on and usable (has a key, or is local). */
+  available: boolean
+  /** Why it isn't available: switched off, or no key. */
+  reason?: string
+  /** It can list its models (`GET /models`, OpenAI-style providers). */
+  canList: boolean
+}
+
+/** A model a provider lists, from `detectModels`. */
+export interface CatalogModel {
+  id: string
+  /** `provider/model`. */
+  ref: string
+  context?: number
+  /** USD per 1M tokens, when the provider lists prices. */
+  priceIn?: number
+  priceOut?: number
+  /** It can be shown in the pickers: local, or with a listed price (a paid model the budget can't price never is). */
+  pickable: boolean
 }
 
 /** A local model server the engine checks (Strata, LM Studio): running or not, and how many requests it serves at once. */
@@ -125,8 +159,9 @@ export interface SnapshotEvent {
   agents: AgentSummary[]
   books: BookSummary[]
   topics: TopicSummary[]
-  /** Every chat model the pickers can offer, including the LM Studio models found on this machine. */
+  /** Every chat model the engine knows, including the LM Studio models found on this machine. The pickers offer the `shown` ones. */
   models: ModelSummary[]
+  providers: ProviderSummary[]
   /** Role -> `provider/model` of the role default (first in the role's list). */
   roleDefaults: Record<string, string>
   servers: ServerStatus[]
@@ -188,6 +223,8 @@ export type EngineEvent =
   | { type: 'topics.updated'; topics: TopicSummary[] }
   | { type: 'kindle.sent'; book: string; ok: boolean; error?: string }
   | { type: 'secrets.updated'; secretsSet: string[] }
+  /** The answer to `detectModels`: every chat model the provider lists, or why it couldn't be asked. */
+  | { type: 'models.catalog'; provider: string; models: CatalogModel[]; error?: string; at: string }
 
 export type EngineEventType = EngineEvent['type']
 
@@ -222,6 +259,10 @@ export type Command =
   | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
   /** Creates an idea file in ideas/. */
   | { type: 'addIdea'; text: string; topic?: string }
+  /** Asks a provider for every model it has (`GET /models`). Answers with `models.catalog`. */
+  | { type: 'detectModels'; provider: string }
+  /** Shows models in the pickers, or hides them (config/models.md). A listed model that isn't known yet is added with its listed price. */
+  | { type: 'showModels'; refs: string[]; shown: boolean }
   /** The model defaults, LM Studio fields and book limit may be left out: they keep their value. */
   | ({ type: 'saveSettings' } & Omit<SettingsSummary, ModelSettingKey> & Partial<Pick<SettingsSummary, ModelSettingKey>>)
   /** Stores a secret in the Windows credential store. Only the SMTP password and the provider key variables are allowed. */
@@ -255,6 +296,8 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   addIdea: true,
   saveSettings: true,
   setSecret: true,
+  detectModels: true,
+  showModels: true,
   snapshot: true,
   ping: true,
   coverRendered: true,

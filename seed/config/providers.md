@@ -27,6 +27,10 @@ providers:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     concurrency: 4
+    rpm: 20                        # OpenRouter's limit for the free models
+    discover: free                 # adds every model OpenRouter lists at price 0 (the `:free` ones); a paid one goes in the list below
+    discover_skip: [content-safety]
+    json_schema: false             # not every model there supports response_format; the engine checks and repairs the JSON instead
     models:
       # to verify
       - id: google/gemini-2.5-flash
@@ -177,7 +181,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
 - `concurrency`: how many requests may run at once. `auto`: as many as the server says it serves at once, asked at start and every 10 seconds, 1 while the server is down. A server that doesn't answer is skipped: its jobs go straight to the next model in the role (no failed retries first) until it answers again, and the office shows the model that really answers. The first request that can't connect marks it down at once for every agent, and the status bar shows it as off with a **Check now** button for right after you start it. Strata reports it as `concurrency.serving` of `<base_url>/status`, so it follows the script you started: 4 with a `-parallel` script, 1 with a `-solo` one, and nothing in this file changes when you switch. For LM Studio it is the sum of `parallel` over the loaded chat models (from LM Studio's `/api/v1/models`): load a model with `--parallel 4` and four requests go to it at once. Requests in parallel share the GPU, so each one is slower, but the total is higher.
 - `rpm`, `tpm`: optional rate limits (requests and tokens per minute). Only `rpm` is enforced for now.
-- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. `discover_skip` leaves out models whose id contains one of its words (any case): LM Studio skips `dflash`, which it lists but can't load here.
+- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. `discover_skip` leaves out models whose id contains one of its words (any case): LM Studio skips `dflash`, which it lists but can't load here. `discover: free` adds only the models the provider lists at price 0. A model of a paid provider is only added with the price the provider lists, so the budget always counts its cost: one listed without a price is left out (add it below with its price). Models that answer with something besides text (music, images) are left out. Discovery runs at start, when a key is stored and when this file changes.
 - `json_schema`: `true` (the default) sends the JSON schema of a structured answer as `response_format`. Set `false` for a server that answers a bad JSON reply with an error instead of constraining it. The prompt then asks for the JSON shape and the engine checks it and repairs it.
 
 ## Strata
@@ -191,6 +195,10 @@ Strata (`D:\Strata`) is a fast local server for Qwen3.8-Flash-Next with an OpenA
 - `context` must match `--max-context` in the run config (131072).
 - `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. That would be retried and then sent to a paid model, while the engine's own parse-and-repair step already copes with a loose JSON answer.
 - No key is needed. `STRATA_API_KEY` is only sent if you set it.
+
+## OpenRouter
+
+One key (`OPENROUTER_API_KEY`, stored in the app's settings) gives many models. `discover: free` adds every free one OpenRouter lists, with its context and output limit, so they show in the model pickers as `openrouter/<maker>/<model>:free` (19 on 2026-10-12, `openrouter/openrouter/free` among them: OpenRouter picks a free model for each request). Free models cost nothing and never count against the caps. OpenRouter limits them to 20 requests a minute and 50 a day, or 1000 a day once the account has bought $10 of credit. A rate-limited request is retried with backoff, then the next model in the role takes it. For a paid OpenRouter model, tick it in the app's Models dialog (Settings, then Choose models): it is saved in `config/models.md` with the price OpenRouter lists. You can also add it to the list here with its price from openrouter.ai/models, or set `discover: true` to add all of them (about 450) with the prices OpenRouter lists. The Models dialog also unticks models you don't want in the pickers.
 
 ## DeepSeek
 

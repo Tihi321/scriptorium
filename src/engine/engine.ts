@@ -8,7 +8,8 @@ import { AgentStore } from './agents/agents'
 import { Budget } from './budget/spend'
 import { LogWriter } from './logs/logs'
 import { resolveKey, setStoredKey } from './models/keys'
-import { ModelRegistry, modelDefaultsOf } from './models/registry'
+import { ModelRegistry, guessFamily, modelDefaultsOf } from './models/registry'
+import type { ListedModel } from './models/openaiCompat'
 import type { RegistryOptions } from './models/registry'
 import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
@@ -25,7 +26,7 @@ import { TopicsFile } from './store/topics'
 import { readMd, writeMd } from './store/atomic'
 import { sendEpub, smtpTransport } from './publish/kindle'
 import type { TransportFactory } from './publish/kindle'
-import { agentSummary, bookSummary, modelSummaries, roleDefaults, serverStatuses, topicSummary } from './summary'
+import { agentSummary, bookSummary, modelSummaries, providerSummaries, roleDefaults, serverStatuses, topicSummary } from './summary'
 import type { WatchEvent } from './store/watcher'
 
 export interface EngineOptions {
@@ -50,6 +51,9 @@ export interface EngineOptions {
 /** How often `concurrency: auto` providers are asked for their slot count. */
 const SLOT_SYNC_MS = 10_000
 
+/** The text below the frontmatter of a config/models.md the engine creates (as in seed/config/models.md). */
+const MODELS_MD_BODY = "# Models in the pickers\n\nWhich models the model pickers offer (the agent panel, Role defaults and Settings). The app writes this file from its **Models** dialog (Settings, then **Choose models**): pick a provider, press **Detect models** to list everything it has, and tick the models you want. You can also edit it by hand.\n\n- `picked`: models a provider lists that are not in `providers.md`, each with its `provider`, `id`, `context` and the price the provider listed when you picked it (`price_in`, `price_out`, `price_cached_in`, USD per 1M tokens). The budget counts them at that price. A paid model is only picked with a listed price; to use one whose price the provider doesn't list (DeepSeek's), add it to `providers.md` with its price.\n- `hidden`: `provider/model` refs the pickers leave out: models from `providers.md` or found by `discover` that you unticked. A role list in `roles.md` can still name a hidden model.\n"
+
 /** The engine core: config, models, budget, agents, jobs and the scheduler, plus the command handler. */
 export class Engine {
   readonly registry: ModelRegistry
@@ -68,6 +72,10 @@ export class Engine {
   readonly research: ResearchService
   readonly search: SearchService
   factory: FactoryConfig = factorySchema.parse({ kind: 'factory' })
+  /** `start()` finished: snapshots from now on are complete. */
+  private started = false
+  /** The last model list each provider gave the Models dialog (`detectModels`), for the prices of the models picked from it. */
+  private catalogs = new Map<string, ListedModel[]>()
   quality: QualityConfig = qualitySchema.parse({ kind: 'quality' })
   formats: FormatEntry[] = []
   settings: SettingsConfig = settingsSchema.parse({ kind: 'settings' })
@@ -170,12 +178,7 @@ export class Engine {
     await this.loadQualityAndFormats()
     await this.loadSettings()
     await this.registry.load()
-    if (this.opts.discover !== false) {
-      void this.registry.discover().then((r) => {
-        for (const d of r) this.log(`models: ${d.provider} ${d.error ? 'discovery failed: ' + d.error : d.found + ' found'}`)
-        this.scheduler.kick()
-      })
-    }
+    void this.discoverModels()
     // providers with `concurrency: auto` (Strata) follow the slot count their server reports: asked now and every few seconds,
     // so starting Strata with a "4 at once" or a "one at a time" script needs no change in providers.md
     await this.syncSlots()
@@ -191,6 +194,7 @@ export class Engine {
     this.scheduler.start()
     await this.pipeline.start()
     await this.budget.writeSummary().catch(() => undefined)
+    this.started = true
   }
 
   /** Asks `concurrency: auto` servers for their slot count; a higher count frees waiting requests at once. */
@@ -256,6 +260,102 @@ export class Engine {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.log(`config/${name}.md: ${(err as Error).message}`)
       }
     }
+  }
+
+  /**
+   * Asks the providers with `discover` which models they have (see `ModelRegistry.discover`), then sends the pickers the new list.
+   * Runs at start, and again when a key is stored or providers.md changes: a provider that just got its key lists its models then.
+   */
+  async discoverModels(): Promise<void> {
+    if (this.opts.discover === false) return
+    try {
+      const r = await this.registry.discover()
+      for (const d of r) this.log(`models: ${d.provider} ${d.error ? 'discovery failed: ' + d.error : d.found + ' found'}`)
+      if (r.length && this.started) this.emit(await this.snapshot()) // before that, the first snapshot has them
+      this.scheduler.kick()
+    } catch (err) {
+      this.log(`models: discovery failed: ${(err as Error).message}`)
+    }
+  }
+
+  /** Asks a provider for every model it lists and sends the list to the Models dialog (`models.catalog`). */
+  async detectModels(provider: string): Promise<void> {
+    const at = new Date().toISOString()
+    const local = !!this.registry.providers.get(provider)?.local
+    try {
+      const listed = await this.registry.catalog(provider)
+      this.catalogs.set(provider, listed)
+      const models = listed.map((m) => ({
+        id: m.id,
+        ref: `${provider}/${m.id}`,
+        context: m.context,
+        priceIn: local ? 0 : m.price?.in,
+        priceOut: local ? 0 : m.price?.out,
+        pickable: local || !!m.price
+      }))
+      this.log(`models: ${provider} lists ${models.length} chat model(s)`)
+      this.emit({ type: 'models.catalog', provider, models, at })
+    } catch (err) {
+      this.emit({ type: 'models.catalog', provider, models: [], error: (err as Error).message, at })
+    }
+  }
+
+  /**
+   * Shows models in the pickers or hides them, in config/models.md. Showing a model the engine doesn't know yet adds it to `picked`
+   * with the context and price its provider listed; a paid model without a listed price is refused. Hiding a picked model removes it.
+   */
+  async showModels(refs: string[], shown: boolean): Promise<void> {
+    const file = this.registry.modelsFile()
+    let doc
+    try {
+      doc = await readMd(file)
+    } catch {
+      doc = { data: { kind: 'models' } as Record<string, unknown>, body: MODELS_MD_BODY }
+    }
+    const picked = Array.isArray(doc.data.picked) ? (doc.data.picked as Record<string, unknown>[]) : []
+    const hidden = new Set(Array.isArray(doc.data.hidden) ? (doc.data.hidden as string[]) : [])
+    const isPicked = (ref: string) => picked.findIndex((m) => `${String(m.provider)}/${String(m.id)}` === ref)
+    for (const ref of new Set(refs)) {
+      const slash = ref.indexOf('/')
+      const provider = ref.slice(0, slash)
+      const id = ref.slice(slash + 1)
+      const p = this.registry.providers.get(provider)
+      if (slash < 1 || !p) {
+        this.log(`showModels: unknown model ${ref}`)
+        continue
+      }
+      if (!shown) {
+        const i = isPicked(ref)
+        if (i >= 0) picked.splice(i, 1)
+        else hidden.add(ref)
+        continue
+      }
+      hidden.delete(ref)
+      if (this.registry.models.has(ref) || isPicked(ref) >= 0) continue
+      const m = this.catalogs.get(provider)?.find((x) => x.id === id)
+      if (!m) {
+        this.log(`showModels: ${provider} has not listed ${id} (detect its models first)`)
+        continue
+      }
+      if (!p.local && !m.price) {
+        this.log(`showModels: ${ref} has no listed price, so the budget could not count it: add it to providers.md with its price`)
+        continue
+      }
+      picked.push({
+        provider,
+        id,
+        family: guessFamily(id),
+        ...(m.context ? { context: m.context } : {}),
+        ...(m.maxOutput ? { max_output: m.maxOutput } : {}),
+        price_in: p.local ? 0 : m.price!.in,
+        price_out: p.local ? 0 : m.price!.out,
+        ...(!p.local && m.price!.cachedIn !== undefined ? { price_cached_in: m.price!.cachedIn } : {})
+      })
+    }
+    await writeMd(file, { ...doc.data, kind: 'models', picked, hidden: [...hidden].sort() }, doc.body || MODELS_MD_BODY)
+    await this.registry.load()
+    this.emit(await this.snapshot()) // the pickers follow
+    this.scheduler.kick()
   }
 
   /** Persists pause all in config/factory.md. */
@@ -351,9 +451,10 @@ export class Engine {
         await this.emitTopics()
       } else if (e.kind === 'config') {
         const name = path.basename(e.rel, '.md')
-        if (name === 'providers' || name === 'roles') {
+        if (name === 'providers' || name === 'roles' || name === 'models') {
           await this.registry.load()
           this.emit(await this.snapshot()) // the pickers show the models and role defaults
+          if (name === 'providers') void this.discoverModels()
         }
         else if (name === 'budget') await this.budget.loadCaps()
         else if (name === 'factory') {
@@ -659,6 +760,12 @@ export class Engine {
         this.emit(await this.snapshot()) // the role defaults shown in the pickers follow the new aliases
         return
       }
+      case 'detectModels':
+        await this.detectModels(cmd.provider)
+        return
+      case 'showModels':
+        await this.showModels(cmd.refs, cmd.shown)
+        return
       case 'setSecret': {
         if (!this.allowedSecrets().includes(cmd.name)) {
           this.log(`setSecret: "${cmd.name}" is not a name the app may store`)
@@ -674,6 +781,7 @@ export class Engine {
         await this.registry.load() // a provider key may have appeared
         this.emit({ type: 'secrets.updated', secretsSet: this.secretsSet() })
         this.scheduler.kick()
+        void this.discoverModels() // and with it the models that provider lists
         return
       }
       case 'sendToKindle':
@@ -713,6 +821,7 @@ export class Engine {
       books,
       topics: topics.map(topicSummary),
       models: modelSummaries(this.registry),
+      providers: providerSummaries(this.registry),
       roleDefaults: roleDefaults(this.registry),
       servers: serverStatuses(this.registry),
       spend: this.budget.snapshot(),

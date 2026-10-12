@@ -223,6 +223,39 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('settings-open').click()
   await expect(page.getByTestId('set-password')).toHaveValue('')
   await page.getByTestId('settings-close').click()
+  // Close saves a change too, and only when something changed
+  const saves = async () => (await commands(page)).filter((c) => c.type === 'saveSettings').length
+  const before = await saves()
+  await page.getByTestId('settings-open').click()
+  await page.getByTestId('settings-close').click()
+  expect(await saves()).toBe(before)
+  await page.getByTestId('settings-open').click()
+  await page.getByTestId('set-maxBooksInProgress').fill('4')
+  await page.getByTestId('settings-close').click()
+  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', maxBooksInProgress: 4 }))
+
+  // Choose models: a provider lists its models, ticking one shows it in the pickers, a model without a price can't be ticked
+  await page.getByTestId('settings-open').click()
+  await page.getByTestId('settings-models').click()
+  await expect(page.getByTestId('models-dialog')).toBeVisible()
+  await page.getByTestId('models-provider-openrouter').click()
+  expect(await commands(page)).toContainEqual({ type: 'detectModels', provider: 'openrouter' })
+  const gpt = page.getByTestId('model-row-openrouter/openai/gpt-6')
+  await expect(gpt).toContainText('$3 / $15')
+  await expect(page.getByTestId('model-row-openrouter/google/gemma-4-31b-it:free')).toContainText('free')
+  await page.getByTestId('models-free').check()
+  await expect(gpt).toHaveCount(0)
+  await page.getByTestId('models-free').uncheck()
+  await gpt.locator('input').click() // the box follows the engine's answer, not the click
+  expect(await commands(page)).toContainEqual({ type: 'showModels', refs: ['openrouter/openai/gpt-6'], shown: true })
+  await expect(gpt).toContainText('picked')
+  await expect(gpt.locator('input')).toBeChecked()
+  await page.getByTestId('models-provider-deepseek').click()
+  await expect(page.getByTestId('model-row-deepseek/deepseek-chat').locator('input')).toBeDisabled()
+  await page.getByTestId('models-provider-anthropic').click()
+  await expect(page.getByTestId('models-status')).toContainText('No key')
+  await page.getByTestId('models-close').click()
+  await expect(page.getByTestId('models-dialog')).toHaveCount(0)
 
   // the idea bucket
   await page.getByTestId('tool-idea').click()

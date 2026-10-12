@@ -5,6 +5,7 @@ import { AgentPanel, HireDialog } from './ui/AgentPanel'
 import { BookCard } from './ui/BookCard'
 import { DraftReader } from './ui/DraftReader'
 import { LibraryView } from './ui/Library'
+import { ModelsDialog } from './ui/ModelsDialog'
 import { SettingsDialog } from './ui/Settings'
 import { officeStore } from './store/store'
 import { Controls } from './ui/Controls'
@@ -58,6 +59,7 @@ export function App() {
       <BookCard />
       <DraftReader />
       <SettingsDialog />
+      <ModelsDialog />
       {hiring && <HireDialog onClose={() => setHiring(false)} />}
     </div>
   )

@@ -58,7 +58,7 @@ describe('snapshot', () => {
     expect(writer).toMatchObject({ model: null, resolvedModel: 'w/writer-model' })
     expect(snap.agents.find((a) => a.role === 'line-editor')!.resolvedModel).toBe('r/review-model')
     expect(snap.roleDefaults).toMatchObject({ writer: 'w/writer-model', 'line-editor': 'r/review-model' })
-    expect(snap.models).toContainEqual({ ref: 'w/writer-model', provider: 'w', model: 'writer-model', family: 'wfam', local: true, enabled: true })
+    expect(snap.models).toContainEqual(expect.objectContaining({ ref: 'w/writer-model', provider: 'w', model: 'writer-model', family: 'wfam', local: true, enabled: true, shown: true, source: 'config' }))
     const book = snap.books.find((b) => b.slug === slug)!
     expect(book).toMatchObject({
       title: 'The Sleepy Fox',

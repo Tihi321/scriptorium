@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { readReaderPages } from './publish/reader'
-import type { AgentSummary, BookSummary, ModelSummary, ServerStatus, TopicSummary } from '../shared/protocol'
+import type { AgentSummary, BookSummary, ModelSummary, ProviderSummary, ServerStatus, TopicSummary } from '../shared/protocol'
 import type { AgentDef } from './agents/agents'
 import type { BookStore } from './pipeline/books'
 import type { ModelRegistry } from './models/registry'
@@ -81,8 +81,27 @@ export function agentSummary(def: AgentDef, sched: Scheduler, router: ModelRoute
 export function modelSummaries(registry: ModelRegistry): ModelSummary[] {
   return [...registry.models.values()]
     .filter((m) => !m.embedding)
-    .map((m) => ({ ref: m.ref, provider: m.provider.id, model: m.id, family: m.family, local: m.provider.local, enabled: m.provider.available }))
+    .map((m) => ({
+      ref: m.ref,
+      provider: m.provider.id,
+      model: m.id,
+      family: m.family,
+      local: m.provider.local,
+      enabled: m.provider.available,
+      shown: registry.isShown(m.ref),
+      source: m.picked ? ('picked' as const) : m.discovered ? ('discovered' as const) : ('config' as const),
+      context: m.context,
+      priceIn: m.priceIn,
+      priceOut: m.priceOut
+    }))
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.ref.localeCompare(b.ref))
+}
+
+/** The model providers, for the Models dialog. */
+export function providerSummaries(registry: ModelRegistry): ProviderSummary[] {
+  return [...registry.providers.values()]
+    .filter((p) => p.kind !== 'search' && p.kind !== 'mock')
+    .map((p) => ({ id: p.id, kind: p.kind, local: p.local, available: p.available, reason: p.available ? undefined : p.unavailableReason, canList: p.kind === 'openai-compat' }))
 }
 
 /** The local servers the engine checks (`concurrency: auto`): Strata and LM Studio. */
