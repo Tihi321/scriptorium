@@ -15,6 +15,7 @@ import { parseMd } from '../src/shared/md'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
 import { ProviderError } from '../src/engine/models/types'
 import { makePipelineEnv, quietResearchState, sleep, waitFor } from './helpers'
+import type { TestEnv } from './helpers'
 
 type Env = Awaited<ReturnType<typeof makePipelineEnv>>
 let env: Env | undefined
@@ -410,20 +411,33 @@ describe('choosing what to write', () => {
   }, 60000)
 })
 
+/** A fake cover renderer: writes a 1x1 PNG for every `cover.render` and answers. `stop` waits for the answers still on their way. */
+function fakeCoverRenderer(e: TestEnv) {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const answers: Promise<void>[] = []
+  let seen = 0
+  const timer = setInterval(() => {
+    const reqs = e.events.filter((x) => x.type === 'cover.render')
+    for (; seen < reqs.length; seen++) {
+      const req = reqs[seen]
+      if (req?.type === 'cover.render') answers.push(writeFile(req.outPath, png).then(() => e.engine.handleCommand({ type: 'coverRendered', book: req.book, ok: true })))
+    }
+  }, 20)
+  return {
+    /** How many renders were asked for this book. */
+    renders: (book: string) => e.events.filter((x) => x.type === 'cover.render' && x.book === book).length,
+    async stop() {
+      clearInterval(timer)
+      await Promise.all(answers)
+    }
+  }
+}
+
 describe('cover rendering', () => {
   it('asks Electron for a PNG, then rebuilds the EPUB with the image', async () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', coverRenderer: true })
     const e = env
-    // a fake renderer: writes a PNG and answers with the command
-    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
-    let handled = 0
-    const timer = setInterval(() => {
-      const req = e.events.filter((x) => x.type === 'cover.render')[handled]
-      if (req && req.type === 'cover.render') {
-        handled++
-        void writeFile(req.outPath, png).then(() => e.engine.handleCommand({ type: 'coverRendered', book: req.book, ok: true }))
-      }
-    }, 20)
+    const renderer = fakeCoverRenderer(e)
     try {
       const slug = (await waitStage(e, 'published'))!
       const req = await waitFor(() => e.events.find((x) => x.type === 'cover.render'), 10000, 'cover.render event')
@@ -433,7 +447,41 @@ describe('cover rendering', () => {
       const { data } = await bookMd(e, slug)
       await checkEpub(path.join(e.dir, 'books', slug, 'out', `${slug}.epub`), { chapters: 1, title: 'The Sleepy Fox', author: data.author as string, coverImage: true })
     } finally {
-      clearInterval(timer)
+      await renderer.stop()
+    }
+  }, 90000)
+
+  it('renames a published book and remakes its cover, EPUB and reader', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', coverRenderer: true })
+    const e = env
+    const renderer = fakeCoverRenderer(e)
+    try {
+      const slug = (await waitStage(e, 'published'))!
+      await waitFor(async () => (await bookMd(e, slug)).data.cover_png === 'done', 10000, 'first cover done')
+      const out = path.join(e.dir, 'books', slug, 'out')
+
+      // only a published book can be renamed, and not to an empty title
+      await e.engine.handleCommand({ type: 'renameBook', book: 'no-such-book', title: 'X' })
+      await e.engine.handleCommand({ type: 'renameBook', book: slug, title: '   ' })
+      expect((await bookMd(e, slug)).data.title).toBe('The Sleepy Fox')
+      expect(renderer.renders(slug)).toBe(1)
+
+      await e.engine.handleCommand({ type: 'renameBook', book: slug, title: '  The   Drowsy Fox ' })
+      const { data } = await bookMd(e, slug)
+      expect(data.title).toBe('The Drowsy Fox')
+      expect(await readFile(path.join(out, 'cover.html'), 'utf8')).toContain('The Drowsy Fox')
+      expect(renderer.renders(slug)).toBe(2)
+      await waitFor(async () => (await bookMd(e, slug)).data.cover_png === 'done', 10000, 'second cover done')
+      // the folder and the EPUB file name stay
+      await checkEpub(path.join(out, `${slug}.epub`), { chapters: 1, title: 'The Drowsy Fox', author: data.author as string, coverImage: true })
+      expect(await readFile(path.join(out, 'reader', 'index.html'), 'utf8')).toContain('The Drowsy Fox')
+      expect(e.events).toContainEqual(expect.objectContaining({ type: 'book.updated', book: expect.objectContaining({ title: 'The Drowsy Fox' }) }))
+
+      await e.engine.handleCommand({ type: 'regenerateCover', book: slug })
+      expect(renderer.renders(slug)).toBe(3)
+      await waitFor(async () => (await bookMd(e, slug)).data.cover_png === 'done', 10000, 'third cover done')
+    } finally {
+      await renderer.stop()
     }
   }, 90000)
 

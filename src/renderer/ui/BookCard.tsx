@@ -28,6 +28,8 @@ export function BookCard() {
   const [saved, setSaved] = useState(false)
   /** The reader page showing: a file of the reader folder (index.html is the contents). */
   const [page, setPage] = useState('index.html')
+  /** The new title being typed, or null when not renaming. */
+  const [newTitle, setNewTitle] = useState<string | null>(null)
 
   useEffect(() => {
     setRating(book?.rating ?? 0)
@@ -36,6 +38,7 @@ export function BookCard() {
   }, [slug, book?.rating, book?.ratingNote])
 
   useEffect(() => setPage('index.html'), [slug, reading])
+  useEffect(() => setNewTitle(null), [slug])
 
   if (!slug || !book) return null
   const close = () => officeStore.getState().openBookCard(null)
@@ -69,15 +72,43 @@ export function BookCard() {
   }
 
   const scores = Object.entries(book.scores)
+  const published = book.stage === 'published'
+  const drawing = book.coverState === 'requested'
+  const rename = () => {
+    const title = (newTitle ?? '').replace(/\s+/g, ' ').trim()
+    if (title && title !== book.title) sendCommand({ type: 'renameBook', book: book.slug, title })
+    setNewTitle(null)
+  }
   return (
     <div className="dialog-backdrop" onClick={close}>
       <div className="dialog book-card" onClick={(e) => e.stopPropagation()} data-testid="book-card">
         <div className="book-card-top">
           <CoverImage book={book} className="card-cover" />
           <div className="stack">
-            <div className="panel-title" data-testid="card-title">
-              {book.title}
-            </div>
+            {newTitle === null ? (
+              <div className="panel-title" data-testid="card-title">
+                {book.title}
+              </div>
+            ) : (
+              <div className="row">
+                <input
+                  autoFocus
+                  value={newTitle}
+                  maxLength={200}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') rename()
+                    if (e.key === 'Escape') setNewTitle(null)
+                  }}
+                  aria-label="New title"
+                  data-testid="rename-input"
+                />
+                <button className="primary" disabled={!newTitle.trim()} onClick={rename} data-testid="rename-save">
+                  Save
+                </button>
+                <button onClick={() => setNewTitle(null)}>Cancel</button>
+              </div>
+            )}
             <div className="kv">
               <span>Author</span>
               <span>{book.author ?? 'unknown'}</span>
@@ -126,6 +157,19 @@ export function BookCard() {
           >
             Send to Kindle
           </button>
+          {published && (
+            <>
+              <button disabled={newTitle !== null || drawing} onClick={() => setNewTitle(book.title)} data-testid="card-rename" title="A new title: the cover, EPUB and reader are made again. The folder keeps its name.">
+                Rename
+              </button>
+              <button disabled={drawing} onClick={() => sendCommand({ type: 'regenerateCover', book: book.slug })} data-testid="card-cover" title="Draw the cover again from templates/cover.html">
+                Remake cover
+              </button>
+            </>
+          )}
+          <span data-testid="cover-status" className={book.coverState === 'failed' ? 'err' : 'dim'}>
+            {drawing ? 'drawing the cover...' : book.coverState === 'failed' ? 'The cover failed (see the log).' : ''}
+          </span>
           <span data-testid="kindle-status" className={kindle?.state === 'error' ? 'err' : 'dim'}>
             {kindle?.state === 'sending' ? 'sending...' : kindle?.state === 'ok' ? 'Sent.' : kindle?.state === 'error' ? `Failed: ${kindle.error ?? 'unknown error'}` : ''}
           </span>

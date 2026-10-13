@@ -777,6 +777,14 @@ export class Engine {
         if (!(await this.pipeline.retryBook(cmd.book))) this.log(`retryBook: "${cmd.book}" is not a failed book`)
         else await this.emitBookUpdated(cmd.book)
         return
+      case 'regenerateCover':
+        if (!(await this.pipeline.remakeCover(cmd.book))) this.log(`regenerateCover: "${cmd.book}" is not a published book`)
+        else await this.emitBookUpdated(cmd.book)
+        return
+      case 'renameBook':
+        if (!(await this.pipeline.renameBook(cmd.book, cmd.title))) this.log(`renameBook: "${cmd.book}" is not a published book, or the title "${cmd.title}" is empty or too long`)
+        else await this.emitBookUpdated(cmd.book)
+        return
       case 'setTopicActive':
         if (!(await this.topics.setActive(cmd.id, cmd.active))) this.log(`setTopicActive: unknown topic ${cmd.id}`)
         else this.pipeline.kick()

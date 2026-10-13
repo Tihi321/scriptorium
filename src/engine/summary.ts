@@ -30,6 +30,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
   const rel = (...p: string[]) => ['books', slug, ...p].join('/')
   const epub = `out/${slug}.epub`
   const topic = d.topic ? topics.find((t) => t.id === d.topic) : undefined
+  const coverMtime = await fs.stat(books.file(slug, 'out', 'cover.png')).then((st) => Math.round(st.mtimeMs), () => null)
   return {
     slug,
     title: d.title,
@@ -52,7 +53,9 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     costUsd: d.cost_usd,
     rating: typeof d.rating === 'number' ? d.rating : null,
     ratingNote: typeof d.rating_note === 'string' ? d.rating_note : null,
-    coverPng: (await exists(books.file(slug, 'out', 'cover.png'))) ? rel('out', 'cover.png') : null,
+    coverPng: coverMtime !== null ? rel('out', 'cover.png') : null,
+    coverVersion: coverMtime,
+    coverState: typeof d.cover_png === 'string' ? d.cover_png : null,
     epub: (await exists(books.file(slug, epub))) ? rel(epub) : null,
     readerDir: (await exists(books.file(slug, 'out', 'reader', 'index.html'))) ? rel('out', 'reader') : null,
     readerPages: await readReaderPages(books.file(slug, 'out', 'reader')),

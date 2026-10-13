@@ -8,9 +8,11 @@ import { officeStore } from '../store/store'
 import { bookColor } from '../store/model'
 
 export function CoverImage({ book, className }: { book: BookSummary; className?: string }) {
-  const [failed, setFailed] = useState(false)
-  if (book.coverPng && !failed) {
-    return <img className={className} src={bookUrl(book.coverPng)} alt={`Cover of ${book.title}`} onError={() => setFailed(true)} />
+  // the version makes a remade cover load instead of the cached one; a new version also gets a new try after an error
+  const src = book.coverPng ? `${bookUrl(book.coverPng)}${book.coverVersion ? `?v=${book.coverVersion}` : ''}` : null
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  if (src && src !== failedSrc) {
+    return <img className={className} src={src} alt={`Cover of ${book.title}`} onError={() => setFailedSrc(src)} />
   }
   return (
     <div className={`${className ?? ''} cover-fallback`} style={{ background: bookColor(book.slug) }}>

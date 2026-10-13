@@ -7,7 +7,9 @@
   /* Cover template. The engine fills {{title}}, {{author}}, {{genre}}, {{year}}, {{pattern_svg}}, {{title_size}} and {{author_size}}, and sets the genre class below.
      Colours and fonts per genre are in the .g-* rules. Only system fonts are used: no downloads. */
   html, body { margin: 0; padding: 0; width: 1600px; height: 2560px; overflow: hidden; }
+  /* position: relative places the boxes below on the 1600x2560 body, not on the window, which can be shorter */
   body {
+    position: relative;
     --bg: #2f3e46; --fg: #f4efe6; --accent: #d9b44a; --font: Georgia, "Times New Roman", serif;
     background: var(--bg); color: var(--fg); font-family: var(--font);
   }

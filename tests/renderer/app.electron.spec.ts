@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { cp, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,6 +31,8 @@ test.beforeAll(async () => {
   await cp(published, dataDir, { recursive: true })
   await rm(path.join(dataDir, 'jobs'), { recursive: true, force: true })
   await rm(path.join(dataDir, 'logs'), { recursive: true, force: true })
+  // the starter staff is copied only into a folder without agents/: drop the fixture's older staff to get the current one
+  await rm(path.join(dataDir, 'agents'), { recursive: true, force: true })
   for (const d of ['jobs/queued', 'jobs/running', 'jobs/done', 'jobs/failed']) await mkdir(path.join(dataDir, d), { recursive: true })
   await writeMd(
     path.join(dataDir, 'config', 'providers.md'),
@@ -155,6 +157,28 @@ test('the real app: office, agents at work, terminal from real logs, pause all, 
     .poll(async () => (parseMd(await readFile(path.join(dataDir, 'books', SLUG, 'book.md'), 'utf8')).data as { rating?: number }).rating, { timeout: 15_000 })
     .toBe(4)
   await expect(page.getByTestId('card-rating')).toHaveText('★★★★')
+
+  // rename: book.md gets the new title and the real renderer draws the cover again, at the full size (not the screen's height)
+  const bookMdData = async () => parseMd(await readFile(path.join(dataDir, 'books', SLUG, 'book.md'), 'utf8')).data as { title?: string; cover_png?: string }
+  const pngSize = async () => {
+    const b = await readFile(path.join(dataDir, 'books', SLUG, 'out', 'cover.png'))
+    return [b.readUInt32BE(16), b.readUInt32BE(20)]
+  }
+  await page.getByTestId('card-rename').click()
+  await page.getByTestId('rename-input').fill("The Moon's Quilt")
+  await page.getByTestId('rename-save').click()
+  await expect.poll(async () => (await bookMdData()).title, { timeout: 15_000 }).toBe("The Moon's Quilt")
+  await expect.poll(async () => (await bookMdData()).cover_png, { timeout: 30_000 }).toBe('done')
+  expect(await pngSize()).toEqual([1600, 2560])
+  await expect(page.getByTestId('card-title')).toHaveText("The Moon's Quilt")
+  await expect(page.locator('[data-testid=book-card] img.card-cover')).toBeVisible()
+  await page.screenshot({ path: path.join(root, '.claude/temp/p5-electron-renamed.png') })
+  // remake cover: a new PNG is written
+  const before = (await stat(path.join(dataDir, 'books', SLUG, 'out', 'cover.png'))).mtimeMs
+  await page.getByTestId('card-cover').click()
+  await expect.poll(async () => (await stat(path.join(dataDir, 'books', SLUG, 'out', 'cover.png')).catch(() => ({ mtimeMs: before }))).mtimeMs, { timeout: 30_000 }).toBeGreaterThan(before)
+  await expect.poll(async () => (await bookMdData()).cover_png, { timeout: 30_000 }).toBe('done')
+  expect(await pngSize()).toEqual([1600, 2560])
   await page.getByTestId('card-close').click()
   await page.screenshot({ path: path.join(root, '.claude/temp/p5-electron-library.png') })
 

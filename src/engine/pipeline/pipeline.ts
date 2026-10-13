@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { parseMd } from '../../shared/md'
-import { COVER_HEIGHT, COVER_WIDTH } from '../publish/cover'
+import { COVER_HEIGHT, COVER_WIDTH, genreClass, writeCoverHtml } from '../publish/cover'
 import type { Scheduler } from '../queue/scheduler'
 import { advance, TERMINAL_STAGES } from './advance'
 import { findMarkers } from '../research/markers'
@@ -445,6 +445,41 @@ export class Pipeline {
     await this.books.update(slug, () => ({ cover_png: 'done' }))
     this.o.bookChanged?.(slug)
     this.o.log(`cover for ${slug} rendered, EPUB rebuilt`)
+  }
+
+  /**
+   * Draws a published book's cover again: out/cover.html from templates/cover.html and book.md (so a changed
+   * template or title shows), then the PNG. The old PNG is removed first, so the EPUB and the reader never show a
+   * cover with an old title; they are rebuilt now and again when the new PNG is there.
+   */
+  async remakeCover(slug: string): Promise<boolean> {
+    const b = await this.books.read(slug)
+    if (!b || b.data.stage !== 'published') return false
+    const d = b.data
+    await writeCoverHtml(this.o.dataDir, slug, {
+      title: d.title,
+      author: d.author ?? 'Unknown',
+      genre: d.topic_name ?? d.genre,
+      year: Number(d.year ?? new Date().getFullYear()),
+      genreClass: typeof d.genre_class === 'string' ? d.genre_class : genreClass({ topicName: d.topic_name, format: d.format })
+    })
+    await fs.rm(this.books.file(slug, 'out', 'cover.png'), { force: true })
+    await this.books.buildEpubFile(slug)
+    await this.requestCover(slug)
+    this.o.log(`remaking the cover of ${slug}`)
+    return true
+  }
+
+  /** Gives a published book a new title. Its folder, slug and EPUB file name stay; the cover, EPUB and reader are made again. */
+  async renameBook(slug: string, title: string): Promise<boolean> {
+    const clean = title.replace(/\s+/g, ' ').trim()
+    const b = await this.books.read(slug)
+    if (!clean || clean.length > 200 || !b || b.data.stage !== 'published') return false
+    if (clean !== b.data.title) {
+      await this.books.update(slug, () => ({ title: clean }))
+      this.o.log(`renamed ${slug}: "${b.data.title}" is now "${clean}"`)
+    }
+    return this.remakeCover(slug)
   }
 }
 

@@ -144,6 +144,10 @@ export interface BookSummary {
   ratingNote: string | null
   /** Paths are relative to the data folder, with forward slashes. */
   coverPng: string | null
+  /** When cover.png was last written (ms), so a remade cover replaces the cached image. */
+  coverVersion: number | null
+  /** `cover_png` in book.md: requested (being drawn), done, failed, pending (no renderer, headless), or null. */
+  coverState: string | null
   epub: string | null
   /** Folder with the unzipped XHTML chapters and `index.html`, for the in-app reader. */
   readerDir: string | null
@@ -292,6 +296,10 @@ export type Command =
   | { type: 'pauseBook'; book: string; paused: boolean }
   /** Puts a failed book's failed jobs back in the queue and continues the book from the stage it failed in. */
   | { type: 'retryBook'; book: string }
+  /** Draws a published book's cover again from templates/cover.html and book.md, then rebuilds the EPUB. Answers with `book.updated`. */
+  | { type: 'regenerateCover'; book: string }
+  /** Gives a published book a new title (its folder and slug stay), then remakes the cover, the EPUB and the reader. Answers with `book.updated`. */
+  | { type: 'renameBook'; book: string; title: string }
   /** Mails the EPUB. Answers with `kindle.sent`. */
   | { type: 'sendToKindle'; book: string }
   | { type: 'setTopicActive'; id: string; active: boolean }
@@ -353,7 +361,9 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   readDraft: true,
   addBookNote: true,
   pauseBook: true,
-  retryBook: true
+  retryBook: true,
+  regenerateCover: true,
+  renameBook: true
 }
 
 export const COMMAND_TYPES: readonly CommandType[] = Object.keys(COMMAND_TYPE_SET) as CommandType[]

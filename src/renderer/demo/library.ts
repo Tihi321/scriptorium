@@ -92,6 +92,8 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     rating: b.rating,
     ratingNote: b.note,
     coverPng: published ? `books/${b.slug}/out/cover.png` : null,
+    coverVersion: null,
+    coverState: published ? 'done' : null,
     epub: published ? `books/${b.slug}/out/${b.slug}.epub` : null,
     readerDir: published ? `books/${b.slug}/out/reader` : null,
     readerPages: published ? READER_PAGES : [],

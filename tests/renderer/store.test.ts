@@ -45,6 +45,8 @@ export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSum
     rating: null,
     ratingNote: null,
     coverPng: null,
+    coverVersion: null,
+    coverState: null,
     epub: null,
     readerDir: null,
     readerPages: [],
