@@ -1,12 +1,15 @@
 import { promises as fs } from 'node:fs'
 import { readReaderPages } from './publish/reader'
-import type { AgentSummary, BookSummary, ModelSummary, ProviderSummary, ServerStatus, TopicSummary } from '../shared/protocol'
+import { briefOf } from '../shared/brief'
+import type { AgentSummary, BookSummary, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, ServerStatus, TopicSummary } from '../shared/protocol'
+import type { FormatEntry } from '../shared/schemas'
 import type { AgentDef } from './agents/agents'
 import type { BookStore } from './pipeline/books'
 import type { ProviderLimiter } from './models/limiter'
 import type { ModelRegistry } from './models/registry'
 import type { ModelRouter } from './models/router'
 import type { Scheduler } from './queue/scheduler'
+import type { IdeaFile } from './store/ideas'
 import type { TopicRow } from './store/topics'
 
 const exists = (file: string) => fs.access(file).then(() => true, () => false)
@@ -21,6 +24,31 @@ export const topicSummary = (t: TopicRow): TopicSummary => ({
   done: t.done,
   inProgress: t.inProgress
 })
+
+export const ideaSummary = (i: IdeaFile): IdeaSummary => {
+  const brief = briefOf(i.data, i.body)
+  return {
+    slug: i.slug,
+    title: i.title,
+    status: i.data.status,
+    source: i.data.source,
+    format: i.data.format,
+    topic: i.data.topic,
+    book: i.data.book,
+    titleFixed: i.data.title_fixed === true,
+    characters: brief.characters.length,
+    brief
+  }
+}
+
+/** The owner's open stories (oldest first, the order they are picked) and the last `used` ones that books were made from (newest first). */
+export function ideaSummaries(ideas: IdeaFile[], used = 10): IdeaSummary[] {
+  const open = ideas.filter((i) => i.data.status === 'open' && i.data.source === 'user')
+  const done = ideas.filter((i) => i.data.status === 'used').sort((a, b) => b.createdMs - a.createdMs).slice(0, used)
+  return [...open, ...done].map(ideaSummary)
+}
+
+export const formatSummaries = (formats: FormatEntry[]): FormatSummary[] => formats.filter((f) => f.enabled).map((f) => ({ id: f.id, name: f.name, kinds: f.kinds }))
 
 export async function bookSummary(books: BookStore, slug: string, topics: TopicRow[]): Promise<BookSummary | null> {
   const b = await books.read(slug)

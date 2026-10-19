@@ -110,3 +110,51 @@ export async function initDataFolder(dataDir: string, seedDir: string | undefine
   }
   return result
 }
+
+export interface EngineLock {
+  file: string
+  release(): Promise<void>
+}
+
+const pidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM' // alive, but not ours to signal
+  }
+}
+
+/**
+ * Takes `index/engine.lock` (pid and start time): one engine per data folder. Throws when a lock names another live process.
+ * A lock of a dead process is replaced. The index folder only holds files that can be rebuilt, so the lock is no hidden state.
+ */
+export async function acquireEngineLock(dataDir: string, pid = process.pid): Promise<EngineLock> {
+  const file = path.join(dataDir, 'index', 'engine.lock')
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  try {
+    const old = JSON.parse(await fs.readFile(file, 'utf8')) as { pid?: unknown; started?: unknown }
+    // a lock from before the last boot is stale even when its pid is alive: Windows hands old pids to other processes
+    const started = typeof old.started === 'string' ? Date.parse(old.started) : NaN
+    const beforeBoot = Number.isFinite(started) && started < Date.now() - os.uptime() * 1000
+    if (typeof old.pid === 'number' && old.pid !== pid && !beforeBoot && pidAlive(old.pid)) {
+      throw new Error(`another Scriptorium engine (pid ${old.pid}, started ${String(old.started ?? 'at an unknown time')}) already runs on ${dataDir}. Stop it first, or use another --data folder.`)
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('another Scriptorium engine')) throw err
+    /* no lock, or an unreadable one: replaced */
+  }
+  await fs.writeFile(file, JSON.stringify({ pid, started: new Date().toISOString() }) + '\n')
+  return {
+    file,
+    release: async () => {
+      // only our own lock is removed
+      try {
+        const cur = JSON.parse(await fs.readFile(file, 'utf8')) as { pid?: unknown }
+        if (cur.pid === pid) await fs.rm(file, { force: true })
+      } catch {
+        /* gone already */
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { EngineEvent } from '../../shared/protocol'
 import type { FactoryConfig, FormatEntry, QualityConfig } from '../../shared/schemas'
+import { briefOf, briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
 import { genreClass, writeCoverHtml } from '../publish/cover'
 import type { ModelInfo } from '../models/registry'
@@ -12,6 +13,7 @@ import type { ChatOptions, JobContext, Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
 import type { IdeaFile, IdeaStore } from '../store/ideas'
 import type { TopicRow, TopicsFile } from '../store/topics'
+import { ideaSummaries } from '../summary'
 import { countBooksInProgress, countWords } from './books'
 import type { BookStore } from './books'
 import { reviewersFor, THREAD_CHECK } from './advance'
@@ -241,8 +243,22 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     const allowed = formatsForKind(formats, topic?.kind ?? null)
+    // the owner's story: its title and format are theirs to fix, and the whole brief goes to the editor
+    const fromOwner = idea?.data.source === 'user'
+    const brief = idea && fromOwner ? briefOf(idea.data, idea.body) : null
+    const fixedTitle = brief?.title.trim() || ''
+    let fixedFormat: FormatEntry | undefined
+    if (brief?.format) {
+      fixedFormat = allowed.find((f) => f.id === brief.format)
+      if (!fixedFormat) d.log(`the story "${idea!.title}" asks for the format "${brief.format}", which ${topic ? 'the topic does not allow' : 'is not enabled'}: the editor chooses`)
+    }
+    const ideaText = brief ? briefPromptText(brief) : idea?.body ?? ''
     const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', 'start_book', {
-      source: idea ? `An idea from the bucket (${idea.data.source === 'user' ? 'from the owner' : 'generated'}): "${idea.title}"\n${idea.body}` : 'No idea was picked: choose a fresh premise that fits the topic.',
+      source: idea
+        ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
+          (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
+          (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '')
+        : 'No idea was picked: choose a fresh premise that fits the topic.',
       topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
       formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
     })
@@ -256,10 +272,10 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     })
     const r = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
     run.addJson(r.cost, r.chat.model)
-    const fmt = allowed.find((f) => f.id === r.value.format) ?? allowed[0]
+    const fmt = fixedFormat ?? allowed.find((f) => f.id === r.value.format) ?? allowed[0]
     if (!fmt) throw new Error('no enabled format for this topic')
     const target = clamp(Math.round(r.value.target_words ?? (fmt.words[0] + fmt.words[1]) / 2), fmt.words[0], fmt.words[1])
-    const title = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
+    const title = fixedTitle || r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     const slug = await d.books.freeSlug(title)
     await d.books.create(
       slug,
@@ -270,7 +286,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         format: fmt.id,
         topic: topic?.id ?? null,
         topic_name: topic?.topic ?? null,
-        genre: r.value.genre || topic?.topic || fmt.name,
+        genre: brief?.genre || r.value.genre || topic?.topic || fmt.name,
         age_band: fmt.age_band,
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
         ...(fmt.script ? { script: true } : {}),
@@ -281,7 +297,13 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       },
       `\n${r.value.notes ? `Editor-in-chief notes: ${r.value.notes}\n` : ''}${idea ? `\nStarted from the idea "${idea.title}".\n` : ''}`
     )
-    if (idea) await d.ideas.markUsed(idea, slug)
+    if (idea) {
+      // the book keeps its own copy of the story: the agents read it from there, and a hand edit applies from the next job
+      const { status: _status, book: _book, ...kept } = idea.data
+      await writeMd(d.books.file(slug, 'brief.md'), { ...kept, kind: 'brief', idea: idea.slug }, '\n' + idea.body + '\n')
+      await d.ideas.markUsed(idea, slug)
+      d.emit({ type: 'ideas.updated', ideas: ideaSummaries(await d.ideas.list()) })
+    }
     if (topic) await d.topics.adjust(topic.id, { inProgress: 1 })
     await made(slug, run)
     d.emit({ type: 'book.stage', book: slug, stage: 'new' })
@@ -295,7 +317,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const slug = ctx.job.book!
     const book = (await d.books.read(slug))!.data
     const fmt = formatOf(book.format)
-    const ideaText = typeof book.idea === 'string' ? ((await d.ideas.list()).find((i) => i.slug === book.idea)?.body ?? '') : ''
+    const brief = await d.books.brief(slug)
+    const ideaText = brief ? briefPromptText(brief) : typeof book.idea === 'string' ? ((await d.ideas.list()).find((i) => i.slug === book.idea)?.body ?? '') : ''
     const mem = d.memory.available() ? d.memory : null
     let similarityNote = ''
     let text: string
@@ -367,6 +390,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     run.version = version
     // a story with choices: the architect plans a map of chapters with choices and endings
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
+    appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await ownerNotesSection(d, slug))
     const schema = z.object({
       chapters: z
@@ -426,6 +450,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           : numbered.map((c) => `${c.n}. **${c.title}**: ${c.summary}${fmt.choices ? `\n   - ${endLine(c)}` : ''}`).join('\n')) +
         '\n'
     )
+    // a character the owner described is in the bible, even when the architect left it out
+    const characters = fmt.nonfiction ? r.value.characters : await withBriefCharacters(d, slug, r.value.characters, ctx.log)
     if (fmt.nonfiction) {
       // the fact base takes the place of the story bible: argument, audience, style, structure and terms (sources and facts follow per chapter)
       await d.factbase.writeThesis(
@@ -436,11 +462,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else if (fmt.long) {
       // the structured bible: characters (with voice sheets), places, threads, timeline, style
       await fs.rm(d.books.file(slug, 'bible'), { recursive: true, force: true })
-      await d.bible.writeInitial(slug, { characters: r.value.characters, places: r.value.places, threads: r.value.threads, setting: r.value.setting, style: r.value.style })
+      await d.bible.writeInitial(slug, { characters, places: r.value.places, threads: r.value.threads, setting: r.value.setting, style: r.value.style })
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
-        (r.value.characters.length ? r.value.characters.map((c) => `- **${c.name}**: ${c.description}${fmt.script && c.voice ? ` Voice: ${c.voice}` : ''}`).join('\n') : '(see the pitch)') +
+        (characters.length ? characters.map((c) => `- **${c.name}**: ${c.description}${fmt.script && c.voice ? ` Voice: ${c.voice}` : ''}`).join('\n') : '(see the pitch)') +
         // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
         (fmt.script && r.value.places.length ? `\n\n## Places\n${r.value.places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
@@ -503,6 +529,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     })
     run.version = version
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'draft', chapterPlace(outline.chapters, n)))
+    appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await ownerNotesSection(d, slug, n))
     let r = await run.chat({ messages, maxTokens: Math.max(4000, perChapter * 6) })
     let body = stripLeadingHeading(cleanProse(r.text))
@@ -716,6 +743,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     })
     run.version = version
     if (branches) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n)))
+    appendToPrompt(messages, await storyBriefSection(d, slug))
     if (!isNote) appendToPrompt(messages, await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6) })
     const body = stripMarkers(stripLeadingHeading(cleanProse(r.text)))
@@ -908,6 +936,25 @@ export async function askFromReview(d: Pick<PipelineDeps, 'research'>, agent: st
     if (a.id && (a.status === 'created' || a.status === 'exists')) ids.push(a.id)
   }
   return ids
+}
+
+/** The owner's story brief (books/<slug>/brief.md) for the agents that plan, write and check. Empty when the book has none. */
+export async function storyBriefSection(d: { books: BookStore }, slug: string): Promise<string> {
+  const brief = await d.books.brief(slug)
+  if (!brief) return ''
+  return `## The owner's story brief\n\nThe owner described this story. Keep its title, its characters (names, roles, looks), its plot points and its setting, and build the story around them. Where the owner's notes (if any) conflict with the brief, the owner's notes win.\n\n${briefPromptText(brief)}`
+}
+
+type OutlineCharacter = { name: string; description: string; voice: string }
+
+/** The outline's characters plus every character of the owner's brief that the architect left out (matched by name, ignoring case). */
+export async function withBriefCharacters(d: { books: BookStore }, slug: string, characters: OutlineCharacter[], log: (m: string) => void): Promise<OutlineCharacter[]> {
+  const brief = await d.books.brief(slug)
+  if (!brief) return characters
+  const have = new Set(characters.map((c) => c.name.trim().toLowerCase()))
+  const missing = brief.characters.filter((c) => c.name.trim() && !have.has(c.name.trim().toLowerCase()))
+  if (missing.length) log(`the outline left out ${missing.length} character(s) of the owner's brief: ${missing.map((c) => c.name).join(', ')}. They are added to the bible.`)
+  return [...characters, ...missing.map((c) => ({ name: c.name.trim(), description: [c.role.trim(), c.description.trim()].filter(Boolean).join('. '), voice: '' }))]
 }
 
 /** Your notes from the draft reader (books/<slug>/notes.md), for the writers. Empty when there are none. */

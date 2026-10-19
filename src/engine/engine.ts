@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { Command, EngineEvent, SettingsSummary, SnapshotEvent } from '../shared/protocol'
+import type { StoryBrief } from '../shared/brief'
+import type { Command, EngineEvent, IdeaSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
 import { parseMdWith } from '../shared/md'
 import { factorySchema, formatsSchema, qualitySchema, ROLES, settingsSchema } from '../shared/schemas'
 import type { FactoryConfig, FormatEntry, QualityConfig, SettingsConfig } from '../shared/schemas'
@@ -22,11 +23,12 @@ import { BookStore, TERMINAL_BOOK_STAGES } from './pipeline/books'
 import { Pipeline } from './pipeline/pipeline'
 import { Scheduler } from './queue/scheduler'
 import { IdeaStore } from './store/ideas'
+import type { IdeaFile } from './store/ideas'
 import { TopicsFile } from './store/topics'
 import { readMd, writeMd } from './store/atomic'
 import { sendEpub, smtpTransport } from './publish/kindle'
 import type { TransportFactory } from './publish/kindle'
-import { agentSummary, bookSummary, modelSummaries, providerSummaries, roleDefaults, serverStatuses, topicSummary } from './summary'
+import { agentSummary, bookSummary, formatSummaries, ideaSummaries, modelSummaries, providerSummaries, roleDefaults, serverStatuses, topicSummary } from './summary'
 import type { WatchEvent } from './store/watcher'
 
 export interface EngineOptions {
@@ -80,6 +82,8 @@ export class Engine {
   formats: FormatEntry[] = []
   settings: SettingsConfig = settingsSchema.parse({ kind: 'settings' })
   private knownAgents = new Set<string>()
+  /** Where the MCP server listens, once it does. */
+  private mcpUrl: string | null = null
   private slotTimer: ReturnType<typeof setInterval> | undefined
   private readonly startedAt = Date.now()
   private readonly log: (m: string) => void
@@ -175,6 +179,10 @@ export class Engine {
       bookChanged: (slug) => void this.emitBookUpdated(slug),
       tickMs: opts.tickMs
     })
+  }
+
+  get uptimeMs(): number {
+    return Date.now() - this.startedAt
   }
 
   get dataDir(): string {
@@ -515,6 +523,8 @@ export class Engine {
         this.emitAgentUpdated(id)
       } else if (e.kind === 'topics') {
         await this.emitTopics()
+      } else if (e.kind === 'idea') {
+        await this.emitIdeas()
       } else if (e.kind === 'config') {
         const name = path.basename(e.rel, '.md')
         if (name === 'providers' || name === 'roles' || name === 'models') {
@@ -624,6 +634,45 @@ export class Engine {
 
   async emitTopics(): Promise<void> {
     this.emit({ type: 'topics.updated', topics: (await this.topics.read()).map(topicSummary) })
+  }
+
+  /** The owner's open stories and the last used ones, as the UI and MCP list them. */
+  async listIdeaSummaries(): Promise<IdeaSummary[]> {
+    return ideaSummaries(await this.ideas.list())
+  }
+
+  async emitIdeas(): Promise<void> {
+    this.emit({ type: 'ideas.updated', ideas: await this.listIdeaSummaries() })
+  }
+
+  /** Creates a story from a brief. Throws when the brief is empty. */
+  async addStory(brief: StoryBrief): Promise<IdeaFile> {
+    const idea = await this.ideas.createStory(brief)
+    this.log(`story "${idea.title}" added (${idea.slug})`)
+    await this.emitIdeas()
+    this.pipeline.kick()
+    return idea
+  }
+
+  /** Replaces the brief of a story. Throws when there is no such story, or a book was already started from it. */
+  async updateStory(slug: string, brief: StoryBrief): Promise<IdeaFile> {
+    const idea = await this.ideas.updateStory(slug, brief)
+    this.log(`story "${idea.title}" changed (${idea.slug})`)
+    await this.emitIdeas()
+    this.pipeline.kick()
+    return idea
+  }
+
+  /** The MCP server started (its url) or stopped (null): the snapshot and the UI follow. */
+  setMcpUrl(url: string | null): void {
+    this.mcpUrl = url
+    this.emit({ type: 'mcp.updated', mcp: url ? { url } : null })
+  }
+
+  /** Shows a warning in the UI. */
+  warn(message: string): void {
+    this.log(`warning: ${message}`)
+    this.emit({ type: 'engine.warning', message })
   }
 
   async emitBookUpdated(slug: string): Promise<void> {
@@ -801,9 +850,24 @@ export class Engine {
         const firstLine = text.split('\n')[0]!.trim()
         const title = firstLine.length > 70 ? firstLine.slice(0, 67).trimEnd() + '...' : firstLine
         await this.ideas.create({ title, pitch: text, topic: cmd.topic ?? null, source: 'user' })
+        await this.emitIdeas()
         this.pipeline.kick()
         return
       }
+      case 'addStory':
+        try {
+          await this.addStory(cmd.brief)
+        } catch (err) {
+          this.log(`addStory: ${(err as Error).message}`)
+        }
+        return
+      case 'updateStory':
+        try {
+          await this.updateStory(cmd.idea, cmd.brief)
+        } catch (err) {
+          this.log(`updateStory: ${(err as Error).message}`)
+        }
+        return
       case 'saveSettings': {
         const file = this.settingsFile()
         let doc
@@ -909,6 +973,8 @@ export class Engine {
       agents: this.agents.list().map((a) => agentSummary(a, this.scheduler, this.router)),
       books,
       topics: topics.map(topicSummary),
+      ideas: await this.listIdeaSummaries(),
+      formats: formatSummaries(this.formats),
       models: modelSummaries(this.registry),
       providers: providerSummaries(this.registry, this.router.limiter),
       roleDefaults: roleDefaults(this.registry),
@@ -917,6 +983,7 @@ export class Engine {
       running: this.scheduler.runningJobs(),
       settings: this.settingsSummary(),
       secretsSet: this.secretsSet(),
+      mcp: this.mcpUrl ? { url: this.mcpUrl } : null,
       at: new Date().toISOString()
     }
   }

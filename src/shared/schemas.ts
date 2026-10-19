@@ -213,6 +213,16 @@ export const settingsSchema = configBase('settings').extend({
   lmstudio_context: z.number().int().min(2048).default(131072),
   lmstudio_ttl_minutes: z.number().int().min(1).default(60)
 })
+export const mcpSchema = configBase('mcp').extend({
+  /** Start the MCP server with the engine. */
+  enabled: z.boolean().default(true),
+  /** Loopback only: any other host is refused and 127.0.0.1 is used. */
+  host: z.string().default('127.0.0.1'),
+  /** 0 picks a free port. */
+  port: z.number().int().min(0).max(65535).default(7341),
+  /** Name of the secret (environment variable or Windows credential store) that holds the bearer token. When it is set, clients must send it. */
+  token_env: z.string().default('SCRIPTORIUM_MCP_TOKEN')
+})
 export const topicsSchema = configBase('topics')
 
 // ---- agents ----
@@ -236,11 +246,15 @@ export const agentSchema = z.looseObject({
 export const ideaSchema = z.looseObject({
   kind: z.literal('idea').default('idea'),
   title: z.string().optional(),
+  /** The owner gave the title: the book keeps it. */
+  title_fixed: z.boolean().optional(),
+  genre: z.string().optional(),
   /** Topic id from topics.md. Empty means "the editor-in-chief picks". */
   topic: z.string().nullable().default(null),
   status: z.enum(['open', 'used']).default('open'),
   /** `user` ideas are picked before generated ones. */
   source: z.enum(['user', 'generated']).default('user'),
+  /** Format id from config/formats.md. Empty means "the editor-in-chief picks". */
   format: z.string().nullable().default(null),
   book: z.string().nullable().default(null),
   created: z.string().optional()

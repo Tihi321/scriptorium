@@ -41,6 +41,19 @@ function Servers() {
   )
 }
 
+/** The MCP server is listening: shows its port. */
+function McpPill() {
+  const mcp = useOffice((s) => s.mcp)
+  if (!mcp) return null
+  const port = new URL(mcp.url).port
+  return (
+    <span className="pill" data-testid="mcp-status" title={`MCP server: ${mcp.url}`}>
+      <span className="dot" style={{ background: '#6aa8ff' }} />
+      MCP :{port}
+    </span>
+  )
+}
+
 export function StatusBar() {
   const agents = useAgentList()
   const connected = useOffice((s) => s.connected)
@@ -54,6 +67,7 @@ export function StatusBar() {
         {connected ? 'engine' : 'offline'}
       </span>
       <Servers />
+      <McpPill />
       <span className="pill" data-testid="count-working">
         <span className="dot" style={{ background: '#6fe39a' }} />
         working <b>{counts.working}</b>

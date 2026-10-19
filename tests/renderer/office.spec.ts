@@ -30,6 +30,7 @@ test('the office renders, an agent opens its terminal, and the controls send com
   await page.getByTestId('tool-budget').click()
   await expect(page.getByTestId('meter-today')).toBeVisible()
   // Strata is off in the demo: "Check now" asks the engine, which finds it running
+  await expect(page.getByTestId('mcp-status')).toHaveText('MCP :7341')
   await expect(page.getByTestId('server-strata')).toHaveAttribute('data-down', 'true')
   await page.getByTestId('servers-check').click()
   await expect(page.getByTestId('server-strata')).toHaveAttribute('data-down', 'false')
@@ -317,6 +318,55 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('idea-text').fill('A book about a clockwork heron')
   await page.getByTestId('idea-add').click()
   expect(await commands(page)).toContainEqual({ type: 'addIdea', text: 'A book about a clockwork heron' })
+
+  // a described story: two characters and a section of its own, then it waits in the list and can be edited
+  await expect(page.getByTestId('story-form')).toHaveCount(0)
+  await page.getByTestId('story-describe').click()
+  await expect(page.getByTestId('story-save')).toBeDisabled()
+  await page.getByTestId('story-title').fill('The Lantern Keeper')
+  await page.getByTestId('story-format').selectOption('novella')
+  await page.getByTestId('story-genre').fill('Sea adventure')
+  await page.getByTestId('story-premise').fill('A girl keeps a lighthouse.')
+  await page.getByTestId('story-add-character').click()
+  await page.getByTestId('story-add-character').click()
+  await page.getByTestId('story-char-name').nth(0).fill('Mara Quill')
+  await page.getByTestId('story-char-role').nth(0).fill('the hero')
+  await page.getByTestId('story-char-desc').nth(0).fill('Freckled.')
+  await page.getByTestId('story-char-name').nth(1).fill('Old Bram')
+  await page.getByTestId('story-add-section').click()
+  await page.getByTestId('story-section-heading').fill('Themes')
+  await page.getByTestId('story-section-text').fill('Courage.')
+  await page.getByTestId('story-save').click()
+  expect(await commands(page)).toContainEqual({
+    type: 'addStory',
+    brief: {
+      title: 'The Lantern Keeper',
+      premise: 'A girl keeps a lighthouse.',
+      plot: '',
+      characters: [
+        { name: 'Mara Quill', role: 'the hero', description: 'Freckled.' },
+        { name: 'Old Bram', role: '', description: '' }
+      ],
+      setting: '',
+      style: '',
+      sections: [{ heading: 'Themes', text: 'Courage.' }],
+      format: 'novella',
+      genre: 'Sea adventure'
+    }
+  })
+  await expect(page.getByTestId('story-form')).toHaveCount(0)
+  await expect(page.getByTestId('waiting-story')).toHaveCount(1)
+  await expect(page.getByTestId('waiting-story')).toContainText('The Lantern Keeper')
+  await expect(page.getByTestId('waiting-story')).toContainText('2 characters')
+  await page.getByTestId('waiting-story').click()
+  await expect(page.getByTestId('story-title')).toHaveValue('The Lantern Keeper')
+  await expect(page.getByTestId('story-character')).toHaveCount(2)
+  await expect(page.getByTestId('story-char-name').nth(1)).toHaveValue('Old Bram')
+  await page.getByTestId('story-char-remove').nth(1).click()
+  await page.getByTestId('story-title').fill('The Lamp Keeper')
+  await page.getByTestId('story-save').click()
+  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'updateStory', idea: 'the-lantern-keeper', brief: expect.objectContaining({ title: 'The Lamp Keeper', characters: [{ name: 'Mara Quill', role: 'the hero', description: 'Freckled.' }] }) }))
+  await expect(page.getByTestId('waiting-story')).toContainText('The Lamp Keeper')
 
   expect(errors).toEqual([])
 })

@@ -3,6 +3,8 @@
  * A Transport carries them. Today that is the Electron utilityProcess port. Later it could be a WebSocket.
  */
 
+import type { StoryBrief } from './brief'
+
 export type AgentState = 'working' | 'reviewing' | 'waiting-provider' | 'waiting-research' | 'idle' | 'error' | 'paused'
 
 /**
@@ -167,6 +169,32 @@ export interface TopicSummary {
   inProgress: number
 }
 
+/** A story (a file in ideas/) for the idea list: the owner's open stories and the last used ones. */
+export interface IdeaSummary {
+  slug: string
+  title: string
+  status: 'open' | 'used'
+  source: 'user' | 'generated'
+  /** Format id the owner fixed, or null. */
+  format: string | null
+  /** Topic id, or null. */
+  topic: string | null
+  /** The book made from it, once used. */
+  book: string | null
+  /** The owner gave the title (the book keeps it). */
+  titleFixed: boolean
+  characters: number
+  /** The whole brief, so the story can be edited. */
+  brief: StoryBrief
+}
+
+/** An enabled format, for the story form's format picker. */
+export interface FormatSummary {
+  id: string
+  name: string
+  kinds: string[]
+}
+
 export interface SettingsSummary {
   kindleAddress: string
   fromAddress: string
@@ -201,6 +229,10 @@ export interface SnapshotEvent {
   agents: AgentSummary[]
   books: BookSummary[]
   topics: TopicSummary[]
+  /** The owner's open stories and the last 10 used ones. */
+  ideas: IdeaSummary[]
+  /** The enabled formats. */
+  formats: FormatSummary[]
   /** Every chat model the engine knows, including the LM Studio models found on this machine. The pickers offer the `shown` ones. */
   models: ModelSummary[]
   providers: ProviderSummary[]
@@ -212,6 +244,8 @@ export interface SnapshotEvent {
   settings: SettingsSummary
   /** Names of secrets that are set (never their values): the SMTP password and provider key variables. */
   secretsSet: string[]
+  /** The MCP server's address while it listens (`http://127.0.0.1:7341/mcp`), else null. */
+  mcp: { url: string } | null
   at: string
 }
 
@@ -248,6 +282,8 @@ export type EngineEvent =
   | { type: 'job.token'; jobId: string; agent: string; text: string }
   /** A local model server went down, came back or changed its slot count. */
   | { type: 'servers'; servers: ServerStatus[] }
+  /** The MCP server started (`url`) or stopped (`null`). */
+  | { type: 'mcp.updated'; mcp: { url: string } | null }
   | { type: 'job.done'; jobId: string; agent: string; ok: boolean; result?: string; error?: string }
   | { type: 'handover'; from: string; to: string; label: string; jobId?: string; done?: boolean }
   | {
@@ -265,6 +301,8 @@ export type EngineEvent =
   | { type: 'book.updated'; book: BookSummary }
   /** topics.md changed (counts, active flags). Carries the whole list. */
   | { type: 'topics.updated'; topics: TopicSummary[] }
+  /** ideas/ changed (a story was added, edited or used). Carries the whole list. */
+  | { type: 'ideas.updated'; ideas: IdeaSummary[] }
   | { type: 'kindle.sent'; book: string; ok: boolean; error?: string }
   | { type: 'secrets.updated'; secretsSet: string[] }
   /** The answer to `detectModels`: every chat model the provider lists, or why it couldn't be asked. */
@@ -307,6 +345,10 @@ export type Command =
   | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
   /** Creates an idea file in ideas/. */
   | { type: 'addIdea'; text: string; topic?: string }
+  /** Creates a story from a brief (title, premise, plot, characters, ...) in ideas/. */
+  | { type: 'addStory'; brief: StoryBrief }
+  /** Replaces the brief of a story that no book has started yet. `idea` is the story's slug. */
+  | { type: 'updateStory'; idea: string; brief: StoryBrief }
   /** Asks a provider for every model it has (`GET /models`). Answers with `models.catalog`. */
   | { type: 'detectModels'; provider: string }
   /** Shows models in the pickers, or hides them (config/models.md). A listed model that isn't known yet is added with its listed price. */
@@ -349,6 +391,8 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   setTopicActive: true,
   addTopic: true,
   addIdea: true,
+  addStory: true,
+  updateStory: true,
   saveSettings: true,
   setSecret: true,
   detectModels: true,

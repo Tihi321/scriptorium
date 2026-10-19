@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { briefOf, isEmptyBrief } from '../../shared/brief'
+import type { StoryBrief } from '../../shared/brief'
 import { parseMd, parseMdWith } from '../../shared/md'
 import { bookSchema } from '../../shared/schemas'
 import type { BookFrontmatter } from '../../shared/schemas'
@@ -199,6 +201,27 @@ export class BookStore {
     } catch {
       return null
     }
+  }
+
+  /**
+   * The owner's story brief of a book: books/<slug>/brief.md, else (older books) the body of the idea it started from.
+   * Null when the book came from a generated idea or from none, or the brief says nothing.
+   */
+  async brief(slug: string): Promise<StoryBrief | null> {
+    let text = await this.readText(slug, 'brief.md')
+    if (text === null) {
+      const idea = (await this.read(slug))?.data.idea
+      if (typeof idea !== 'string' || !/^[\w.-]+$/.test(idea)) return null
+      try {
+        text = await fs.readFile(path.join(this.dataDir, 'ideas', `${idea}.md`), 'utf8')
+      } catch {
+        return null
+      }
+    }
+    const doc = parseMd(text)
+    if (doc.data.source === 'generated') return null
+    const brief = briefOf(doc.data, doc.body)
+    return isEmptyBrief(brief) ? null : brief
   }
 
   async pitch(slug: string): Promise<string | null> {

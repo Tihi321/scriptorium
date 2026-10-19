@@ -25,6 +25,10 @@ let blockerId: number | null = null
 // SCRIPTORIUM_NO_WINDOW=1 runs the engine and the cover service without the main window (for scripted checks).
 const noWindow = process.env.SCRIPTORIUM_NO_WINDOW === '1'
 const startHidden = process.argv.includes('--hidden')
+// --headless: no window at start, only the tray. The window is made the first time it is asked for ("Show Scriptorium").
+// The engine serves MCP, as `yarn headless` does.
+const headless = process.argv.includes('--headless')
+let makeWindow: (() => void) | null = null
 
 // The reader and the covers are served by this scheme, from the data folder only (see files.ts).
 protocol.registerSchemesAsPrivileged([{ scheme: BOOK_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }])
@@ -33,18 +37,22 @@ function forwardedEngineArgs(): string[] {
   const i = process.argv.findIndex((a) => a === '--data')
   const value = i >= 0 ? process.argv[i + 1] : undefined
   const args = value ? ['--data', value] : []
+  if (headless || process.argv.includes('--mcp')) args.push('--mcp')
+  if (process.argv.includes('--no-mcp')) args.push('--no-mcp')
+  const mcpPort = process.argv.findIndex((a) => a === '--mcp-port')
+  if (mcpPort >= 0 && process.argv[mcpPort + 1]) args.push('--mcp-port', process.argv[mcpPort + 1]!)
   // The engine cannot find `seed/` from inside the archive, so a packaged app hands it the copy in resources.
   if (app.isPackaged) args.push('--seed', path.join(process.resourcesPath, 'seed'))
   return args
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(show: boolean): BrowserWindow {
   const w = new BrowserWindow({
     width: 1440,
     height: 900,
     title: 'Scriptorium',
     backgroundColor: '#12161e',
-    show: !startHidden,
+    show,
     icon: appIcon(),
     autoHideMenuBar: true,
     webPreferences: {
@@ -67,7 +75,11 @@ function createWindow(): BrowserWindow {
 }
 
 function showWindow(): void {
-  if (!win || win.isDestroyed()) return
+  if (!win || win.isDestroyed()) {
+    // headless: the window does not exist until it is asked for
+    makeWindow?.()
+    return
+  }
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
@@ -112,6 +124,12 @@ function rebuildTrayMenu(sendCommand: (c: { type: 'pauseAll' | 'resumeAll' }) =>
       { label: 'Quit', click: () => app.quit() }
     ])
   )
+}
+
+/** Headless: the tray tooltip names the MCP port once the engine reports it. */
+function setHeadlessTooltip(mcpUrl: string | null): void {
+  if (!headless || !tray) return
+  tray.setToolTip(mcpUrl ? `Scriptorium (headless, MCP :${new URL(mcpUrl).port})` : 'Scriptorium (headless)')
 }
 
 function updatePowerBlocker(): void {
@@ -174,7 +192,11 @@ if (!app.requestSingleInstanceLock()) {
         case 'engine.ready':
           dataDir = event.dataDir
           break
+        case 'mcp.updated':
+          setHeadlessTooltip(event.mcp?.url ?? null)
+          break
         case 'snapshot':
+          setHeadlessTooltip(event.mcp?.url ?? null)
           allPaused = event.paused
           for (const r of event.running) runningJobs.add(r.jobId)
           updatePowerBlocker()
@@ -223,21 +245,26 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('host:getLogin', () => loginItemOn())
     ipcMain.handle('host:setLogin', (_e, on: unknown) => setLoginItem(on === true))
 
-    if (!noWindow) {
-      win = createWindow()
+    // Makes the main window and wires it to the engine and the tray. Headless: called by the first "Show Scriptorium".
+    const openWindow = (show: boolean): void => {
+      const w = createWindow(show)
+      win = w
       // The renderer asks for a first state once it has loaded.
-      win.webContents.on('did-finish-load', () => {
+      w.webContents.on('did-finish-load', () => {
         engine.send({ type: 'ping', id: 'startup' })
         engine.send({ type: 'snapshot' })
       })
-      if (process.env.SCRIPTORIUM_NO_TRAY !== '1') {
-        tray = new Tray(trayImage())
-        tray.setToolTip('Scriptorium')
-        tray.on('click', () => (win?.isVisible() ? win.hide() : showWindow()))
-        win.on('show', () => rebuildTrayMenu(sendCommand))
-        win.on('hide', () => rebuildTrayMenu(sendCommand))
-        rebuildTrayMenu(sendCommand)
-      }
+      w.on('show', () => rebuildTrayMenu(sendCommand))
+      w.on('hide', () => rebuildTrayMenu(sendCommand))
+      rebuildTrayMenu(sendCommand)
+    }
+    if (!noWindow) makeWindow = () => openWindow(true)
+    if (!noWindow && !headless) openWindow(!startHidden)
+    if (process.env.SCRIPTORIUM_NO_TRAY !== '1' && (!noWindow || headless)) {
+      tray = new Tray(trayImage())
+      tray.setToolTip(headless ? 'Scriptorium (headless)' : 'Scriptorium')
+      tray.on('click', () => (win && !win.isDestroyed() && win.isVisible() ? win.hide() : showWindow()))
+      rebuildTrayMenu(sendCommand)
     }
 
     // Quit ends the engine.
@@ -253,7 +280,7 @@ if (!app.requestSingleInstanceLock()) {
       setTimeout(() => app.exit(0), 200)
     })
     app.on('window-all-closed', () => {
-      // closing the window only hides it; the hidden cover window closing is not the app closing either
+      // closing the window only hides it (headless: the tray stays); the hidden cover window closing is not the app closing either
       if (noWindow || renderingCovers > 0) return
     })
   })

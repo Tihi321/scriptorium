@@ -1,5 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { briefLabel, isEmptyBrief, renderBrief } from '../../shared/brief'
+import type { StoryBrief } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
 import { ideaSchema } from '../../shared/schemas'
 import type { IdeaFrontmatter } from '../../shared/schemas'
@@ -25,6 +27,13 @@ export const slugify = (s: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'idea'
+
+/** The frontmatter fields of a brief (format, topic and genre are left out when empty). */
+const briefFields = (b: StoryBrief) => ({
+  topic: b.topic?.trim() || null,
+  format: b.format?.trim() || null,
+  ...(b.genre?.trim() ? { genre: b.genre.trim() } : {})
+})
 
 /**
  * The idea bucket: one markdown file per idea in ideas/. Your own files may be as plain as a text file:
@@ -92,6 +101,39 @@ export class IdeaStore {
     }
     await writeMd(file, data, '\n' + input.pitch.trim() + '\n')
     return { slug, file, data: ideaSchema.parse(data), body: input.pitch.trim(), title: input.title, createdMs: Date.now() }
+  }
+
+  /** Creates a story from a brief. A given title is kept for the book (`title_fixed`), else the label comes from the premise. */
+  async createStory(brief: StoryBrief): Promise<IdeaFile> {
+    if (isEmptyBrief(brief)) throw new Error('a story needs a title or some text')
+    await fs.mkdir(this.dir, { recursive: true })
+    const taken = new Set((await fs.readdir(this.dir)).map((f) => f.replace(/\.md$/, '')))
+    const fixed = !!brief.title.trim()
+    const title = fixed ? brief.title.trim() : briefLabel(brief) || 'Untitled story'
+    const base = slugify(title)
+    let slug = base
+    for (let i = 2; taken.has(slug); i++) slug = `${base}-${i}`
+    const file = path.join(this.dir, `${slug}.md`)
+    const data = { kind: 'idea', title, ...(fixed ? { title_fixed: true } : {}), ...briefFields(brief), status: 'open', source: 'user', created: new Date().toISOString() }
+    const body = renderBrief(brief)
+    await writeMd(file, data, '\n' + body + '\n')
+    return { slug, file, data: ideaSchema.parse(data), body, title, createdMs: Date.now() }
+  }
+
+  /** Replaces the brief of an open story. Other frontmatter (status, source, created, your own fields) stays. */
+  async updateStory(slug: string, brief: StoryBrief): Promise<IdeaFile> {
+    if (isEmptyBrief(brief)) throw new Error('a story needs a title or some text')
+    const idea = (await this.list()).find((i) => i.slug === slug)
+    if (!idea) throw new Error(`no story "${slug}"`)
+    if (idea.data.status !== 'open') throw new Error(`the story "${slug}" is already used by a book`)
+    const doc = parseMd(await fs.readFile(idea.file, 'utf8'), idea.file)
+    const fixed = !!brief.title.trim()
+    const title = fixed ? brief.title.trim() : briefLabel(brief) || 'Untitled story'
+    const { format: _f, topic: _t, genre: _g, title_fixed: _x, ...rest } = doc.data
+    const data = { ...rest, kind: 'idea', title, ...(fixed ? { title_fixed: true } : {}), ...briefFields(brief) }
+    const body = renderBrief(brief)
+    await writeMd(idea.file, data, '\n' + body + '\n')
+    return { ...idea, data: ideaSchema.parse(data), body, title }
   }
 
   /** Marks an idea as used by a book. Keeps everything else in the file as it was. */
