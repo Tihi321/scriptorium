@@ -10,6 +10,7 @@
     "dev": "yarn build:engine && electron-vite dev",
     "build": "yarn build:engine && electron-vite build",
     "engine": "yarn build:engine && node out/engine/index.js",
+    "headless": "yarn build:engine && node out/engine/index.js --mcp",
     "key:set": "yarn build:engine && node out/engine/index.js key-set",
     "dev:ui": "vite --config vite.ui.config.ts --open /?demo",
     "test": "vitest run",
@@ -22,6 +23,7 @@
     "dist:dir": "yarn build && electron-builder --config electron-builder.yml --win dir --x64"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@napi-rs/keyring": "^2.1.0",
     "chokidar": "^4.0.3",
     "jszip": "^3.10.2",

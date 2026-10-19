@@ -8,8 +8,8 @@ import type { Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
 import { pad2 } from './books'
 import { chatJson, cleanProse } from './llm'
-import { buildMessages } from './prompts'
-import { askFromReview, clamp, formatVars, memoryContext, recordMade, Run, unitNumber } from './handlers'
+import { appendToPrompt, buildMessages } from './prompts'
+import { askFromReview, clamp, formatVars, memoryContext, recordMade, Run, storyBriefSection, unitNumber } from './handlers'
 import type { PipelineDeps } from './handlers'
 
 const reviewSchema = (dims: string[]) =>
@@ -50,6 +50,7 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    appendToPrompt(messages, await storyBriefSection(d, slug))
     const r = await chatJson(ctx, messages, reviewSchema(['structure']), { maxTokens: 6000, temperature: 0.2 })
     run.addJson(r.cost, r.chat.model)
     const score = clamp(Number(r.value.scores.structure), 1, 10)

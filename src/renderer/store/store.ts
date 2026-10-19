@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla'
-import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, ModelSummary, ProviderSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
+import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
 import {
   asAgentState,
   bookColor,
@@ -36,8 +36,14 @@ export interface OfficeState {
   /** "Check now" was clicked and the engine has not answered yet. */
   checkingServers: boolean
   topics: TopicSummary[]
+  /** The owner's open stories and the last used ones. */
+  ideas: IdeaSummary[]
+  /** The enabled formats, for the story form. */
+  formats: FormatSummary[]
   settings: SettingsSummary | null
   secretsSet: string[]
+  /** The MCP server's address while it listens. */
+  mcp: { url: string } | null
   /** Result of the last Send to Kindle per book. */
   kindle: Record<string, { state: 'sending' | 'ok' | 'error'; error?: string }>
   /** The office or the library. */
@@ -106,8 +112,11 @@ function initial(): OfficeState {
     servers: [],
     checkingServers: false,
     topics: [],
+    ideas: [],
+    formats: [],
     settings: null,
     secretsSet: [],
+    mcp: null,
     kindle: {},
     view: 'office',
     openBook: null,
@@ -201,6 +210,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         agentOrder: e.agents.map((a) => a.id),
         books: booksFromSnapshot(e.books, now),
         topics: e.topics,
+        ideas: e.ideas ?? [],
+        formats: e.formats ?? [],
         spend: e.spend,
         models: e.models,
         providers: e.providers ?? [],
@@ -208,6 +219,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         servers: e.servers ?? [],
         settings: e.settings,
         secretsSet: e.secretsSet,
+        mcp: e.mcp ?? null,
         selectedAgent: s.selectedAgent && agents[s.selectedAgent] ? s.selectedAgent : null
       }
     }
@@ -238,6 +250,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       return { books: { ...s.books, [e.book.slug]: viewOfBook(e.book, now) } }
     case 'topics.updated':
       return { topics: e.topics }
+    case 'ideas.updated':
+      return { ideas: e.ideas }
     case 'kindle.sent':
       return { kindle: { ...s.kindle, [e.book]: e.ok ? { state: 'ok' } : { state: 'error', error: e.error } } }
     case 'secrets.updated':
@@ -278,6 +292,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         books: e.book && !s.books[e.book] ? upsertBook(s.books, e.book, {}, now) : s.books
       }
     }
+    case 'mcp.updated':
+      return { mcp: e.mcp }
     case 'servers':
       return { servers: e.servers, checkingServers: false }
     case 'agent.problem': {

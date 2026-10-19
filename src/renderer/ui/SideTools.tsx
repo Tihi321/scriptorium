@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { budgetLevel, budgetPct } from '../store/model'
 import { useOffice } from '../store/hooks'
-import { AddIdea } from './AddIdea'
 import { RoleDefaults } from './AgentPanel'
 import { AskResearcher } from './AskResearcher'
 import { Budget } from './Budget'
+import { StoryForm } from './StoryForm'
 
 type Tool = 'budget' | 'ask' | 'idea' | 'roles'
 
@@ -44,7 +44,7 @@ export function SideTools() {
     <div className="side-tools" data-testid="side-tools">
       {open === 'budget' && <Budget />}
       {open === 'ask' && <AskResearcher />}
-      {open === 'idea' && <AddIdea />}
+      {open === 'idea' && <StoryForm />}
       {open === 'roles' && <RoleDefaults />}
       <div className="side-tabs">
         {tabs.map((t) => (

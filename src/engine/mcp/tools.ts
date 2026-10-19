@@ -1,0 +1,550 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { z } from 'zod'
+import { briefOf, emptyBrief, renderBrief } from '../../shared/brief'
+import type { BriefCharacter, StoryBrief } from '../../shared/brief'
+import type { BookSummary } from '../../shared/protocol'
+import { ROLES } from '../../shared/schemas'
+import type { Engine } from '../engine'
+import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
+import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, serverStatuses, topicSummary } from '../summary'
+import { TOPIC_KINDS } from '../store/topics'
+
+/** A mistake in what the agent sent: shown to it as a tool error. */
+class ToolError extends Error {}
+
+const fail = (message: string): never => {
+  throw new ToolError(message)
+}
+
+const text = (x: unknown) => ({ content: [{ type: 'text' as const, text: typeof x === 'string' ? x : JSON.stringify(x, null, 2) }] })
+
+/** Runs a tool: the result is JSON text, any error comes back as an MCP tool error (never a crash). */
+const run =
+  <A>(fn: (args: A) => Promise<unknown>) =>
+  async (args: A) => {
+    try {
+      return text(await fn(args))
+    } catch (err) {
+      return { ...text(err instanceof Error ? err.message : String(err)), isError: true }
+    }
+  }
+
+const READ = { readOnlyHint: true, openWorldHint: false } as const
+const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const
+
+/** A slug is a folder or file name, never a path. */
+const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const validSlug = (s: string) => SLUG.test(s) && !s.includes('..')
+
+const characterSchema = z.object({
+  name: z.string().describe('Character name'),
+  role: z.string().optional().describe('Who they are in the story, e.g. "the hero", "the lighthouse keeper\'s daughter"'),
+  description: z.string().optional().describe('Looks, voice, history: free text')
+})
+const sectionSchema = z.object({ heading: z.string(), text: z.string() })
+
+const toCharacter = (c: z.infer<typeof characterSchema>): BriefCharacter => ({ name: c.name.trim(), role: c.role?.trim() ?? '', description: c.description?.trim() ?? '' })
+
+/** A book summary without the reader page list (noise for an agent). */
+const slim = ({ readerPages: _r, ...rest }: BookSummary) => rest
+
+/** Registers the factory tools on an MCP server. Secrets, settings, Kindle, model lists and stopNow are left out on purpose. */
+export function registerTools(server: McpServer, engine: Engine): void {
+  // ---- helpers over the engine ----
+  const topics = () => engine.topics.read()
+  const needBook = async (slug: string) => {
+    if (!validSlug(slug) || !(await engine.books.read(slug))) fail(`no book "${slug}" (list_books shows the slugs)`)
+    return slug
+  }
+  const needAgent = (id: string) => engine.agents.get(id) ?? fail(`no agent "${id}" (list_agents shows the ids)`)
+  const needStory = async (slug: string) => {
+    const idea = validSlug(slug) ? (await engine.ideas.list()).find((i) => i.slug === slug) : undefined
+    return idea ?? fail(`no story "${slug}" (list_stories shows the slugs)`)
+  }
+  const checkFormat = (format?: string) => {
+    if (format && !engine.formats.some((f) => f.enabled && f.id === format)) {
+      fail(`unknown format "${format}". Enabled formats: ${engine.formats.filter((f) => f.enabled).map((f) => f.id).join(', ')}`)
+    }
+  }
+  const checkTopic = async (topic?: string) => {
+    if (topic && !(await topics()).some((t) => t.id === topic)) fail(`unknown topic "${topic}" (list_topics shows the ids)`)
+  }
+  const book = async (slug: string) => {
+    const s = await bookSummary(engine.books, slug, await topics())
+    return s ? slim(s) : null
+  }
+  const agent = (id: string) => {
+    const def = engine.agents.get(id)
+    return def ? agentSummary(def, engine.scheduler, engine.router) : null
+  }
+  const allAgents = () => engine.agents.list().map((a) => agentSummary(a, engine.scheduler, engine.router))
+
+  // ---- read ----
+  server.registerTool(
+    'factory_status',
+    {
+      description: 'Overview of the factory: paused or not, spend against the caps, local model servers, running jobs, books per stage, agents busy and idle.',
+      annotations: READ
+    },
+    run(async () => {
+      const byStage: Record<string, number> = {}
+      for (const slug of await engine.books.slugs()) {
+        const b = await engine.books.read(slug)
+        if (b) byStage[b.data.stage] = (byStage[b.data.stage] ?? 0) + 1
+      }
+      const agents = allAgents()
+      const busy = agents.filter((a) => a.state === 'working' || a.state === 'reviewing' || a.state === 'waiting-provider' || a.state === 'waiting-research')
+      return {
+        paused: engine.factory.paused,
+        uptimeMs: engine.uptimeMs,
+        spend: engine.budget.snapshot(),
+        servers: serverStatuses(engine.registry),
+        running: engine.scheduler.runningJobs(),
+        booksByStage: byStage,
+        maxBooksInProgress: engine.factory.max_books_in_progress,
+        openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
+        agents: { total: agents.length, busy: busy.length, idle: agents.filter((a) => a.state === 'idle').length, paused: agents.filter((a) => a.paused).length },
+        busyAgents: busy.map((a) => ({ id: a.id, state: a.state, task: a.task, book: a.book }))
+      }
+    })
+  )
+
+  server.registerTool(
+    'list_books',
+    {
+      description: 'List the books, one compact row each. Optionally only one stage (e.g. published, failed, drafting).',
+      inputSchema: { stage: z.string().optional().describe('Only books in this stage') },
+      annotations: READ
+    },
+    run(async ({ stage }: { stage?: string }) => {
+      const all = await topics()
+      const rows = []
+      for (const slug of await engine.books.slugs()) {
+        const b = await bookSummary(engine.books, slug, all)
+        if (!b || (stage && b.stage !== stage)) continue
+        rows.push({ slug, title: b.title, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused })
+      }
+      return rows
+    })
+  )
+
+  server.registerTool(
+    'get_book',
+    { description: 'One book in full: stage, chapters, words, score, team, last steps, cover and EPUB state, and the owner story brief it was made from (if any).', inputSchema: { book: z.string().describe('Book slug') }, annotations: READ },
+    run(async ({ book: slug }: { book: string }) => {
+      await needBook(slug)
+      return { ...(await book(slug)), brief: await engine.books.brief(slug) }
+    })
+  )
+
+  server.registerTool(
+    'read_book_file',
+    {
+      description:
+        'Read one text file of a book: brief, pitch, outline, bible (the whole story bible), notes (the owner notes), or chapter (give the chapter number). Only files inside the book folder can be read.',
+      inputSchema: {
+        book: z.string().describe('Book slug'),
+        file: z.enum(['brief', 'pitch', 'outline', 'bible', 'notes', 'chapter']),
+        chapter: z.number().int().positive().optional().describe('Chapter number, for file "chapter"')
+      },
+      annotations: READ
+    },
+    run(async ({ book: slug, file, chapter }: { book: string; file: 'brief' | 'pitch' | 'outline' | 'bible' | 'notes' | 'chapter'; chapter?: number }) => {
+      await needBook(slug)
+      const b = engine.books
+      const rel =
+        file === 'chapter' ? (chapter ? path.relative(b.dir(slug), b.chapterFile(slug, chapter)) : fail('give the chapter number')) : file === 'bible' ? 'bible' : `${file}.md`
+      const full = path.join(b.dir(slug), rel)
+      // belt and braces: the name is fixed above and the slug is checked, but nothing outside the book folder is read
+      if (path.relative(b.dir(slug), full).startsWith('..')) fail('path outside the book')
+      if (file === 'bible') return (await readBible(full)) ?? fail(`book "${slug}" has no bible yet`)
+      const content = await fs.readFile(full, 'utf8').catch(() => null)
+      if (content === null) {
+        if (file === 'brief') {
+          const brief = await b.brief(slug)
+          if (brief) return renderBrief(brief)
+        }
+        fail(`book "${slug}" has no ${file === 'chapter' ? `chapter ${chapter}` : file} yet`)
+      }
+      return content
+    })
+  )
+
+  server.registerTool(
+    'list_stories',
+    {
+      description: 'List the stories (idea files): the owner stories you add, and the ideas the factory generated. Default: open stories from every source.',
+      inputSchema: {
+        status: z.enum(['open', 'used', 'all']).optional().describe('open = waiting for a book (default), used = a book was started'),
+        source: z.enum(['user', 'generated', 'all']).optional().describe('Default all')
+      },
+      annotations: READ
+    },
+    run(async ({ status, source }: { status?: 'open' | 'used' | 'all'; source?: 'user' | 'generated' | 'all' }) =>
+      (await engine.ideas.list())
+        .filter((i) => (status ?? 'open') === 'all' || i.data.status === (status ?? 'open'))
+        .filter((i) => !source || source === 'all' || i.data.source === source)
+        .map(ideaSummary)
+        .map(({ brief: _b, ...row }) => row)
+    )
+  )
+
+  server.registerTool(
+    'get_story',
+    { description: 'One story with its whole brief (premise, plot, characters, setting, style, extra sections).', inputSchema: { story: z.string().describe('Story slug') }, annotations: READ },
+    run(async ({ story }: { story: string }) => ideaSummary(await needStory(story)))
+  )
+
+  server.registerTool(
+    'list_topics',
+    { description: 'The topics the factory writes about, with how many books each wants and has.', inputSchema: { active: z.boolean().optional().describe('Only switched-on (true) or switched-off (false) topics') }, annotations: READ },
+    run(async ({ active }: { active?: boolean }) => (await topics()).filter((t) => active === undefined || t.active === active).map(topicSummary))
+  )
+
+  server.registerTool('list_agents', { description: 'The agents (staff): role, model, state, current task and book, assigned book.', annotations: READ }, run(async () => allAgents()))
+
+  server.registerTool(
+    'list_models',
+    { description: 'The models the pickers offer (provider/model refs, prices, context) and the default model of each role.', annotations: READ },
+    run(async () => ({ models: modelSummaries(engine.registry).filter((m) => m.shown), roleDefaults: roleDefaults(engine.registry) }))
+  )
+
+  // ---- stories ----
+  server.registerTool(
+    'add_story',
+    {
+      description:
+        'Give the factory a story to turn into a book. Needs at least a title or some text. The editor-in-chief keeps your title, characters, plot and setting, and the writers follow them. Returns the story slug.',
+      inputSchema: {
+        title: z.string().optional().describe('The book title. When set, the book keeps it'),
+        premise: z.string().optional().describe('What the story is about'),
+        plot: z.string().optional().describe('Plot points, in any detail you like'),
+        characters: z.array(characterSchema).optional(),
+        setting: z.string().optional(),
+        style: z.string().optional().describe('Voice, tone, point of view'),
+        sections: z.array(sectionSchema).optional().describe('Any extra headed text (themes, rules of the world, ...)'),
+        format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks'),
+        topic: z.string().optional().describe('A topic id from list_topics'),
+        genre: z.string().optional()
+      }
+    },
+    run(
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string }) => {
+        checkFormat(a.format)
+        await checkTopic(a.topic)
+        const brief: StoryBrief = {
+          ...emptyBrief(),
+          title: a.title?.trim() ?? '',
+          premise: a.premise ?? '',
+          plot: a.plot ?? '',
+          characters: (a.characters ?? []).filter((c) => c.name.trim()).map(toCharacter),
+          setting: a.setting ?? '',
+          style: a.style ?? '',
+          sections: a.sections ?? [],
+          ...(a.format ? { format: a.format } : {}),
+          ...(a.topic ? { topic: a.topic } : {}),
+          ...(a.genre ? { genre: a.genre } : {})
+        }
+        const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
+        return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
+      }
+    )
+  )
+
+  server.registerTool(
+    'update_story',
+    {
+      description:
+        'Change a story that no book has started yet. Only the fields you give change. `characters` replaces the whole list; `add_characters` adds characters (one with a name that is already there is replaced). An empty string clears a text field.',
+      inputSchema: {
+        story: z.string().describe('Story slug'),
+        title: z.string().optional(),
+        premise: z.string().optional(),
+        plot: z.string().optional(),
+        characters: z.array(characterSchema).optional().describe('Replaces the character list'),
+        add_characters: z.array(characterSchema).optional().describe('Adds to the list'),
+        setting: z.string().optional(),
+        style: z.string().optional(),
+        sections: z.array(sectionSchema).optional().describe('Replaces the extra sections'),
+        format: z.string().optional(),
+        topic: z.string().optional(),
+        genre: z.string().optional()
+      }
+    },
+    run(
+      async (a: {
+        story: string
+        title?: string
+        premise?: string
+        plot?: string
+        characters?: z.infer<typeof characterSchema>[]
+        add_characters?: z.infer<typeof characterSchema>[]
+        setting?: string
+        style?: string
+        sections?: z.infer<typeof sectionSchema>[]
+        format?: string
+        topic?: string
+        genre?: string
+      }) => {
+        const idea = await needStory(a.story)
+        if (idea.data.status !== 'open') fail(`the story "${a.story}" was already used by a book (${idea.data.book ?? 'unknown'}): add a note to that book instead (add_book_note)`)
+        checkFormat(a.format)
+        await checkTopic(a.topic)
+        const brief = briefOf(idea.data, idea.body)
+        if (a.title !== undefined) brief.title = a.title.trim()
+        if (a.premise !== undefined) brief.premise = a.premise
+        if (a.plot !== undefined) brief.plot = a.plot
+        if (a.setting !== undefined) brief.setting = a.setting
+        if (a.style !== undefined) brief.style = a.style
+        if (a.sections !== undefined) brief.sections = a.sections
+        if (a.characters !== undefined) brief.characters = a.characters.filter((c) => c.name.trim()).map(toCharacter)
+        for (const c of a.add_characters ?? []) {
+          if (!c.name.trim()) continue
+          const next = toCharacter(c)
+          const i = brief.characters.findIndex((x) => x.name.toLowerCase() === next.name.toLowerCase())
+          if (i >= 0) brief.characters[i] = next
+          else brief.characters.push(next)
+        }
+        for (const k of ['format', 'topic', 'genre'] as const) {
+          if (a[k] === undefined) continue
+          if (a[k]!.trim()) brief[k] = a[k]!.trim()
+          else delete brief[k]
+        }
+        const updated = await engine.updateStory(a.story, brief).catch((err: Error) => fail(err.message))
+        return { slug: updated.slug, file: `ideas/${updated.slug}.md`, story: ideaSummary(updated) }
+      }
+    )
+  )
+
+  // ---- books ----
+  server.registerTool(
+    'add_book_note',
+    {
+      description: 'Add an owner note to a book: the writers follow it from the next job on. With `chapter` the note is about that written chapter; with `rewrite` as well, that chapter is rewritten with the note.',
+      inputSchema: { book: z.string(), text: z.string(), chapter: z.number().int().positive().optional(), rewrite: z.boolean().optional().describe('Rewrite the chapter now (needs chapter)') },
+      annotations: WRITE
+    },
+    run(async ({ book: slug, text: note, chapter, rewrite }: { book: string; text: string; chapter?: number; rewrite?: boolean }) => {
+      await needBook(slug)
+      if (!note.trim()) fail('the note is empty')
+      if (rewrite && !chapter) fail('rewrite needs a chapter number')
+      if (chapter && !(await engine.books.chapters(slug)).some((c) => c.n === chapter)) fail(`chapter ${chapter} of "${slug}" is not written yet`)
+      await engine.handleCommand({ type: 'addBookNote', book: slug, text: note, chapter, rewrite })
+      return { book: await book(slug), notes: await engine.books.ownerNotes(slug) }
+    })
+  )
+
+  server.registerTool(
+    'set_book_paused',
+    { description: 'Pause or resume one book: its jobs wait while the agents work on the other books.', inputSchema: { book: z.string(), paused: z.boolean() }, annotations: WRITE },
+    run(async ({ book: slug, paused }: { book: string; paused: boolean }) => {
+      await needBook(slug)
+      await engine.handleCommand({ type: 'pauseBook', book: slug, paused })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'retry_book',
+    { description: 'Continue a failed book: its failed jobs go back in the queue.', inputSchema: { book: z.string() }, annotations: WRITE },
+    run(async ({ book: slug }: { book: string }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.stage !== 'failed') fail(`"${slug}" is not a failed book (stage: ${b?.data.stage})`)
+      await engine.handleCommand({ type: 'retryBook', book: slug })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'rate_book',
+    { description: 'Give a book your rating (1 to 5) and an optional note.', inputSchema: { book: z.string(), rating: z.number().int().min(1).max(5), note: z.string().optional() }, annotations: WRITE },
+    run(async ({ book: slug, rating, note }: { book: string; rating: number; note?: string }) => {
+      await needBook(slug)
+      await engine.handleCommand({ type: 'rate', book: slug, rating, note })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'rename_book',
+    { description: 'Give a published book a new title (its slug stays). The cover, EPUB and reader are made again.', inputSchema: { book: z.string(), title: z.string() }, annotations: WRITE },
+    run(async ({ book: slug, title }: { book: string; title: string }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.stage !== 'published') fail(`"${slug}" is not published (stage: ${b?.data.stage}): only published books can be renamed`)
+      const clean = title.replace(/\s+/g, ' ').trim()
+      if (!clean || clean.length > 200) fail('the title is empty or longer than 200 characters')
+      await engine.handleCommand({ type: 'renameBook', book: slug, title: clean })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'remake_cover',
+    { description: 'Draw the cover of a published book again and rebuild its EPUB.', inputSchema: { book: z.string() }, annotations: WRITE },
+    run(async ({ book: slug }: { book: string }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.stage !== 'published') fail(`"${slug}" is not published (stage: ${b?.data.stage})`)
+      await engine.handleCommand({ type: 'regenerateCover', book: slug })
+      return book(slug)
+    })
+  )
+
+  // ---- factory ----
+  server.registerTool(
+    'set_factory_paused',
+    { description: 'Pause or resume the whole factory. While paused no new jobs start (running ones finish).', inputSchema: { paused: z.boolean() }, annotations: WRITE },
+    run(async ({ paused }: { paused: boolean }) => {
+      await engine.handleCommand({ type: paused ? 'pauseAll' : 'resumeAll' })
+      return { paused: engine.factory.paused }
+    })
+  )
+
+  server.registerTool(
+    'ask_researcher',
+    {
+      description: 'Ask the researcher a question. The answer is written to the research notes: the book notes when `book` is given, else the shared notes.',
+      inputSchema: { question: z.string(), book: z.string().optional().describe('Book slug the question is for') },
+      annotations: WRITE
+    },
+    run(async ({ question, book: slug }: { question: string; book?: string }) => {
+      if (!question.trim()) fail('the question is empty')
+      if (slug) await needBook(slug)
+      await engine.handleCommand({ type: 'askResearcher', question, book: slug })
+      return { asked: true, for: slug ?? 'the shared notes' }
+    })
+  )
+
+  server.registerTool(
+    'add_topic',
+    {
+      description: `Add a topic to "My topics": the factory then writes books about it. kind is one of ${TOPIC_KINDS.join(', ')}. target is how many books are wanted (empty: no limit).`,
+      inputSchema: { name: z.string(), kind: z.enum(TOPIC_KINDS as [string, ...string[]]), target: z.number().int().nonnegative().optional() },
+      annotations: WRITE
+    },
+    run(async ({ name, kind, target }: { name: string; kind: string; target?: number }) => {
+      if (!name.trim()) fail('the topic name is empty')
+      const before = new Set((await topics()).map((t) => t.id))
+      await engine.handleCommand({ type: 'addTopic', name, kind, target })
+      const added = (await topics()).filter((t) => !before.has(t.id))
+      if (!added.length) fail('the topic was not added')
+      return added.map(topicSummary)
+    })
+  )
+
+  server.registerTool(
+    'set_topic_active',
+    { description: 'Switch a topic on or off.', inputSchema: { id: z.string(), active: z.boolean() }, annotations: WRITE },
+    run(async ({ id, active }: { id: string; active: boolean }) => {
+      if (!(await topics()).some((t) => t.id === id)) fail(`unknown topic "${id}" (list_topics shows the ids)`)
+      await engine.handleCommand({ type: 'setTopicActive', id, active })
+      return (await topics()).filter((t) => t.id === id).map(topicSummary)
+    })
+  )
+
+  server.registerTool(
+    'check_servers',
+    { description: 'Ask the local model servers (Strata, LM Studio) how many requests they take at once, now. Use it after starting one.', annotations: WRITE },
+    run(async () => {
+      await engine.handleCommand({ type: 'checkServers' })
+      return serverStatuses(engine.registry)
+    })
+  )
+
+  // ---- agents ----
+  server.registerTool(
+    'hire_agent',
+    {
+      description: `Hire an agent. role is one of ${ROLES.join(', ')} (or a role defined in config/roles.md). name and model (a provider/model ref from list_models) are optional.`,
+      inputSchema: { role: z.string(), name: z.string().optional(), model: z.string().optional() },
+      annotations: WRITE
+    },
+    run(async ({ role, name, model }: { role: string; name?: string; model?: string }) => {
+      if (!(ROLES as readonly string[]).includes(role) && !(role in engine.registry.roles.roles)) fail(`unknown role "${role}"`)
+      if (model && !engine.registry.getModel(model)) fail(`unknown model "${model}" (list_models shows the refs)`)
+      const before = new Set(engine.agents.list().map((a) => a.id))
+      await engine.handleCommand({ type: 'hire', role, name, model })
+      const hired = engine.agents.list().filter((a) => !before.has(a.id))
+      if (!hired.length) fail('nobody was hired')
+      return hired.map((a) => agentSummary(a, engine.scheduler, engine.router))
+    })
+  )
+
+  server.registerTool(
+    'fire_agent',
+    { description: 'Fire an agent. It finishes its current job first, unless `now` is true.', inputSchema: { agent: z.string(), now: z.boolean().optional() }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } },
+    run(async ({ agent: id, now }: { agent: string; now?: boolean }) => {
+      needAgent(id)
+      await engine.handleCommand({ type: 'fire', agent: id, now })
+      return agent(id) ?? { fired: id }
+    })
+  )
+
+  server.registerTool(
+    'set_agent_paused',
+    { description: 'Pause or resume one agent.', inputSchema: { agent: z.string(), paused: z.boolean() }, annotations: WRITE },
+    run(async ({ agent: id, paused }: { agent: string; paused: boolean }) => {
+      needAgent(id)
+      await engine.handleCommand({ type: paused ? 'pause' : 'resume', agent: id })
+      return agent(id)
+    })
+  )
+
+  server.registerTool(
+    'assign_agent',
+    {
+      description: 'Assign an agent to one book in progress (it then only takes that book\'s jobs; a writer becomes the book\'s writer), or free it with book null.',
+      inputSchema: { agent: z.string(), book: z.string().nullable() },
+      annotations: WRITE
+    },
+    run(async ({ agent: id, book: slug }: { agent: string; book: string | null }) => {
+      needAgent(id)
+      if (slug !== null) {
+        const b = await engine.books.read(await needBook(slug))
+        if (!b || TERMINAL_BOOK_STAGES.has(b.data.stage)) fail(`"${slug}" is not a book in progress (stage: ${b?.data.stage})`)
+      }
+      await engine.handleCommand({ type: 'assignBook', agent: id, book: slug })
+      return agent(id)
+    })
+  )
+
+  server.registerTool(
+    'set_model',
+    {
+      description: 'Set the model of one agent (`agent`; model null clears its override), or the default model of a role (`role`, a model is needed). Give exactly one of agent and role. Models are provider/model refs from list_models.',
+      inputSchema: { model: z.string().nullable(), agent: z.string().optional(), role: z.string().optional() },
+      annotations: WRITE
+    },
+    run(async ({ model, agent: id, role }: { model: string | null; agent?: string; role?: string }) => {
+      if (!!id === !!role) fail('give exactly one of agent and role')
+      if (model !== null && !engine.registry.getModel(model)) fail(`unknown model "${model}" (list_models shows the refs)`)
+      if (id) {
+        needAgent(id)
+        await engine.handleCommand({ type: 'setModel', model, agent: id })
+        return agent(id)
+      }
+      if (model === null) fail('a role default needs a model')
+      if (!(role! in engine.registry.roles.roles) && !(ROLES as readonly string[]).includes(role!)) fail(`unknown role "${role}"`)
+      await engine.handleCommand({ type: 'setModel', model, role })
+      return { role, default: roleDefaults(engine.registry)[role!] ?? null }
+    })
+  )
+}
+
+/** The bible of a book: bible/bible.md of a light book, else every file under bible/ (a long book) one after the other. */
+async function readBible(dir: string): Promise<string | null> {
+  const single = await fs.readFile(path.join(dir, 'bible.md'), 'utf8').catch(() => null)
+  if (single !== null) return single
+  const parts: string[] = []
+  const walk = async (d: string) => {
+    const entries = (await fs.readdir(d, { withFileTypes: true }).catch(() => [])).sort((a, b) => a.name.localeCompare(b.name))
+    for (const e of entries) {
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) await walk(p)
+      else if (e.name.endsWith('.md')) parts.push(`<!-- ${path.relative(dir, p).split(path.sep).join('/')} -->\n${(await fs.readFile(p, 'utf8')).trim()}`)
+    }
+  }
+  await walk(dir)
+  return parts.length ? parts.join('\n\n') : null
+}

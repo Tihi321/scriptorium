@@ -1,7 +1,9 @@
 import path from 'node:path'
 import { keySet, probe, rebuildReader, reindexLibrary } from './cli'
 import { Engine } from './engine'
-import { argValue, initDataFolder, resolveDataDir } from './store/dataFolder'
+import { loadMcpConfig, startMcpServer } from './mcp/server'
+import type { McpHandle } from './mcp/server'
+import { acquireEngineLock, argValue, initDataFolder, resolveDataDir } from './store/dataFolder'
 import { watchDataFolder } from './store/watcher'
 import { getParentPort, ParentPortTransport, StdoutTransport } from './transport'
 import type { EngineTransport } from '../shared/protocol'
@@ -9,7 +11,8 @@ import type { EngineTransport } from '../shared/protocol'
 const USAGE = `Scriptorium engine
 
 Usage:
-  npm run engine -- [--data <dir>] [--seed <dir>] [--once] [--heartbeat <ms>]
+  npm run engine -- [--data <dir>] [--seed <dir>] [--once] [--heartbeat <ms>] [--mcp | --no-mcp] [--mcp-port <n>]
+  npm run headless -- [--data <dir>]   (the engine with the MCP server on, no window)
   npm run engine -- probe [--model <provider/model>] [--data <dir>]
   npm run engine -- reindex [--data <dir>]
   npm run engine -- rebuild-reader [--data <dir>]
@@ -19,6 +22,9 @@ Usage:
   --seed <dir>      Seed folder to copy from. Default: the repo's seed/ (or SCRIPTORIUM_SEED)
   --once            Create the data folder from the seed and exit
   --heartbeat <ms>  Heartbeat interval. Default 3000
+  --mcp             Serve the factory over MCP (http://127.0.0.1:7341/mcp), whatever config/mcp.md says
+  --no-mcp          Do not start the MCP server
+  --mcp-port <n>    MCP port (0: any free one). Default: port in config/mcp.md
   probe             Stream one short reply from LM Studio (and DeepSeek if a key is set) and embed one string
   reindex           Rebuild index/library.sqlite (search index) from the markdown files
   rebuild-reader    Write the in-app reader folder (books/<slug>/out/reader/) for every published book
@@ -64,6 +70,16 @@ async function main(): Promise<void> {
   log(`seed: copied ${init.copied.length} file(s), kept ${init.skipped.length} existing, created ${init.createdDirs} folder(s)`)
   if (once) return
 
+  // one engine per data folder: a second one (the app and `yarn headless`, say) would write the same files
+  let lock
+  try {
+    lock = await acquireEngineLock(dataDir)
+  } catch (err) {
+    process.stderr.write(`[engine] ${(err as Error).message}
+`)
+    process.exit(1)
+  }
+
   const startedAt = Date.now()
   const engine = new Engine({ dataDir, emit: (e) => transport.send(e), log, coverRenderer: !!parentPort })
   await engine.start()
@@ -72,6 +88,12 @@ async function main(): Promise<void> {
     void engine.handleWatch(e)
   })
   await watcher.ready
+  let mcp: McpHandle | null = null
+  const mcpConfig = await loadMcpConfig(dataDir, argv, log)
+  if (mcpConfig.enabled) {
+    mcp = await startMcpServer({ engine, config: mcpConfig, log })
+    if (mcp) engine.setMcpUrl(mcp.url)
+  }
   transport.onMessage((cmd) => {
     engine.handleCommand(cmd).catch((err) => log(`command ${cmd.type} failed: ${(err as Error).message}`))
   })
@@ -87,8 +109,10 @@ async function main(): Promise<void> {
     if (stopping) return
     stopping = true
     clearInterval(beat)
+    await mcp?.close()
     await watcher.close()
     await engine.stop()
+    await lock.release()
     transport.close()
     process.exit(0)
   }

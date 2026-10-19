@@ -5,7 +5,8 @@
  * Query flags: `seed=N` (random seed), `tick=MS` (simulation step, default 400; 0 stops the clock, use `__scriptoriumFake.step()`).
  * Recorded commands are in `window.__scriptoriumFake.commands`.
  */
-import type { AgentState, AgentSummary, CatalogModel, Command, EngineEvent, ModelSummary, ProviderSummary } from '../../shared/protocol'
+import { briefLabel } from '../../shared/brief'
+import type { AgentState, AgentSummary, CatalogModel, Command, EngineEvent, IdeaSummary, ModelSummary, ProviderSummary } from '../../shared/protocol'
 import { bookSummary as summaryOfBook, makeBookUrl, makeBooks, makeTopics, topicSummaries } from './library'
 import type { RendererApi } from '../api'
 
@@ -122,6 +123,13 @@ export function installFakeEngine(params: URLSearchParams): void {
   const spend = { today: 0.42, month: 6.1, dailyCap: 2, monthlyCap: 30 }
   const topics = makeTopics()
   const books = makeBooks()
+  const ideas: IdeaSummary[] = []
+  const formats = [
+    { id: 'short-story', name: 'Short story', kinds: ['fiction'] },
+    { id: 'novella', name: 'Novella', kinds: ['fiction'] },
+    { id: 'picture-book', name: 'Picture book', kinds: ['juvenile-fiction'] },
+    { id: 'short-nonfiction', name: 'Short non-fiction book', kinds: ['nonfiction'] }
+  ]
   const agents: FakeAgent[] = STAFF.map(([role, name, id, model]) => ({ id, name, role, paused: false, state: 'idle', model, override: null, ticks: 0, tokens: 0, phase: 'main' }))
   const activeBooks = books.filter((b) => !['published', 'rejected', 'idea'].includes(b.stage))
 
@@ -191,6 +199,8 @@ export function installFakeEngine(params: URLSearchParams): void {
     agents: agents.map(summaryOf),
     books: books.map((b) => summaryOfBook(b, topics)),
     topics: topicSummaries(topics, books),
+    ideas: ideas.map((i) => ({ ...i })),
+    formats,
     models: MODELS,
     providers: PROVIDERS.map((p) => ({ ...p })),
     roleDefaults,
@@ -199,6 +209,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     running: agents.filter((a) => a.jobId).map((a) => ({ jobId: a.jobId!, agent: a.id })),
     settings,
     secretsSet: [...secretsSet],
+    mcp: { url: 'http://127.0.0.1:7341/mcp' },
     at: new Date().toISOString()
   })
 
@@ -471,6 +482,24 @@ export function installFakeEngine(params: URLSearchParams): void {
           for (let n = 2; topics.some((x) => x.id === id); n++) id = `my-${slug}-${n}`
           topics.push({ id, name: command.name.trim(), kind: command.kind, section: 'My topics', active: command.active !== false, target: command.target ?? 0 })
           emit({ type: 'topics.updated', topics: topicSummaries(topics, books) })
+          break
+        }
+        case 'addStory': {
+          const b = command.brief
+          const title = b.title.trim() || briefLabel(b) || 'Untitled story'
+          let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'idea'
+          for (let n = 2; ideas.some((x) => x.slug === slug); n++) slug = `${slug.replace(/-\d+$/, '')}-${n}`
+          ideas.push({ slug, title, status: 'open', source: 'user', format: b.format ?? null, topic: b.topic ?? null, book: null, titleFixed: !!b.title.trim(), characters: b.characters.length, brief: b })
+          emit({ type: 'ideas.updated', ideas: ideas.map((i) => ({ ...i })) })
+          break
+        }
+        case 'updateStory': {
+          const i = ideas.find((x) => x.slug === command.idea)
+          if (i && i.status === 'open') {
+            const b = command.brief
+            Object.assign(i, { title: b.title.trim() || briefLabel(b) || 'Untitled story', format: b.format ?? null, topic: b.topic ?? null, titleFixed: !!b.title.trim(), characters: b.characters.length, brief: b })
+            emit({ type: 'ideas.updated', ideas: ideas.map((x) => ({ ...x })) })
+          }
           break
         }
         case 'saveSettings': {

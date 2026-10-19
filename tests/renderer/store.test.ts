@@ -69,6 +69,8 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     ],
     books: [bookSummary('fox-book', { title: 'Fox Book' })],
     topics: [],
+    ideas: [],
+    formats: [],
     models: [],
     providers: [],
     roleDefaults: {},
@@ -77,6 +79,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     running: [],
     settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-flash', defaultStrataModel: 'strata/qwen3.8-flash-next', defaultLmstudioModel: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', modelOrder: [], lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 },
     secretsSet: [],
+    mcp: null,
     at: 'now',
     ...extra
   }
