@@ -37,6 +37,8 @@ export interface StoryBrief {
   seriesIndex?: number
   /** Role -> `provider/model` for the book made from this story (frontmatter `role_models`). */
   models?: Record<string, string>
+  /** Slug of a published book this story adapts (frontmatter `source_book`): the script writer's story. */
+  sourceBook?: string
   /** `false`: the book gets no humanizer pass (frontmatter `humanize: false`). Unset: the format decides. */
   humanize?: boolean
 }
@@ -156,6 +158,8 @@ export function briefOf(data: Record<string, unknown>, body: string): StoryBrief
   if (topic) brief.topic = topic
   if (genre) brief.genre = genre
   if (data.humanize === false) brief.humanize = false
+  const sourceBook = str(data.source_book)
+  if (sourceBook) brief.sourceBook = sourceBook
   const rm = data.role_models
   if (rm && typeof rm === 'object' && !Array.isArray(rm)) {
     const models = Object.fromEntries(Object.entries(rm).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k, (v as string).trim()]))

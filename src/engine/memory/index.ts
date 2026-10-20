@@ -215,17 +215,18 @@ export class MemoryIndex {
     return hits.slice(0, k)
   }
 
-  /** Nearest existing text of other books, as cosine similarity (vectors are unit length). */
-  async nearest(text: string, opts: { notBook: string; kinds: string[] }): Promise<{ book: string; file: string; similarity: number } | null> {
+  /** Nearest existing text of other books, as cosine similarity (vectors are unit length). `notBook` is one book or several that do not count. */
+  async nearest(text: string, opts: { notBook: string | string[]; kinds: string[] }): Promise<{ book: string; file: string; similarity: number } | null> {
     if (!this.dim) return null
     const [qv] = await this.embed([text], 'query')
     if (!qv || qv.length !== this.dim) return null
+    const skip = new Set(Array.isArray(opts.notBook) ? opts.notBook : [opts.notBook])
     const rows = this.db
       .prepare('select rowid as id, distance from chunks_vec where embedding match ? and k = ? order by distance')
       .all(new Uint8Array(new Float32Array(qv).buffer), 200) as { id: number | bigint; distance: number }[]
     for (const r of rows) {
       const row = this.db.prepare('select file, book, kind from chunks where id = ?').get(Number(r.id)) as { file: string; book: string; kind: string } | undefined
-      if (!row || row.book === opts.notBook || !opts.kinds.includes(row.kind)) continue
+      if (!row || skip.has(row.book) || !opts.kinds.includes(row.kind)) continue
       return { book: row.book, file: row.file, similarity: Number((1 - (r.distance * r.distance) / 2).toFixed(4)) }
     }
     return null

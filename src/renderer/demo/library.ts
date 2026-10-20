@@ -10,6 +10,10 @@ export interface FakeBook {
   note: string | null
   paused?: boolean
   notes?: string
+  /** The published book this one adapts into a visual novel script (its slug). */
+  source?: string
+  /** Its title, for "adapted from". */
+  sourceTitle?: string
 }
 
 export interface FakeTopic {
@@ -74,7 +78,8 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     author: 'Mara Quill',
     topic: { id: t.id, name: t.name },
     kind: t.kind,
-    format: t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
+    format: b.source ? 'visual-novel' : t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
+    ...(b.source ? { sourceBook: { slug: b.source, title: b.sourceTitle ?? b.source } } : {}),
     stage: b.stage,
     paused: !!b.paused,
     chaptersWritten: published ? 3 : 1,

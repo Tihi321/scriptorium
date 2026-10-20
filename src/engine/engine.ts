@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { emptyBrief } from '../shared/brief'
 import type { StoryBrief } from '../shared/brief'
 import type { Command, EngineEvent, IdeaSummary, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
 import { parseMdWith } from '../shared/md'
@@ -738,6 +739,36 @@ export class Engine {
     return idea
   }
 
+  /**
+   * The script writer: a story that adapts a published book into a visual novel script (`format` is a script format: linear or with choices).
+   * The story waits until the source is published (it is, here) and a book starts from it like from any story. The title defaults to the source's.
+   * Throws when the book does not exist or is not published, the format is not an enabled script format, or the same adaptation is already waiting.
+   */
+  async adaptBook(input: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }): Promise<IdeaFile> {
+    const src = await this.books.read(input.book)
+    if (!src) throw new Error(`no book "${input.book}" (list_books shows the slugs)`)
+    if (src.data.stage !== 'published') throw new Error(`"${src.data.title}" is not published yet (stage ${src.data.stage}): only a finished book can be adapted`)
+    const fmt = this.formats.find((f) => f.enabled && f.id === input.format)
+    if (!fmt?.script) {
+      throw new Error(`"${input.format}" is not a visual novel format. Use one of: ${this.formats.filter((f) => f.enabled && f.script).map((f) => f.id).join(', ') || '(no visual novel format is enabled)'}`)
+    }
+    if ((await this.ideas.list()).some((i) => i.data.status === 'open' && i.data.source_book === input.book && i.data.format === fmt.id)) {
+      throw new Error(`an adaptation of "${src.data.title}" as ${fmt.id} is already waiting for its book`)
+    }
+    const notes = input.notes?.trim() ?? ''
+    const brief: StoryBrief = {
+      ...emptyBrief(),
+      title: input.title?.trim() || src.data.title,
+      premise: `A ${fmt.name.toLowerCase()} script adapted from the owner's published book "${src.data.title}". Keep the book's story, characters, setting and ending.`,
+      sections: notes ? [{ heading: 'Notes for the adapter', text: notes }] : [],
+      format: fmt.id,
+      ...(src.data.genre.trim() ? { genre: src.data.genre.trim() } : {}),
+      sourceBook: input.book,
+      ...(input.models && Object.keys(input.models).length ? { models: input.models } : {})
+    }
+    return this.addStory(brief)
+  }
+
   /** Replaces the brief of a story. Throws when there is no such story, or a book was already started from it. */
   async updateStory(slug: string, brief: StoryBrief): Promise<IdeaFile> {
     brief = await this.withSeries(brief, (await this.ideas.list()).find((i) => i.slug === slug))
@@ -953,6 +984,13 @@ export class Engine {
           await this.addStory(cmd.brief)
         } catch (err) {
           this.log(`addStory: ${(err as Error).message}`)
+        }
+        return
+      case 'adaptBook':
+        try {
+          await this.adaptBook({ book: cmd.book, format: cmd.format, title: cmd.title, notes: cmd.notes })
+        } catch (err) {
+          this.warn(`adaptBook: ${(err as Error).message}`)
         }
         return
       case 'addSeries':

@@ -5,6 +5,7 @@ import { formatUsd } from '../store/model'
 import { officeStore } from '../store/store'
 import { CoverImage } from './Library'
 import { PageNav } from './PageNav'
+import { ScriptWriter } from './ScriptWriter'
 
 function Stars({ value, onPick }: { value: number; onPick(n: number): void }) {
   return (
@@ -30,6 +31,8 @@ export function BookCard() {
   const [page, setPage] = useState('index.html')
   /** The new title being typed, or null when not renaming. */
   const [newTitle, setNewTitle] = useState<string | null>(null)
+  /** The script writer panel is open (adapt this book into a visual novel). */
+  const [adapting, setAdapting] = useState(false)
 
   useEffect(() => {
     setRating(book?.rating ?? 0)
@@ -39,6 +42,7 @@ export function BookCard() {
 
   useEffect(() => setPage('index.html'), [slug, reading])
   useEffect(() => setNewTitle(null), [slug])
+  useEffect(() => setAdapting(false), [slug])
 
   if (!slug || !book) return null
   const close = () => officeStore.getState().openBookCard(null)
@@ -66,6 +70,16 @@ export function BookCard() {
           ) : (
             <div className="empty">This book has no reader folder yet.</div>
           )}
+        </div>
+      </div>
+    )
+  }
+
+  if (adapting) {
+    return (
+      <div className="dialog-backdrop" onClick={close}>
+        <div className="dialog book-card" onClick={(e) => e.stopPropagation()} data-testid="book-card">
+          <ScriptWriter book={book} onDone={() => setAdapting(false)} />
         </div>
       </div>
     )
@@ -118,6 +132,12 @@ export function BookCard() {
               <span>
                 {book.kind ?? 'n/a'}, {book.format}
               </span>
+              {book.sourceBook && (
+                <>
+                  <span>Adapted from</span>
+                  <span data-testid="card-adapted-from">{book.sourceBook.title}</span>
+                </>
+              )}
               <span>Year</span>
               <span>{book.year ?? 'n/a'}</span>
               <span>Length</span>
@@ -162,6 +182,11 @@ export function BookCard() {
               <button disabled={newTitle !== null || drawing} onClick={() => setNewTitle(book.title)} data-testid="card-rename" title="A new title: the cover, EPUB and reader are made again. The folder keeps its name.">
                 Rename
               </button>
+              {!book.sourceBook && book.kind !== 'visual-novel' && (
+                <button onClick={() => setAdapting(true)} data-testid="card-adapt" title="Adapt this book into a visual novel script (linear or with choices)">
+                  Adapt to visual novel
+                </button>
+              )}
               <button disabled={drawing} onClick={() => sendCommand({ type: 'regenerateCover', book: book.slug })} data-testid="card-cover" title="Draw the cover again from templates/cover.html">
                 Remake cover
               </button>

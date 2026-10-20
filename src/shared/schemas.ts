@@ -273,6 +273,8 @@ export const ideaSchema = z.looseObject({
   series_index: z.number().int().positive().optional(),
   /** `false`: the book made from this story gets no humanizer pass. */
   humanize: z.boolean().optional(),
+  /** Slug of a published book this story adapts (a visual novel script of a prose book). The story waits until that book is published. */
+  source_book: z.string().optional(),
   created: z.string().optional()
 })
 
@@ -300,6 +302,8 @@ export const bookSchema = z.looseObject({
   /** Series slug and position, copied from the story the book was made from. */
   series: z.string().optional(),
   series_index: z.number().int().positive().optional(),
+  /** Slug of the published book this book adapts into a visual novel script (copied from the story). */
+  source_book: z.string().optional(),
   /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
   humanize: z.boolean().optional(),
   age_band: z.string().nullable().default(null),

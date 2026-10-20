@@ -149,7 +149,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       for (const slug of await engine.books.slugs()) {
         const b = await bookSummary(engine.books, slug, all)
         if (!b || (stage && b.stage !== stage)) continue
-        rows.push({ slug, title: b.title, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused })
+        rows.push({ slug, title: b.title, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused, ...(b.sourceBook ? { sourceBook: b.sourceBook.slug } : {}) })
       }
       return rows
     })
@@ -284,6 +284,27 @@ export function registerTools(server: McpServer, engine: Engine): void {
         return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
       }
     )
+  )
+
+  server.registerTool(
+    'adapt_book',
+    {
+      description:
+        'The script writer: adapt a published book into a visual novel script that VN Studio can import. Creates a story with source_book set; the factory starts the book at once (it is already published), the architect compresses the book into the format chapters and maps each to the source chapters, and the writers turn those chapters into script scenes. The source must exist and be published. Returns the story slug.',
+      inputSchema: {
+        book: z.string().describe('Slug of the published book to adapt (list_books)'),
+        format: z.string().describe('A visual novel format id: "visual-novel" (linear) or "choice-visual-novel" (choices; the source ending stays one canon path)'),
+        title: z.string().optional().describe('Title of the script. Default: the title of the source book'),
+        notes: z.string().optional().describe('Notes for the adapter: what to keep, cut or change'),
+        models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}')
+      }
+    },
+    run(async (a: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }) => {
+      await needBook(a.book)
+      checkRoleModels(a.models)
+      const idea = await engine.adaptBook(a).catch((err: Error) => fail(err.message))
+      return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
+    })
   )
 
   server.registerTool(

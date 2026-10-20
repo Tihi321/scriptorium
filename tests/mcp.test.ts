@@ -74,7 +74,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -489,5 +489,24 @@ describe('MCP book models', () => {
     await makeBook(env, 'running-book', 'drafting')
     expect((await call(c, 'set_book_model', { book: 'running-book', role: 'humanizer', model: 'client/claude-code' })).data.roleModels).toEqual({ humanizer: 'client/claude-code' })
     expect((await call(c, 'add_story', { title: 'Y', models: { humanizer: 'client/claude-code' } })).isError).toBe(false)
+  })
+
+  it('adapt_book makes a story from a published book, and refuses what cannot be adapted', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }], roles: { writer: ['loc/m1'] }, paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    await makeBook(env, 'demo-book')
+    await makeBook(env, 'half-done', 'drafting')
+    expect((await call(c, 'adapt_book', { book: 'nope', format: 'visual-novel' })).raw).toMatch(/no book "nope"/)
+    expect((await call(c, 'adapt_book', { book: 'half-done', format: 'visual-novel' })).raw).toMatch(/not published yet/)
+    expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'novel' })).raw).toMatch(/not a visual novel format/)
+    const ok = await call(c, 'adapt_book', { book: 'demo-book', format: 'choice-visual-novel', notes: 'Keep the bell.' })
+    expect(ok.isError).toBe(false)
+    expect(ok.data.story).toMatchObject({ format: 'choice-visual-novel', sourceBook: 'demo-book', titleFixed: true })
+    const file = parseMd(await readFile(path.join(env.dir, 'ideas', `${ok.data.slug}.md`), 'utf8'))
+    expect(file.data).toMatchObject({ source_book: 'demo-book', format: 'choice-visual-novel', title: 'Demo Book' })
+    expect(file.body).toContain('Keep the bell.')
+    expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'choice-visual-novel' })).raw).toMatch(/already waiting/)
+    expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'visual-novel', models: { writer: 'no/such' } })).isError).toBe(true)
   })
 })

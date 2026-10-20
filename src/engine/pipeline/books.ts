@@ -62,6 +62,8 @@ export interface OutlineChapter {
   choices?: Choice[]
   /** A story with choices: how this ending ends. */
   ending?: string
+  /** An adaptation: the chapters of the source book this chapter is made from. */
+  source_chapters?: number[]
 }
 
 export class BookStore {
@@ -241,7 +243,8 @@ export class BookStore {
       title: String(c.title ?? `Chapter ${i + 1}`),
       summary: String(c.summary ?? ''),
       ...(Array.isArray(c.choices) ? { choices: (c.choices as Record<string, unknown>[]).map((ch) => ({ text: String(ch.text ?? ''), to: Number(ch.to) })) } : {}),
-      ...(typeof c.ending === 'string' ? { ending: c.ending } : {})
+      ...(typeof c.ending === 'string' ? { ending: c.ending } : {}),
+      ...(Array.isArray(c.source_chapters) && c.source_chapters.length ? { source_chapters: (c.source_chapters as unknown[]).map(Number).filter((x) => Number.isInteger(x) && x > 0) } : {})
     }))
     return { chapters, body: doc.body }
   }

@@ -161,11 +161,14 @@ export const nextSeriesIndex = (series: string, refs: BookRef[], ideas: IdeaFile
 
 /**
  * The open stories that must wait: a story of a series waits while an earlier book of the series is not published yet,
- * or an earlier story of the series has not been made into a book yet.
+ * or an earlier story of the series has not been made into a book yet. A story that adapts a book (`source_book`) waits until that book is published.
  */
 export function waitingStories(ideas: IdeaFile[], refs: BookRef[]): Set<string> {
   const waiting = new Set<string>()
   for (const idea of ideas) {
+    // an adaptation waits until the book it adapts is published (a source that is gone never is)
+    const source = idea.data.source_book
+    if (idea.data.status === 'open' && source && refs.find((b) => b.slug === source)?.stage !== 'published') waiting.add(idea.slug)
     const series = idea.data.series
     const index = idea.data.series_index
     if (idea.data.status !== 'open' || !series || !index) continue

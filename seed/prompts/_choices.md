@@ -5,7 +5,7 @@ task: choices
 ---
 # Stories with choices
 
-For formats with `choices: true` (choose-your-path books and visual novels with choices), the engine adds one section of this file to the end of a prompt: `outline` to the architect's outline, `draft` and `rewrite` to the writer's chapter prompts, `review` to every reviewer. Edit the text to change how these books are planned, written and reviewed. Keep the `## ` headings. `{{ways_in}}` and `{{ways_out}}` are filled in by the engine.
+For formats with `choices: true` (choose-your-path books and visual novels with choices), the engine adds one section of this file to the end of a prompt: `outline` to the architect's outline, `draft` and `rewrite` to the writer's chapter prompts, `review` to every reviewer, and `adapt` to the outline of a book that adapts another book (the script writer). Edit the text to change how these books are planned, written and reviewed. Keep the `## ` headings. `{{ways_in}}` and `{{ways_out}}` are filled in by the engine.
 
 ## outline
 This book is a story with choices: at the end of some chapters the reader decides what happens next, and each choice leads to a different chapter. Plan it as a map of chapters, not a straight line:
@@ -37,3 +37,6 @@ Keep the chapter working for every way in. If it ends with a choice, end at the 
 
 ## review
 This book is a story with choices. The chapters are given in number order, but nobody reads them that way: after each chapter a line in square brackets gives its choices and the chapter each one leads to, or says that it is an ending. A reader starts at chapter 1 and follows one path to one ending. Judge every path as a story of its own: does each chapter follow from every chapter that leads to it, do the choices matter and lead where their words promise, are the paths really different, is every ending earned and complete. Do not report the jump from one chapter to the next in number order as a continuity error, and do not ask for the choices to be written into the chapters: the book adds them after each chapter.
+
+## adapt
+This story with choices adapts a book that has one ending. Keep the source book as the canon path: one route through the map follows the source in order from its first chapter to its own ending, with the same events and the same ending. The other routes branch off that story with choices that matter and end in endings of their own, but the canon path is plain: mark its ending in "ending" as "canon: " followed by how the source ends, and let the source chapters stay in order along it (the "source_chapters" of the later chapters are never lower than those before them on the canon path).

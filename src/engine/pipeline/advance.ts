@@ -106,6 +106,8 @@ export interface BookState {
   humanize?: boolean
   /** Chapter number -> the round the humanizer rewrote it in. A chapter that was written again since has no entry. */
   humanized?: Map<number, number>
+  /** The book adapts another book (`source_book`): it needs no research of its own, the source's facts are in the source text. */
+  adaptation?: boolean
 }
 
 /** A job to enqueue, with the request text for its body. */
@@ -285,10 +287,10 @@ export function advance(s: BookState): Plan {
   }
   if (s.outlineChapters === null) {
     // the architect decides whether the book needs facts, and the research jobs run before the outline
-    if (!s.researchPlan) {
+    if (!s.researchPlan && !s.adaptation) {
       return { patch: stageOf('outline'), jobs: [{ id: jobId(slug, 'researchplan', 'book', 0), task: 'research_plan', role: 'architect', book: slug, unit: 'book' }] }
     }
-    if (pendingAny(s, s.researchPlan.jobs)) return { patch: stageOf('outline'), jobs: [] }
+    if (s.researchPlan && pendingAny(s, s.researchPlan.jobs)) return { patch: stageOf('outline'), jobs: [] }
     return { patch: stageOf('outline'), jobs: [{ id: jobId(slug, 'outline', 'book', 0), task: 'outline', role: 'architect', book: slug, unit: 'book' }] }
   }
   const total = s.outlineChapters

@@ -290,7 +290,8 @@ export class Pipeline {
     for (const state of ['queued', 'running'] as const) for (const id of await this.jobs.ids(state)) if (id.startsWith('research--')) researchPending.add(id)
     const factory = this.o.getFactory()
     const genreText = `${d.genre ?? ''} ${d.topic_name ?? ''}`.toLowerCase()
-    const prepEnabled = format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase()))
+    const adaptation = typeof d.source_book === 'string' && d.source_book !== ''
+    const prepEnabled = !adaptation && (format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase())))
     const tensionDoc = await this.books.readText(slug, 'reports', 'tension.md')
     const tensionData = tensionDoc ? parseMd(tensionDoc).data : {}
     for (const [c, v] of Object.entries((tensionData.tension as Record<string, number> | undefined) ?? {})) {
@@ -343,6 +344,7 @@ export class Pipeline {
       failedJobs: failedByBook.get(slug) ?? [],
       nonfiction: format.nonfiction,
       factbase: format.nonfiction ? await this.deps.factbase.doneChapters(slug) : new Set<number>(),
+      adaptation,
       humanize: wantsHumanize && hired,
       humanized: new Map(chapterFiles.flatMap((c) => (c.humanized === undefined ? [] : [[c.n, c.humanized] as [number, number]])))
     }

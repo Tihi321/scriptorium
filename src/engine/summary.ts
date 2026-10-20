@@ -39,6 +39,7 @@ export const ideaSummary = (i: IdeaFile): IdeaSummary => {
     book: i.data.book,
     titleFixed: i.data.title_fixed === true,
     characters: brief.characters.length,
+    ...(i.data.source_book ? { sourceBook: i.data.source_book } : {}),
     ...(i.data.series ? { series: i.data.series, seriesIndex: i.data.series_index ?? null } : {}),
     brief
   }
@@ -85,6 +86,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     topic: d.topic ? { id: d.topic, name: d.topic_name ?? topic?.topic ?? d.topic } : null,
     kind: topic?.kind ?? null,
     format: d.format,
+    sourceBook: d.source_book ? { slug: d.source_book, title: (await books.read(d.source_book))?.data.title ?? d.source_book } : null,
     stage: d.stage,
     paused: d.paused === true,
     chaptersWritten: chapters.length,

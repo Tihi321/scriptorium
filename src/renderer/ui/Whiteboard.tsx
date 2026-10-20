@@ -100,6 +100,12 @@ function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
       </span>
       <span>Format</span>
       <span>{b.format}{b.topic ? `, ${b.topic.name}` : ''}</span>
+      {b.sourceBook && (
+        <>
+          <span>Adapted from</span>
+          <span data-testid="info-adapted-from">{b.sourceBook.title}</span>
+        </>
+      )}
       {b.author && (
         <>
           <span>Writer</span>

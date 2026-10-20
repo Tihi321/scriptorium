@@ -5,7 +5,8 @@
  * Query flags: `seed=N` (random seed), `tick=MS` (simulation step, default 400; 0 stops the clock, use `__scriptoriumFake.step()`).
  * Recorded commands are in `window.__scriptoriumFake.commands`.
  */
-import { briefLabel } from '../../shared/brief'
+import { briefLabel, emptyBrief } from '../../shared/brief'
+import type { StoryBrief } from '../../shared/brief'
 import type { AgentState, AgentSummary, CatalogModel, Command, EngineEvent, IdeaSummary, ModelSummary, ProviderSummary, SeriesSummary } from '../../shared/protocol'
 import { bookSummary as summaryOfBook, makeBookUrl, makeBooks, makeTopics, topicSummaries } from './library'
 import type { RendererApi } from '../api'
@@ -131,7 +132,9 @@ export function installFakeEngine(params: URLSearchParams): void {
     { id: 'short-story', name: 'Short story', kinds: ['fiction'] },
     { id: 'novella', name: 'Novella', kinds: ['fiction'] },
     { id: 'picture-book', name: 'Picture book', kinds: ['juvenile-fiction'] },
-    { id: 'short-nonfiction', name: 'Short non-fiction book', kinds: ['nonfiction'] }
+    { id: 'short-nonfiction', name: 'Short non-fiction book', kinds: ['nonfiction'] },
+    { id: 'visual-novel', name: 'Visual novel', kinds: ['visual-novel'] },
+    { id: 'choice-visual-novel', name: 'Visual novel with choices', kinds: ['visual-novel'] }
   ]
   const agents: FakeAgent[] = STAFF.map(([role, name, id, model]) => ({ id, name, role, paused: false, state: 'idle', model, override: null, ticks: 0, tokens: 0, phase: 'main' }))
   const activeBooks = books.filter((b) => !['published', 'rejected', 'idea'].includes(b.stage))
@@ -511,6 +514,20 @@ export function installFakeEngine(params: URLSearchParams): void {
           ideas.push({ slug, title, status: 'open', source: 'user', format: b.format ?? null, topic: b.topic ?? null, book: null, titleFixed: !!b.title.trim(), characters: b.characters.length, ...(series ? { series, seriesIndex } : {}), brief: b })
           emit({ type: 'ideas.updated', ideas: ideas.map((i) => ({ ...i })) })
           if (series) emit({ type: 'series.updated', series: seriesSummaries() })
+          break
+        }
+        case 'adaptBook': {
+          // the script writer: a story that adapts a published book, and (the source is published) the book starts from it at once
+          const source = books.find((x) => x.slug === command.book)
+          if (!source || source.stage !== 'published' || !formats.some((x) => x.id === command.format && x.kinds.includes('visual-novel'))) break
+          const title = command.title?.trim() || source.title
+          let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'idea'
+          for (let n = 2; books.some((x) => x.slug === slug); n++) slug = `${slug.replace(/-\d+$/, '')}-${n}`
+          const brief: StoryBrief = { ...emptyBrief(), title, premise: `A script adapted from "${source.title}".`, format: command.format, sourceBook: source.slug, sections: command.notes?.trim() ? [{ heading: 'Notes for the adapter', text: command.notes.trim() }] : [] }
+          ideas.push({ slug, title, status: 'used', source: 'user', format: command.format, topic: null, book: slug, titleFixed: true, characters: 0, sourceBook: source.slug, brief })
+          books.push({ slug, title, stage: 'outline', topic: source.topic, rating: null, note: null, source: source.slug, sourceTitle: source.title })
+          emit({ type: 'ideas.updated', ideas: ideas.map((i) => ({ ...i })) })
+          emit({ type: 'book.updated', book: summaryOfBook(books[books.length - 1]!, topics) })
           break
         }
         case 'addSeries': {
