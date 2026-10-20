@@ -11,6 +11,7 @@ import { bookRefs } from '../store/series'
 import { eligibleTopics, pickNext, registerHandlers } from './handlers'
 import { registerLongHandlers } from './longHandlers'
 import { registerNonfictionHandlers } from './nonfiction'
+import { registerHumanizerHandlers } from './humanizerHandlers'
 import { FactBase } from '../memory/factbase'
 import { registerResearchHandlers } from './researchHandlers'
 import type { PipelineDeps } from './handlers'
@@ -24,6 +25,8 @@ export interface PipelineOptions extends Omit<PipelineDeps, 'requestCover' | 'ki
   coverRenderer: boolean
   /** Interval of the factory tick in ms. Default 5000. */
   tickMs?: number
+  /** True when an agent of this role is hired (agents/). The humanizer pass is skipped while there is none. */
+  hasAgent(role: string): boolean
 }
 
 /**
@@ -46,6 +49,7 @@ export class Pipeline {
     registerLongHandlers(o.scheduler, this.deps)
     registerResearchHandlers(o.scheduler, this.deps)
     registerNonfictionHandlers(o.scheduler, this.deps)
+    registerHumanizerHandlers(o.scheduler, this.deps)
   }
 
   private get books(): BookStore {
@@ -294,6 +298,13 @@ export class Pipeline {
     }
     const flatChapters = ((tensionData.flat_stretches as [number, number][] | undefined) ?? []).flatMap(([a, b]) => Array.from({ length: Number(b) - Number(a) + 1 }, (_, i) => Number(a) + i))
     const outlineText = await this.books.readText(slug, 'outline.md')
+    // the humanizer pass: the format and the book allow it, and a humanizer is hired (else it is skipped, with one line in the log)
+    const wantsHumanize = format.humanize !== false && d.humanize !== false
+    const hired = this.o.hasAgent('humanizer')
+    if (wantsHumanize && !hired && !this.warned.has(`humanizer:${slug}`)) {
+      this.warned.add(`humanizer:${slug}`)
+      this.o.log(`no humanizer is hired: "${d.title}" (${slug}) goes without the humanizer pass. Hire one (role humanizer) to get it, or set \`humanize: false\` in book.md to silence this.`)
+    }
     return {
       slug,
       stage: d.stage,
@@ -331,7 +342,9 @@ export class Pipeline {
       checkResearch,
       failedJobs: failedByBook.get(slug) ?? [],
       nonfiction: format.nonfiction,
-      factbase: format.nonfiction ? await this.deps.factbase.doneChapters(slug) : new Set<number>()
+      factbase: format.nonfiction ? await this.deps.factbase.doneChapters(slug) : new Set<number>(),
+      humanize: wantsHumanize && hired,
+      humanized: new Map(chapterFiles.flatMap((c) => (c.humanized === undefined ? [] : [[c.n, c.humanized] as [number, number]])))
     }
   }
 

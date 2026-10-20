@@ -465,4 +465,29 @@ describe('MCP book models', () => {
     expect((await call(c, 'set_book_model', { book: 'nobody', role: 'writer', model: null })).isError).toBe(true)
     expect((await call(c, 'set_book_model', { book: 'running-book', role: 'writer', model: null })).data.roleModels).toEqual({})
   })
+
+  it('add_story humanize:false is stored in the story and shown by get_story; update_story can set it back; the humanizer role takes a book model', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['loc/m1'] }, paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const tool = (await c.listTools()).tools.find((t) => t.name === 'add_story')!
+    expect(Object.keys((tool.inputSchema as { properties: Record<string, unknown> }).properties)).toContain('humanize')
+    // not given, or true: the story has no humanize field (the format decides)
+    await call(c, 'add_story', { title: 'Plain', premise: 'A bell.' })
+    await call(c, 'add_story', { title: 'Explicit', premise: 'A bell.', humanize: true })
+    for (const slug of ['plain', 'explicit']) expect(parseMd(await readFile(path.join(env.dir, 'ideas', `${slug}.md`), 'utf8')).data.humanize).toBeUndefined()
+    const added = await call(c, 'add_story', { title: 'The Bell', premise: 'A bell.', humanize: false })
+    expect(added.isError).toBe(false)
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.humanize).toBe(false)
+    expect((await call(c, 'get_story', { story: 'the-bell' })).data.brief.humanize).toBe(false)
+    // an edit of another field keeps it; humanize:true clears it
+    await call(c, 'update_story', { story: 'the-bell', plot: 'She rings it.' })
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.humanize).toBe(false)
+    await call(c, 'update_story', { story: 'the-bell', humanize: true })
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.humanize).toBeUndefined()
+    // a book can have its own humanizer model
+    await makeBook(env, 'running-book', 'drafting')
+    expect((await call(c, 'set_book_model', { book: 'running-book', role: 'humanizer', model: 'client/claude-code' })).data.roleModels).toEqual({ humanizer: 'client/claude-code' })
+    expect((await call(c, 'add_story', { title: 'Y', models: { humanizer: 'client/claude-code' } })).isError).toBe(false)
+  })
 })

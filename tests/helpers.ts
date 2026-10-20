@@ -172,6 +172,10 @@ export interface PipelineEnvOptions {
   shortDrafts?: boolean
   /** The first outline comes back one chapter short of the format's minimum. */
   shortOutline?: boolean
+  /** Keep the seed's humanizer agent, so every chapter gets the humanizer pass. Default false: the other tests run without it. */
+  humanizer?: boolean
+  /** What the mock humanizer answers: the chapter text it was given and the request. Default: the same chapter with one tic cut. */
+  humanizeWith?: (chapter: string, request: string) => string
   /** Format the mock editor-in-chief picks. */
   format?: string
   /** Which topics.md edits to make before the engine starts. */
@@ -258,6 +262,7 @@ export async function makePipelineEnv(o: PipelineEnvOptions = {}, engineOpts: Pa
     )
     await writeMd(file, { ...doc.data, formats }, doc.body)
   }
+  if (!o.humanizer) await rm(path.join(dir, 'agents', 'humanizer-iris-vane.md'), { force: true })
   if (o.extraArchivist) {
     const text = await readFile(path.join(dir, 'agents', 'archivist-milo-grant.md'), 'utf8')
     await writeFile(path.join(dir, 'agents', 'archivist-second-hand.md'), text.replace('name: Milo Grant', 'name: Second Hand'))
@@ -385,6 +390,12 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     return prose(words) + cite + marks
   })
   mock.on({ task: 'rewrite_chapter' }, (req) => (bump('rewrite_chapter'), prose(wantWords(req, 100)) + cite))
+  mock.on({ task: 'humanize_chapter' }, (req) => {
+    bump('humanize_chapter')
+    const t = lastUser(req)
+    const chapter = /<chapter>\r?\n([\s\S]*?)\r?\n<\/chapter>/.exec(t)?.[1] ?? ''
+    return o.humanizeWith ? o.humanizeWith(chapter, t) : chapter.replace('yawned', 'gave a huge yawn')
+  })
   mock.on({ task: 'review' }, (req) => {
     const role = req.meta!.role!
     bump(`review:${role}`)

@@ -300,6 +300,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         age_band: fmt.age_band,
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
         ...(fmt.script ? { script: true } : {}),
+        ...(idea?.data.humanize === false ? { humanize: false } : {}),
         target_words: target,
         ...(idea && idea.data.role_models && typeof idea.data.role_models === 'object' ? { role_models: idea.data.role_models } : {}),
         ...(idea?.data.series ? { series: idea.data.series, ...(idea.data.series_index ? { series_index: idea.data.series_index } : {}) } : {}),
@@ -877,8 +878,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
 }
 
 /** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
-export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'>, task: string): string {
-  return fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
+export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean }, task: string): string {
+  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
 }
 
 function topicKind(formatId: string, formats: FormatEntry[]): string | null {

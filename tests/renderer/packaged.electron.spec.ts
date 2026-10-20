@@ -85,7 +85,7 @@ test('the packaged app seeds the data folder, starts the engine, shows the agent
   await expect(page.locator('.office-canvas canvas')).toBeVisible({ timeout: 30_000 })
   await expect
     .poll(() => page.evaluate(() => (globalThis as unknown as { __office?: { agentCount(): number } }).__office?.agentCount() ?? 0), { timeout: 30_000 })
-    .toBe(27)
+    .toBe(28)
   await expect(page.getByTestId('statusbar')).toContainText('engine')
 
   // seed copied from resources/seed

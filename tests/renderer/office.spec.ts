@@ -20,10 +20,10 @@ test('the office renders, an agent opens its terminal, and the controls send com
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto('/?demo&seed=3&tick=0')
 
-  // the canvas and all 27 starter agents
+  // the canvas and all 28 starter agents
   const canvas = page.locator('.office-canvas canvas')
   await expect(canvas).toBeVisible()
-  await expect.poll(() => page.evaluate(() => (globalThis as unknown as Dbg).__office?.agentCount() ?? 0), { timeout: 15_000 }).toBe(27)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as Dbg).__office?.agentCount() ?? 0), { timeout: 15_000 }).toBe(28)
   await expect(page.getByTestId('whiteboard')).toContainText('The Lantern and the Fox')
   // the budget, the researcher box, the idea bucket and the role defaults are tabs, closed at first
   await expect(page.getByTestId('meter-today')).toHaveCount(0)

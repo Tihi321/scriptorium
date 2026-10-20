@@ -71,7 +71,7 @@ describe('seed configs', () => {
     expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(16384)
     expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(65536) // its own load_context wins
     expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
-    expect(Object.keys(registry.roles.roles)).toHaveLength(16)
+    expect(Object.keys(registry.roles.roles)).toHaveLength(17)
     expect(registry.embeddingModel()?.embedding).toBe(true)
   })
 

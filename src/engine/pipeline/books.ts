@@ -50,6 +50,8 @@ export interface ChapterFile {
   agent?: string
   /** Fixes already applied to this chapter: `len` (length rewrite). */
   fixes: string[]
+  /** The round the humanizer last rewrote this chapter in (`humanized` in the chapter file). Missing: not humanized since it was last written. */
+  humanized?: number
 }
 
 export interface OutlineChapter {
@@ -267,25 +269,28 @@ export class BookStore {
         words: Number(doc.data.words ?? countWords(doc.body)),
         body: doc.body.trim(),
         agent: doc.data.agent ? String(doc.data.agent) : undefined,
-        fixes: Array.isArray(doc.data.fixes) ? (doc.data.fixes as unknown[]).map(String) : []
+        fixes: Array.isArray(doc.data.fixes) ? (doc.data.fixes as unknown[]).map(String) : [],
+        ...(Number.isInteger(doc.data.humanized) ? { humanized: Number(doc.data.humanized) } : {})
       })
     }
     return out.sort((a, b) => a.n - b.n)
   }
 
   /** Writes a chapter. The version it replaces is kept in chapters/history/. */
-  async writeChapter(slug: string, ch: { n: number; title: string; round: number; body: string; agent?: string; model?: string; fixes?: string[] }): Promise<void> {
+  async writeChapter(slug: string, ch: { n: number; title: string; round: number; body: string; agent?: string; model?: string; fixes?: string[]; humanized?: number }): Promise<void> {
     const file = this.chapterFile(slug, ch.n)
     try {
       const old = await fs.readFile(file, 'utf8')
-      const oldRound = Number(parseMd(old).data.round ?? 0)
-      await atomicWrite(this.file(slug, 'chapters', 'history', `ch-${pad2(ch.n)}-r${oldRound}.md`), old)
+      const oldDoc = parseMd(old)
+      const oldRound = Number(oldDoc.data.round ?? 0)
+      // a humanized version is kept beside the version it was made from (the same round), not over it
+      await atomicWrite(this.file(slug, 'chapters', 'history', `ch-${pad2(ch.n)}-r${oldRound}${Number.isInteger(oldDoc.data.humanized) ? '-humanized' : ''}.md`), old)
     } catch {
       /* first version */
     }
     await writeMd(
       file,
-      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined },
+      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined, humanized: ch.humanized },
       '\n' + ch.body.trim() + '\n'
     )
   }

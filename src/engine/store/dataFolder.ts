@@ -1,6 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { migrateHumanizer } from './migrations'
 
 /** Folders created inside the data folder (see "Shared files" in docs/design.md). */
 export const DATA_LAYOUT = [
@@ -64,6 +65,8 @@ export interface InitResult {
   createdDirs: number
   copied: string[]
   skipped: string[]
+  /** Changes made to files that already existed (see `migrations.ts`), one line each. */
+  migrated: string[]
 }
 
 async function copyTree(src: string, dest: string, root: string, result: InitResult, skipDirs: Set<string> = new Set()): Promise<void> {
@@ -98,10 +101,12 @@ async function copyTree(src: string, dest: string, root: string, result: InitRes
  * yours to hire and fire, and a fired starter agent doesn't come back at the next start.
  */
 export async function initDataFolder(dataDir: string, seedDir: string | undefined = findSeedDir()): Promise<InitResult> {
-  const result: InitResult = { dataDir, createdDirs: 0, copied: [], skipped: [] }
+  const result: InitResult = { dataDir, createdDirs: 0, copied: [], skipped: [], migrated: [] }
   await fs.mkdir(dataDir, { recursive: true })
   const skipDirs = new Set(existsSync(path.join(dataDir, 'agents')) ? ['agents'] : [])
   if (seedDir && existsSync(seedDir)) await copyTree(seedDir, dataDir, dataDir, result, skipDirs)
+  // files the seed never replaces: what a data folder from before a feature needs to have
+  result.migrated.push(...(await migrateHumanizer(dataDir, seedDir && existsSync(seedDir) ? seedDir : undefined)).changes)
   for (const rel of DATA_LAYOUT) {
     const dir = path.join(dataDir, ...rel.split('/'))
     if (!existsSync(dir)) {

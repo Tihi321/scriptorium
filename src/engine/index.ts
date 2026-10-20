@@ -68,6 +68,7 @@ async function main(): Promise<void> {
   const init = await initDataFolder(dataDir, seed ? path.resolve(seed) : undefined)
   log(`data folder: ${dataDir}`)
   log(`seed: copied ${init.copied.length} file(s), kept ${init.skipped.length} existing, created ${init.createdDirs} folder(s)`)
+  for (const m of init.migrated) log(`migration: ${m}`)
   if (once) return
 
   // one engine per data folder: a second one (the app and `yarn headless`, say) would write the same files

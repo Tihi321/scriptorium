@@ -51,6 +51,7 @@ const ROLE_ROOM: Record<string, RoomId> = {
   'idea-generator': 'idea',
   architect: 'writers',
   writer: 'writers',
+  humanizer: 'writers',
   'developmental-editor': 'editing',
   'line-editor': 'editing',
   'copy-editor': 'editing',

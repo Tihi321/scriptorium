@@ -187,6 +187,11 @@ export const formatEntrySchema = z.looseObject({
    * For short formats only (not `long`).
    */
   choices: z.boolean().default(false),
+  /**
+   * The humanizer rewrites every chapter once after it is drafted (and again after a rewrite round) so it reads less like a
+   * machine and more like a person. Needs a hired humanizer agent; a book can switch it off with `humanize: false` in book.md.
+   */
+  humanize: z.boolean().default(true),
   /** Rewrite rounds for this format. Falls back to quality.max_rounds. */
   max_rounds: z.number().int().nonnegative().optional(),
   /** Overrides the default reviewer list. */
@@ -266,6 +271,8 @@ export const ideaSchema = z.looseObject({
   series: z.string().optional(),
   /** Position in the series, 1 for the first book. */
   series_index: z.number().int().positive().optional(),
+  /** `false`: the book made from this story gets no humanizer pass. */
+  humanize: z.boolean().optional(),
   created: z.string().optional()
 })
 
@@ -293,6 +300,8 @@ export const bookSchema = z.looseObject({
   /** Series slug and position, copied from the story the book was made from. */
   series: z.string().optional(),
   series_index: z.number().int().positive().optional(),
+  /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
+  humanize: z.boolean().optional(),
   age_band: z.string().nullable().default(null),
   target_words: z.number().int().positive(),
   author: z.string().nullable().default(null),
@@ -398,5 +407,6 @@ export const ROLES = [
   'child-safety-reviewer',
   'read-aloud-reviewer',
   'publisher',
-  'archivist'
+  'archivist',
+  'humanizer'
 ] as const

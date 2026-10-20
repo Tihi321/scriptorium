@@ -173,7 +173,7 @@ export function stageColumn(stage: string): StageColumn {
   if (s === 'new' || s.startsWith('idea')) return 'idea'
   if (s.startsWith('outline') || s.startsWith('plan') || s.startsWith('bible') || s.startsWith('architect')) return 'outline'
   if (s.startsWith('draft') || s.startsWith('writ')) return 'drafting'
-  if (s.startsWith('edit') || s.startsWith('review') || s.startsWith('revis') || s.startsWith('polish') || s.startsWith('rewrite')) return 'editing'
+  if (s.startsWith('edit') || s.startsWith('humaniz') || s.startsWith('review') || s.startsWith('revis') || s.startsWith('polish') || s.startsWith('rewrite')) return 'editing'
   return 'other'
 }
 

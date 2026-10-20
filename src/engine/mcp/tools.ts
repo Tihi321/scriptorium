@@ -254,11 +254,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
         topic: z.string().optional().describe('A topic id from list_topics'),
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
+        humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -276,6 +277,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.topic ? { topic: a.topic } : {}),
           ...(a.genre ? { genre: a.genre } : {}),
           ...(a.series ? { series: a.series } : {}),
+          ...(a.humanize === false ? { humanize: false } : {}),
           ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
@@ -303,6 +305,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         topic: z.string().optional(),
         genre: z.string().optional(),
         series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
+        humanize: z.boolean().optional().describe('false: the humanizer skips this book; true: back to the default'),
         models: modelsSchema.optional().describe('Replaces the models of this story (role -> provider/model); {} clears them')
       }
     },
@@ -321,6 +324,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         topic?: string
         genre?: string
         series?: string
+        humanize?: boolean
         models?: Record<string, string>
       }) => {
         const idea = await needStory(a.story)
@@ -334,6 +338,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
           if (Object.keys(a.models).length) brief.models = a.models
           else delete brief.models
         }
+        if (a.humanize === false) brief.humanize = false
+        else if (a.humanize === true) delete brief.humanize
         if (a.title !== undefined) brief.title = a.title.trim()
         if (a.premise !== undefined) brief.premise = a.premise
         if (a.plot !== undefined) brief.plot = a.plot

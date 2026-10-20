@@ -186,6 +186,7 @@ export class Engine {
       emit: this.emit,
       log: this.log,
       coverRenderer: !!opts.coverRenderer,
+      hasAgent: (role) => this.agents.list().some((a) => a.data.role === role),
       bookChanged: (slug) => void this.emitBookUpdated(slug),
       tickMs: opts.tickMs
     })

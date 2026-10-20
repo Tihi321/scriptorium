@@ -10,10 +10,10 @@ function inline(text: string): string {
   return t
 }
 
-const SCENE = /^\**\s*scene\s*:\s*\**\s*(.+?)\s*\**$/i
-const CAST = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
+export const SCENE = /^\**\s*scene\s*:\s*\**\s*(.+?)\s*\**$/i
+export const CAST = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
 /** `NAME: line` or `NAME (expression): line`. The name is in capitals, as in a script. */
-const LINE = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
+export const LINE = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
 
 /**
  * A visual novel script (formats with `script: true`) to XHTML, one element per line: `SCENE: place, time` opens a scene,
