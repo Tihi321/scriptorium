@@ -70,6 +70,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     books: [bookSummary('fox-book', { title: 'Fox Book' })],
     topics: [],
     ideas: [],
+    series: [],
     formats: [],
     models: [],
     providers: [],

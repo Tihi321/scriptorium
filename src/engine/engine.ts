@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { StoryBrief } from '../shared/brief'
-import type { Command, EngineEvent, IdeaSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
+import type { Command, EngineEvent, IdeaSummary, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
 import { parseMdWith } from '../shared/md'
 import { factorySchema, formatsSchema, qualitySchema, ROLES, settingsSchema } from '../shared/schemas'
 import type { FactoryConfig, FormatEntry, QualityConfig, SettingsConfig } from '../shared/schemas'
@@ -24,12 +24,14 @@ import { BookStore, TERMINAL_BOOK_STAGES } from './pipeline/books'
 import { Pipeline } from './pipeline/pipeline'
 import { Scheduler } from './queue/scheduler'
 import { IdeaStore } from './store/ideas'
+import { bookRefs, nextSeriesIndex, SeriesStore } from './store/series'
+import type { SeriesFile } from './store/series'
 import type { IdeaFile } from './store/ideas'
 import { TopicsFile } from './store/topics'
 import { readMd, writeMd } from './store/atomic'
 import { sendEpub, smtpTransport } from './publish/kindle'
 import type { TransportFactory } from './publish/kindle'
-import { agentSummary, bookSummary, formatSummaries, ideaSummaries, modelSummaries, providerSummaries, roleDefaults, serverStatuses, topicSummary } from './summary'
+import { agentSummary, bookSummary, formatSummaries, ideaSummaries, modelSummaries, providerSummaries, roleDefaults, seriesSummaries, serverStatuses, topicSummary } from './summary'
 import type { WatchEvent } from './store/watcher'
 
 export interface EngineOptions {
@@ -72,6 +74,7 @@ export class Engine {
   readonly books: BookStore
   readonly topics: TopicsFile
   readonly ideas: IdeaStore
+  readonly series: SeriesStore
   readonly bible: Bible
   readonly memory: MemoryService
   readonly research: ResearchService
@@ -151,6 +154,7 @@ export class Engine {
     this.books = new BookStore(dir)
     this.topics = new TopicsFile(dir, () => void this.emitTopics())
     this.ideas = new IdeaStore(dir)
+    this.series = new SeriesStore(dir)
     this.bible = new Bible(this.books)
     this.memory = new MemoryService(dir, this.registry)
     this.search = new SearchService({ registry: this.registry, budget: this.budget, emit: this.emit, log: this.log, keys: opts.registry?.keys, ...opts.search })
@@ -168,6 +172,7 @@ export class Engine {
       books: this.books,
       topics: this.topics,
       ideas: this.ideas,
+      series: this.series,
       bible: this.bible,
       memory: this.memory,
       research: this.research,
@@ -557,6 +562,9 @@ export class Engine {
         await this.emitTopics()
       } else if (e.kind === 'idea') {
         await this.emitIdeas()
+        await this.emitSeries() // a story of a series changed: the series list shows it
+      } else if (e.kind === 'series') {
+        await this.emitSeries()
       } else if (e.kind === 'config') {
         const name = path.basename(e.rel, '.md')
         if (name === 'providers' || name === 'roles' || name === 'models') {
@@ -677,20 +685,65 @@ export class Engine {
     this.emit({ type: 'ideas.updated', ideas: await this.listIdeaSummaries() })
   }
 
+  /** The series with their books in order, as the UI and MCP list them. */
+  async listSeriesSummaries(): Promise<SeriesSummary[]> {
+    return seriesSummaries({ series: this.series, books: this.books, ideas: this.ideas })
+  }
+
+  async emitSeries(): Promise<void> {
+    this.emit({ type: 'series.updated', series: await this.listSeriesSummaries() })
+  }
+
+  /** Creates a series from a brief (its title names it). Throws when there is no title. */
+  async addSeries(brief: StoryBrief): Promise<SeriesFile> {
+    const s = await this.series.create(brief)
+    this.log(`series "${s.title}" added (${s.slug})`)
+    await this.emitSeries()
+    return s
+  }
+
+  /** Replaces the brief of a series. Throws when there is no such series. */
+  async updateSeries(slug: string, brief: StoryBrief): Promise<SeriesFile> {
+    const s = await this.series.update(slug, brief)
+    this.log(`series "${s.title}" changed (${s.slug})`)
+    await this.emitSeries()
+    return s
+  }
+
+  /**
+   * The brief with its series checked and numbered: a story of a series must name a series that exists, and gets the next free
+   * `series_index` unless it keeps the one it has (a story moved to another series is numbered again).
+   */
+  private async withSeries(brief: StoryBrief, was?: IdeaFile): Promise<StoryBrief> {
+    const slug = brief.series?.trim()
+    if (!slug) {
+      const { series: _s, seriesIndex: _i, ...rest } = brief
+      return rest
+    }
+    if (!(await this.series.get(slug))) throw new Error(`no series "${slug}" (list_series shows the slugs)`)
+    const keeps = brief.seriesIndex && (!was || was.data.series === slug)
+    const seriesIndex = keeps ? brief.seriesIndex : nextSeriesIndex(slug, await bookRefs(this.books), (await this.ideas.list()).filter((i) => i.slug !== was?.slug))
+    return { ...brief, series: slug, seriesIndex }
+  }
+
   /** Creates a story from a brief. Throws when the brief is empty. */
   async addStory(brief: StoryBrief): Promise<IdeaFile> {
+    brief = await this.withSeries(brief)
     const idea = await this.ideas.createStory(brief)
     this.log(`story "${idea.title}" added (${idea.slug})`)
     await this.emitIdeas()
+    if (idea.data.series) await this.emitSeries()
     this.pipeline.kick()
     return idea
   }
 
   /** Replaces the brief of a story. Throws when there is no such story, or a book was already started from it. */
   async updateStory(slug: string, brief: StoryBrief): Promise<IdeaFile> {
+    brief = await this.withSeries(brief, (await this.ideas.list()).find((i) => i.slug === slug))
     const idea = await this.ideas.updateStory(slug, brief)
     this.log(`story "${idea.title}" changed (${idea.slug})`)
     await this.emitIdeas()
+    await this.emitSeries()
     this.pipeline.kick()
     return idea
   }
@@ -901,6 +954,20 @@ export class Engine {
           this.log(`addStory: ${(err as Error).message}`)
         }
         return
+      case 'addSeries':
+        try {
+          await this.addSeries(cmd.brief)
+        } catch (err) {
+          this.log(`addSeries: ${(err as Error).message}`)
+        }
+        return
+      case 'updateSeries':
+        try {
+          await this.updateSeries(cmd.series, cmd.brief)
+        } catch (err) {
+          this.log(`updateSeries: ${(err as Error).message}`)
+        }
+        return
       case 'updateStory':
         try {
           await this.updateStory(cmd.idea, cmd.brief)
@@ -1014,6 +1081,7 @@ export class Engine {
       books,
       topics: topics.map(topicSummary),
       ideas: await this.listIdeaSummaries(),
+      series: await this.listSeriesSummaries(),
       formats: formatSummaries(this.formats),
       models: modelSummaries(this.registry),
       providers: providerSummaries(this.registry, this.router.limiter),

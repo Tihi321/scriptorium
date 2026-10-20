@@ -12,8 +12,10 @@ import type { JobStore } from '../queue/jobs'
 import type { ChatOptions, JobContext, Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
 import type { IdeaFile, IdeaStore } from '../store/ideas'
+import { bookRefs, waitingStories } from '../store/series'
+import type { BookRef, SeriesStore } from '../store/series'
 import type { TopicRow, TopicsFile } from '../store/topics'
-import { ideaSummaries } from '../summary'
+import { ideaSummaries, seriesSummaries } from '../summary'
 import { countBooksInProgress, countWords } from './books'
 import type { BookStore } from './books'
 import { reviewersFor, THREAD_CHECK } from './advance'
@@ -27,6 +29,7 @@ import { findMarkers, stripMarkers } from '../research/markers'
 import type { ResearchService, SearchService } from '../research/service'
 import { bibleFor, nonfictionContext } from './nfcontext'
 import { chatJson, cleanProse } from './llm'
+import { earlierSeriesBooks, seriesSection, withSeriesBible } from './series'
 import { appendToPrompt, buildMessages, loadChoicesSection } from './prompts'
 import { ancestors, chapterPlace, checkBranches, endLine } from './branches'
 import type { BranchChapter } from './branches'
@@ -38,6 +41,8 @@ export interface PipelineDeps {
   books: BookStore
   topics: TopicsFile
   ideas: IdeaStore
+  /** The series (series/): the order gate, the series section of the prompts and the bible carry-over read them. */
+  series: SeriesStore
   jobs: JobStore
   bible: Bible
   /** The fact base of non-fiction books (in place of the story bible). */
@@ -90,10 +95,14 @@ export interface NextPick {
   topic?: TopicRow
 }
 
-/** Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic. */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[]): NextPick | null {
+/**
+ * Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic.
+ * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
+ */
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = []): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
-  const open = ideas.filter((i) => i.data.status === 'open')
+  const waiting = waitingStories(ideas, books)
+  const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug))
   const ok = (topic?: TopicRow) => formatsForKind(formats, topic?.kind ?? null).length > 0
   for (const i of open.filter((x) => x.data.source === 'user')) {
     const topic = i.data.topic ? byId.get(i.data.topic) : undefined
@@ -150,7 +159,7 @@ export function splitActs(chapters: number): { n: number; title: string; chapter
 }
 
 /** The context for writing or checking chapter `n` of a long book, from the book memory. */
-export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 'memory' | 'research' | 'log' | 'contextTokens'>, slug: string, n: number, budgetTokens: number, role: string): Promise<PackedContext> {
+export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 'series' | 'memory' | 'research' | 'log' | 'contextTokens'>, slug: string, n: number, budgetTokens: number, role: string): Promise<PackedContext> {
   // leave room for the answer: use at most 45% of the model's window
   const window = d.contextTokens(role)
   if (window) budgetTokens = Math.max(2500, Math.min(budgetTokens, Math.floor(window * 0.45)))
@@ -165,7 +174,8 @@ export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 'm
   // research notes (of the book and shared) that fit what this chapter is about
   const entry = (await d.books.outline(slug))?.chapters.find((c) => c.n === n)
   const research = entry ? await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4) : []
-  return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research })
+  const seriesBooks = await earlierSeriesBooks(d, slug)
+  return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research, seriesBooks })
 }
 
 /** Writes the book's record of this job (books/<slug>/made.md and the summary in book.md). */
@@ -239,7 +249,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const formats = d.getFormats()
     // the start jobs hold the `factory:start` lock, so they run one at a time: count again here, in case the factory was busy since the job was queued
     if ((await countBooksInProgress(d.books)) >= d.getFactory().max_books_in_progress) return { result: 'enough books in progress already' }
-    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats)
+    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books))
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     const allowed = formatsForKind(formats, topic?.kind ?? null)
@@ -292,6 +302,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(fmt.script ? { script: true } : {}),
         target_words: target,
         ...(idea && idea.data.role_models && typeof idea.data.role_models === 'object' ? { role_models: idea.data.role_models } : {}),
+        ...(idea?.data.series ? { series: idea.data.series, ...(idea.data.series_index ? { series_index: idea.data.series_index } : {}) } : {}),
         idea: idea?.slug ?? null,
         created: new Date().toISOString(),
         cost_usd: 0
@@ -304,6 +315,11 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       await writeMd(d.books.file(slug, 'brief.md'), { ...kept, kind: 'brief', idea: idea.slug }, '\n' + idea.body + '\n')
       await d.ideas.markUsed(idea, slug)
       d.emit({ type: 'ideas.updated', ideas: ideaSummaries(await d.ideas.list()) })
+      if (idea.data.series) {
+        // the series lists its books in the order they were started
+        await d.series.addBook(idea.data.series, slug)
+        d.emit({ type: 'series.updated', series: await seriesSummaries(d) })
+      }
     }
     if (topic) await d.topics.adjust(topic.id, { inProgress: 1 })
     await made(slug, run)
@@ -333,6 +349,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...formatVars(fmt, book.target_words)
       })
       run.version = version
+      appendToPrompt(messages, await seriesSection(d, slug))
       const r = await run.chat({ messages, maxTokens: 4000 })
       text = cleanProse(r.text)
       if (text.length < 40) throw new Error('the pitch came back empty')
@@ -392,6 +409,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     // a story with choices: the architect plans a map of chapters with choices and endings
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
     appendToPrompt(messages, await storyBriefSection(d, slug))
+    appendToPrompt(messages, await seriesSection(d, slug))
     appendToPrompt(messages, await ownerNotesSection(d, slug))
     const schema = z.object({
       chapters: z
@@ -452,7 +470,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         '\n'
     )
     // a character the owner described is in the bible, even when the architect left it out
-    const characters = fmt.nonfiction ? r.value.characters : await withBriefCharacters(d, slug, r.value.characters, ctx.log)
+    const briefCharacters = fmt.nonfiction ? r.value.characters : await withBriefCharacters(d, slug, r.value.characters, ctx.log)
+    // book N of a series starts from what the earlier books' bibles say about the recurring characters and places
+    const carried = fmt.nonfiction ? { characters: briefCharacters, places: r.value.places } : await withSeriesBible(d, slug, briefCharacters, r.value.places, ctx.log)
+    const characters = carried.characters
+    const places = carried.places
     if (fmt.nonfiction) {
       // the fact base takes the place of the story bible: argument, audience, style, structure and terms (sources and facts follow per chapter)
       await d.factbase.writeThesis(
@@ -463,13 +485,13 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else if (fmt.long) {
       // the structured bible: characters (with voice sheets), places, threads, timeline, style
       await fs.rm(d.books.file(slug, 'bible'), { recursive: true, force: true })
-      await d.bible.writeInitial(slug, { characters, places: r.value.places, threads: r.value.threads, setting: r.value.setting, style: r.value.style })
+      await d.bible.writeInitial(slug, { characters, places, threads: r.value.threads, setting: r.value.setting, style: r.value.style })
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
         (characters.length ? characters.map((c) => `- **${c.name}**: ${c.description}${fmt.script && c.voice ? ` Voice: ${c.voice}` : ''}`).join('\n') : '(see the pitch)') +
         // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
-        (fmt.script && r.value.places.length ? `\n\n## Places\n${r.value.places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
+        (fmt.script && places.length ? `\n\n## Places\n${places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
@@ -531,6 +553,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     run.version = version
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'draft', chapterPlace(outline.chapters, n)))
     appendToPrompt(messages, await storyBriefSection(d, slug))
+    appendToPrompt(messages, await seriesSection(d, slug))
     appendToPrompt(messages, await ownerNotesSection(d, slug, n))
     let r = await run.chat({ messages, maxTokens: Math.max(4000, perChapter * 6) })
     let body = stripLeadingHeading(cleanProse(r.text))
@@ -628,6 +651,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       })
       run.version = version
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
+      appendToPrompt(messages, await seriesSection(d, slug))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
       // the schema names this reviewer's dimensions, so structured output and the repair retry both insist on them
       const schema = z.object({
@@ -745,6 +769,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     run.version = version
     if (branches) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n)))
     appendToPrompt(messages, await storyBriefSection(d, slug))
+    appendToPrompt(messages, await seriesSection(d, slug))
     if (!isNote) appendToPrompt(messages, await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6) })
     const body = stripMarkers(stripLeadingHeading(cleanProse(r.text)))

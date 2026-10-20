@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { emptyBrief, isEmptyBrief } from '../../shared/brief'
 import type { StoryBrief } from '../../shared/brief'
 import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
+import { officeStore } from '../store/store'
 
 /** What the form sends: empty characters and sections left out, empty format, topic and genre not set. */
 function cleaned(b: StoryBrief): StoryBrief {
@@ -13,7 +14,9 @@ function cleaned(b: StoryBrief): StoryBrief {
     sections: b.sections.filter((s) => s.heading.trim()),
     format: b.format || undefined,
     topic: b.topic || undefined,
-    genre: b.genre?.trim() || undefined
+    genre: b.genre?.trim() || undefined,
+    series: b.series || undefined,
+    seriesIndex: b.series ? b.seriesIndex : undefined
   }
 }
 
@@ -25,6 +28,8 @@ export function StoryForm() {
   const topics = useOffice((s) => s.topics)
   const formats = useOffice((s) => s.formats)
   const ideas = useOffice((s) => s.ideas)
+  const series = useOffice((s) => s.series)
+  const wantSeries = useOffice((s) => s.storySeries)
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
   const [open, setOpen] = useState(false)
@@ -33,6 +38,15 @@ export function StoryForm() {
   const [editing, setEditing] = useState<string | null>(null)
   const waiting = useMemo(() => ideas.filter((i) => i.status === 'open' && i.source === 'user'), [ideas])
   const sections = useMemo(() => [...new Set(topics.map((t) => t.section))], [topics])
+
+  // "Next book" in the series panel: a new story form with that series selected
+  useEffect(() => {
+    if (!wantSeries) return
+    setBrief({ ...emptyBrief(), series: wantSeries })
+    setEditing(null)
+    setOpen(true)
+    officeStore.getState().setStorySeries(null)
+  }, [wantSeries])
 
   const flash = () => {
     setSent(true)
@@ -118,6 +132,22 @@ export function StoryForm() {
                       </option>
                     ))}
                 </optgroup>
+              ))}
+            </select>
+          </div>
+          <div className="row">
+            <select
+              style={{ flex: 1, minWidth: 0 }}
+              value={brief.series ?? ''}
+              title="A book of a series continues the books before it, and waits until they are published"
+              data-testid="story-series"
+              onChange={(e) => set({ series: e.target.value || undefined, seriesIndex: undefined })}
+            >
+              <option value="">No series</option>
+              {series.map((s) => (
+                <option key={s.slug} value={s.slug}>
+                  {s.title}
+                </option>
               ))}
             </select>
           </div>

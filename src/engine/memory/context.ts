@@ -31,6 +31,7 @@ const SECTION_TITLES: Record<number, string> = {
   5: 'Summaries of the acts so far',
   6: 'Summaries of the chapters so far',
   7: 'Passages from earlier chapters (found by search)',
+  7.5: 'Passages from the earlier books of the series (found by search)',
   8: 'The previous chapter in full'
 }
 
@@ -73,6 +74,8 @@ export interface DraftContextInput {
   budgetTokens: number
   /** Research notes that matter for this chapter (see research/context.ts). They get their own section after the bible entries. */
   research?: { name: string; text: string }[]
+  /** The earlier books of the book's series: passages of their chapters and summaries are searched too (after the book's own). */
+  seriesBooks?: string[]
 }
 
 /**
@@ -132,6 +135,11 @@ export async function buildDraftContext(i: DraftContextInput): Promise<PackedCon
       items.push({ name: `passage: ${h.ref} #${h.idx}`, text: `(${h.ref})\n${h.text}`, priority: 3 + rank * 0.01, order: 7 })
       if (++rank >= 6) break
     }
+  }
+
+  if (i.index && entry && i.seriesBooks?.length) {
+    const hits = await i.index.search(`${entry.title}. ${entry.summary}`, { books: i.seriesBooks, kinds: ['chapter', 'summary'], k: 8 })
+    hits.slice(0, 4).forEach((h, rank) => items.push({ name: `series passage: ${h.book} ${h.ref} #${h.idx}`, text: `(${h.book}, ${h.ref})\n${h.text}`, priority: 3.5 + rank * 0.01, order: 7.5 }))
   }
 
   if (n > 1) {

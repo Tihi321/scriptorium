@@ -525,6 +525,29 @@ textarea {
 .topic-list {
   overflow-y: auto;
 }
+.library-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.library-side .topic-list {
+  overflow: visible;
+  flex: none;
+}
+.series-panel {
+  flex: none;
+}
+.series-item {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.series-books {
+  margin: 4px 0;
+  padding-left: 20px;
+}
 .topic-group {
   border-top: 1px solid var(--line);
   margin-top: 4px;

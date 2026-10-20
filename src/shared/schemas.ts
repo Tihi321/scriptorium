@@ -262,6 +262,21 @@ export const ideaSchema = z.looseObject({
   /** Role -> `provider/model` for the book made from this story (copied to the book's `role_models`). */
   role_models: z.record(z.string(), z.string()).optional(),
   book: z.string().nullable().default(null),
+  /** Series slug (a file in series/). The book made from this story is a book of that series. */
+  series: z.string().optional(),
+  /** Position in the series, 1 for the first book. */
+  series_index: z.number().int().positive().optional(),
+  created: z.string().optional()
+})
+
+/** A series: books that continue each other, with shared characters, setting and canon (series/<slug>.md). */
+export const seriesSchema = z.looseObject({
+  kind: z.literal('series').default('series'),
+  title: z.string().optional(),
+  genre: z.string().optional(),
+  format: z.string().optional(),
+  /** Slugs of the books made so far, in order. */
+  books: z.array(z.string()).default([]),
   created: z.string().optional()
 })
 
@@ -275,6 +290,9 @@ export const bookSchema = z.looseObject({
   topic: z.string().nullable().default(null),
   topic_name: z.string().nullable().default(null),
   genre: z.string().default(''),
+  /** Series slug and position, copied from the story the book was made from. */
+  series: z.string().optional(),
+  series_index: z.number().int().positive().optional(),
   age_band: z.string().nullable().default(null),
   target_words: z.number().int().positive(),
   author: z.string().nullable().default(null),
@@ -356,6 +374,7 @@ export type QualityConfig = z.output<typeof qualitySchema>
 export type FormatEntry = z.output<typeof formatEntrySchema>
 export type FormatsConfig = z.output<typeof formatsSchema>
 export type IdeaFrontmatter = z.output<typeof ideaSchema>
+export type SeriesFrontmatter = z.output<typeof seriesSchema>
 export type BookFrontmatter = z.output<typeof bookSchema>
 export type JobFrontmatter = z.output<typeof jobSchema>
 

@@ -2,7 +2,7 @@ import path from 'node:path'
 import chokidar from 'chokidar'
 import { TMP_MARKER } from './atomic'
 
-export type WatchKind = 'config' | 'agent' | 'topics' | 'idea'
+export type WatchKind = 'config' | 'agent' | 'topics' | 'idea' | 'series'
 export type WatchChange = 'add' | 'change' | 'unlink'
 
 export interface WatchEvent {
@@ -30,11 +30,12 @@ function kindOf(rel: string): WatchKind | undefined {
   if (rel.startsWith('config/')) return 'config'
   if (rel.startsWith('agents/')) return 'agent'
   if (rel.startsWith('ideas/')) return 'idea'
+  if (rel.startsWith('series/')) return 'series'
   return undefined
 }
 
 /**
- * Watches config/, agents/, topics.md and ideas/ and emits typed, debounced change events.
+ * Watches config/, agents/, topics.md, ideas/ and series/ and emits typed, debounced change events.
  * Temporary files written by atomicWrite (`*.tmp-*`) are ignored.
  */
 export function watchDataFolder(
@@ -50,7 +51,8 @@ export function watchDataFolder(
       path.join(dataDir, 'config'),
       path.join(dataDir, 'agents'),
       path.join(dataDir, 'topics.md'),
-      path.join(dataDir, 'ideas')
+      path.join(dataDir, 'ideas'),
+      path.join(dataDir, 'series')
     ],
     {
       ignoreInitial: !opts.initial,

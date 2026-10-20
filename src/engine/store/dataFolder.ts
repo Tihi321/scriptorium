@@ -7,6 +7,7 @@ export const DATA_LAYOUT = [
   'config',
   'agents',
   'ideas',
+  'series',
   'research',
   'templates',
   'prompts',
