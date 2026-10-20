@@ -31,6 +31,10 @@ export interface StoryBrief {
   format?: string
   topic?: string
   genre?: string
+  /** Series slug (a file in series/): the book made from this story continues that series. */
+  series?: string
+  /** Position in the series (frontmatter `series_index`). Empty: the next free number. */
+  seriesIndex?: number
   /** Role -> `provider/model` for the book made from this story (frontmatter `role_models`). */
   models?: Record<string, string>
 }
@@ -143,6 +147,9 @@ export function briefOf(data: Record<string, unknown>, body: string): StoryBrief
   const format = str(data.format)
   const topic = str(data.topic)
   const genre = str(data.genre)
+  const series = str(data.series)
+  if (series) brief.series = series
+  if (typeof data.series_index === 'number' && Number.isInteger(data.series_index) && data.series_index > 0) brief.seriesIndex = data.series_index
   if (format) brief.format = format
   if (topic) brief.topic = topic
   if (genre) brief.genre = genre

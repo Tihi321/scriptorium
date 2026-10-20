@@ -71,11 +71,17 @@ Reading:
 - `read_book_file {book, file, chapter?}`: `file` is brief, pitch, outline, bible, notes or chapter (give `chapter`). Only these files inside the book's folder.
 - `list_stories {status?, source?}`: `status` open (default), used or all; `source` user, generated or all.
 - `get_story {story}`: one story with its whole brief.
+- `list_series`: one compact row per series with its books in order (slug, title, index, `kind` book or story, stage, score).
+- `get_series {series}`: the series file (premise, recurring characters, setting, style, extra sections) and its books in order with stage and score. A story no book has started yet is listed with `kind: story`.
 - `list_topics {active?}`, `list_agents`, `list_models` (the models the pickers offer, and each role's default).
 
 Stories:
-- `add_story {title?, premise?, plot?, characters?, setting?, style?, sections?, format?, topic?, genre?, models?}`: needs a title or some text. Returns the slug. `models` is role -> `provider/model`, kept for the book made from the story (see `set_book_model`). `format` must be an enabled format id, `topic` an id from `list_topics`.
-- `update_story {story, ...same fields, add_characters?}` (`models` replaces the story's models, `{}` clears them): only a story no book has started. Only the fields you give change. `characters` replaces the whole list, `add_characters` adds to it (a character with a name already there is replaced), `sections` replaces the extra sections, and an empty string clears a text field, `format`, `topic` or `genre`.
+- `add_story {title?, premise?, plot?, characters?, setting?, style?, sections?, format?, topic?, genre?, series?, models?}`: needs a title or some text. Returns the slug. `models` is role -> `provider/model`, kept for the book made from the story (see `set_book_model`). `format` must be an enabled format id, `topic` an id from `list_topics`.
+- `update_story {story, ...same fields, add_characters?}` (`models` replaces the story's models, `{}` clears them): only a story no book has started. Only the fields you give change. `characters` replaces the whole list, `add_characters` adds to it (a character with a name already there is replaced), `sections` replaces the extra sections, and an empty string clears a text field, `format`, `topic`, `genre` or `series`. `series` (on both tools) is a series slug from `list_series`: the story becomes the next book of that series (`series_index` is the next free number among the series' books and open stories, and keeps its number on later edits; moving a story to another series numbers it again). An unknown series is a tool error.
+
+Series (see "Series"):
+- `add_series {title, premise?, plot?, characters?, setting?, style?, sections?, genre?, format?}`: creates `series/<slug>.md`. `premise` is the arc of the whole series, `characters` the recurring cast. Returns the slug and the series with its books.
+- `update_series {series, title?, ...same fields, add_characters?}`: only the fields you give change. `characters` replaces the cast, `add_characters` adds to it (a name already there is replaced), `sections` replaces the extra sections, an empty string clears a text field. The books of the series stay.
 
 Books:
 - `add_book_note {book, text, chapter?, rewrite?}`: an owner note the writers follow from the next job. With `chapter` it is about that chapter, and with `rewrite` as well the chapter is rewritten now.
@@ -167,6 +173,42 @@ Any other heading is passed to the agents as it is.
 - `topic` (an id from `list_topics`, optional) and `genre` are used for the book.
 - A body with no `##` headings is the premise.
 - When the factory starts the book, the file is copied to `books/<slug>/brief.md`. Edit that copy to change what the agents see: it applies from the next job. Pitch, outline, outline review, drafts and rewrites all read it, and brief characters missing from the outline are added to the bible.
+
+## Series
+
+A series is books that continue each other, with the same recurring characters, setting and style, and with what happened in the earlier books carried into the later ones. Make one with `add_series`, then give its books with `add_story {series}` (the UI: **New series** in the library, and **Next book**, which opens the story form with the series chosen). The series is `series/<slug>.md` in the data folder:
+
+```markdown
+---
+kind: series
+title: The Ninth Hour
+genre: Comic mystery
+format: novella
+books: [case-one, case-two]
+created: 2026-10-20T10:00:00.000Z
+---
+
+## Premise
+
+The arc of the whole series.
+
+## Characters
+
+### Dec Hartley
+Role: Irish locksmith
+Curious, unlucky, talks too much.
+
+## Setting
+
+## Style
+```
+
+- The body is a story brief without the title (`## Premise`, `## Plot`, `## Characters` with `### Name` blocks, `## Setting`, `## Style`, any other `##` heading). `books` lists the books' slugs in the order they were started; the engine fills it in.
+- A story and its book carry `series: <slug>` and `series_index: <n>` in their frontmatter (`ideas/<slug>.md`, `brief.md`, `book.md`).
+- **Order.** A story of a series is not started while an earlier book of the series (a lower `series_index`) is not published yet, or while an earlier story of it has no book yet. A rejected or failed book 1 therefore holds book 2 back until you reopen it and it is published. Other stories and topics go on meanwhile.
+- **Prompts.** The pitch, outline, outline review, chapter draft, chapter rewrite, reviewers and continuity checks of a book of a series get a "The series this book belongs to" section: the series premise, cast, setting and style, and, for each earlier book in order, its title, blurb, act and chapter summaries, the end state of the recurring characters from that book's bible (the cast members of the series file; matched by name) and the threads it left open. Each earlier book is cut to about 7,000 characters and all of them to about 28,000, so a long series does not swamp the prompt. Book 1 gets the series header only.
+- **Bible.** The bible of book N>1 starts with the earlier books' entries for the recurring characters, and for places named in the series text, so the archivist grows what book 1 left. The long-book draft context also searches the earlier books' chapters and summaries.
+- The series file is watched like ideas: edit it by hand and the UI follows.
 
 ## Security
 

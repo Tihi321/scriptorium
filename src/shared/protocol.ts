@@ -184,8 +184,36 @@ export interface IdeaSummary {
   /** The owner gave the title (the book keeps it). */
   titleFixed: boolean
   characters: number
+  /** The series the story belongs to (slug) and its position, when it has one. */
+  series?: string
+  seriesIndex?: number | null
   /** The whole brief, so the story can be edited. */
   brief: StoryBrief
+}
+
+/** One entry of a series' list: a book (any stage) or a story no book has started yet. */
+export interface SeriesBookRef {
+  /** Book slug, or the story's slug while `kind` is `story`. */
+  slug: string
+  title: string
+  /** Position in the series. */
+  index: number
+  kind: 'book' | 'story'
+  /** The book's stage, or `story` for a story still waiting. */
+  stage: string
+  score: number | null
+}
+
+/** A series (a file in series/): its arc, recurring cast, setting and style as a brief, and its books in order. */
+export interface SeriesSummary {
+  slug: string
+  title: string
+  genre: string | null
+  format: string | null
+  /** Title, premise (the series arc), characters, setting, style and extra sections. */
+  brief: StoryBrief
+  /** The books (and waiting stories) of the series, in order. */
+  books: SeriesBookRef[]
 }
 
 /** An enabled format, for the story form's format picker. */
@@ -231,6 +259,8 @@ export interface SnapshotEvent {
   topics: TopicSummary[]
   /** The owner's open stories and the last 10 used ones. */
   ideas: IdeaSummary[]
+  /** The series (series/), with their books in order. */
+  series: SeriesSummary[]
   /** The enabled formats. */
   formats: FormatSummary[]
   /** Every chat model the engine knows, including the LM Studio models found on this machine. The pickers offer the `shown` ones. */
@@ -303,6 +333,8 @@ export type EngineEvent =
   | { type: 'topics.updated'; topics: TopicSummary[] }
   /** ideas/ changed (a story was added, edited or used). Carries the whole list. */
   | { type: 'ideas.updated'; ideas: IdeaSummary[] }
+  /** series/ changed (a series was added, edited, or got a book). Carries the whole list. */
+  | { type: 'series.updated'; series: SeriesSummary[] }
   | { type: 'kindle.sent'; book: string; ok: boolean; error?: string }
   | { type: 'secrets.updated'; secretsSet: string[] }
   /** The answer to `detectModels`: every chat model the provider lists, or why it couldn't be asked. */
@@ -353,6 +385,10 @@ export type Command =
   | { type: 'addStory'; brief: StoryBrief }
   /** Replaces the brief of a story that no book has started yet. `idea` is the story's slug. */
   | { type: 'updateStory'; idea: string; brief: StoryBrief }
+  /** Creates a series from a brief (title, premise = the series arc, recurring characters, setting, style) in series/. */
+  | { type: 'addSeries'; brief: StoryBrief }
+  /** Replaces the brief of a series. `series` is its slug. Its books stay. */
+  | { type: 'updateSeries'; series: string; brief: StoryBrief }
   /** Asks a provider for every model it has (`GET /models`). Answers with `models.catalog`. */
   | { type: 'detectModels'; provider: string }
   /** Shows models in the pickers, or hides them (config/models.md). A listed model that isn't known yet is added with its listed price. */
@@ -397,6 +433,8 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   addIdea: true,
   addStory: true,
   updateStory: true,
+  addSeries: true,
+  updateSeries: true,
   saveSettings: true,
   setSecret: true,
   detectModels: true,

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { BookSummary } from '../../shared/protocol'
 import { buildShelves } from '../store/shelves'
 import { bookUrl } from '../api'
+import { SeriesPanel } from './Series'
 import { TopicOverview } from './Topics'
 import { useOffice } from '../store/hooks'
 import { officeStore } from '../store/store'
@@ -83,7 +84,10 @@ export function LibraryView() {
           )}
         </section>
       </div>
-      <TopicOverview />
+      <div className="library-side">
+        <SeriesPanel />
+        <TopicOverview />
+      </div>
     </div>
   )
 }

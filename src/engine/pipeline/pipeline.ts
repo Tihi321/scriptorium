@@ -7,6 +7,7 @@ import { findMarkers } from '../research/markers'
 import type { BookState, ChapterScores, ReviewSummary } from './advance'
 import { countBooksInProgress } from './books'
 import type { BookStore } from './books'
+import { bookRefs } from '../store/series'
 import { eligibleTopics, pickNext, registerHandlers } from './handlers'
 import { registerLongHandlers } from './longHandlers'
 import { registerNonfictionHandlers } from './nonfiction'
@@ -434,7 +435,7 @@ export class Pipeline {
     const pending = await this.pendingJobs('start_book')
     const inProgress = await this.countInProgress()
     if (inProgress + pending >= max || pending > 0) return
-    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats())
+    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books))
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {

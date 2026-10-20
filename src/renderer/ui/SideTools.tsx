@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { budgetLevel, budgetPct } from '../store/model'
 import { useOffice } from '../store/hooks'
 import { RoleDefaults } from './AgentPanel'
@@ -23,6 +23,11 @@ function remembered(): Tool | null {
 export function SideTools() {
   const [open, setOpen] = useState<Tool | null>(remembered)
   const spend = useOffice((s) => s.spend)
+  const wantSeries = useOffice((s) => s.storySeries)
+  // "Next book" in the series panel opens the Ideas tab, where the story form takes the series
+  useEffect(() => {
+    if (wantSeries) setOpen('idea')
+  }, [wantSeries])
   const toggle = (t: Tool) => {
     const next = open === t ? null : t
     setOpen(next)

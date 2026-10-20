@@ -9,7 +9,8 @@ import { ROLES } from '../../shared/schemas'
 import { DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
-import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, serverStatuses, topicSummary } from '../summary'
+import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, seriesSummary, serverStatuses, topicSummary } from '../summary'
+import { bookRefs, seriesMembers } from '../store/series'
 import { TOPIC_KINDS } from '../store/topics'
 
 /** A mistake in what the agent sent: shown to it as a tool error. */
@@ -64,6 +65,14 @@ export function registerTools(server: McpServer, engine: Engine): void {
   const needStory = async (slug: string) => {
     const idea = validSlug(slug) ? (await engine.ideas.list()).find((i) => i.slug === slug) : undefined
     return idea ?? fail(`no story "${slug}" (list_stories shows the slugs)`)
+  }
+  const needSeries = async (slug: string) => (validSlug(slug) ? await engine.series.get(slug) : null) ?? fail(`no series "${slug}" (list_series shows the slugs)`)
+  const seriesRow = async (slug: string) => {
+    const s = await needSeries(slug)
+    return seriesSummary(s, seriesMembers(s.slug, await bookRefs(engine.books), await engine.ideas.list()))
+  }
+  const checkSeries = async (series?: string) => {
+    if (series && !(await engine.series.get(series))) fail(`unknown series "${series}" (list_series shows the slugs)`)
   }
   const checkFormat = (format?: string) => {
     if (format && !engine.formats.some((f) => f.enabled && f.id === format)) {
@@ -244,13 +253,15 @@ export function registerTools(server: McpServer, engine: Engine): void {
         format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks'),
         topic: z.string().optional().describe('A topic id from list_topics'),
         genre: z.string().optional(),
+        series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
+        await checkSeries(a.series)
         checkRoleModels(a.models)
         const brief: StoryBrief = {
           ...emptyBrief(),
@@ -264,6 +275,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.format ? { format: a.format } : {}),
           ...(a.topic ? { topic: a.topic } : {}),
           ...(a.genre ? { genre: a.genre } : {}),
+          ...(a.series ? { series: a.series } : {}),
           ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
@@ -290,6 +302,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         format: z.string().optional(),
         topic: z.string().optional(),
         genre: z.string().optional(),
+        series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
         models: modelsSchema.optional().describe('Replaces the models of this story (role -> provider/model); {} clears them')
       }
     },
@@ -307,12 +320,14 @@ export function registerTools(server: McpServer, engine: Engine): void {
         format?: string
         topic?: string
         genre?: string
+        series?: string
         models?: Record<string, string>
       }) => {
         const idea = await needStory(a.story)
         if (idea.data.status !== 'open') fail(`the story "${a.story}" was already used by a book (${idea.data.book ?? 'unknown'}): add a note to that book instead (add_book_note)`)
         checkFormat(a.format)
         await checkTopic(a.topic)
+        await checkSeries(a.series)
         checkRoleModels(a.models)
         const brief = briefOf(idea.data, idea.body)
         if (a.models !== undefined) {
@@ -333,13 +348,130 @@ export function registerTools(server: McpServer, engine: Engine): void {
           if (i >= 0) brief.characters[i] = next
           else brief.characters.push(next)
         }
-        for (const k of ['format', 'topic', 'genre'] as const) {
+        for (const k of ['format', 'topic', 'genre', 'series'] as const) {
           if (a[k] === undefined) continue
           if (a[k]!.trim()) brief[k] = a[k]!.trim()
           else delete brief[k]
         }
         const updated = await engine.updateStory(a.story, brief).catch((err: Error) => fail(err.message))
         return { slug: updated.slug, file: `ideas/${updated.slug}.md`, story: ideaSummary(updated) }
+      }
+    )
+  )
+
+  // ---- series ----
+  server.registerTool(
+    'list_series',
+    { description: 'List the series (books that continue each other, with shared characters and canon), one compact row each with its books in order.', annotations: READ },
+    run(async () => {
+      const [all, refs, ideas] = [await engine.series.list(), await bookRefs(engine.books), await engine.ideas.list()]
+      return all.map((s) => ({ slug: s.slug, title: s.title, genre: s.data.genre ?? null, format: s.data.format ?? null, books: seriesMembers(s.slug, refs, ideas).map(({ slug, title, index, kind, stage, score }) => ({ slug, title, index, kind, stage, score })) }))
+    })
+  )
+
+  server.registerTool(
+    'get_series',
+    {
+      description: 'One series in full: its file (premise = the series arc, recurring characters, setting, style, extra sections) and its books in order with stage and score. A story that no book has started yet is listed with kind "story".',
+      inputSchema: { series: z.string().describe('Series slug') },
+      annotations: READ
+    },
+    run(async ({ series }: { series: string }) => {
+      const s = await needSeries(series)
+      const row = await seriesRow(series)
+      return { slug: s.slug, file: `series/${s.slug}.md`, title: s.title, genre: row.genre, format: row.format, brief: row.brief, books: row.books }
+    })
+  )
+
+  const seriesBrief = (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; genre?: string }): StoryBrief => ({
+    ...emptyBrief(),
+    title: a.title?.trim() ?? '',
+    premise: a.premise ?? '',
+    plot: a.plot ?? '',
+    characters: (a.characters ?? []).filter((c) => c.name.trim()).map(toCharacter),
+    setting: a.setting ?? '',
+    style: a.style ?? '',
+    sections: a.sections ?? [],
+    ...(a.format ? { format: a.format } : {}),
+    ...(a.genre ? { genre: a.genre } : {})
+  })
+  const seriesInput = {
+    premise: z.string().optional().describe('The arc of the whole series'),
+    plot: z.string().optional().describe('Where the series is going, in any detail you like'),
+    characters: z.array(characterSchema).optional().describe('The recurring cast: every book gets them, and their end state is carried from book to book'),
+    setting: z.string().optional(),
+    style: z.string().optional().describe('Voice, tone, point of view for every book'),
+    sections: z.array(sectionSchema).optional().describe('Any extra headed text (rules of the world, ...)'),
+    genre: z.string().optional(),
+    format: z.string().optional().describe('A format id from config/formats.md (informational for the series)')
+  }
+
+  server.registerTool(
+    'add_series',
+    {
+      description:
+        'Create a series: a title, the series arc (premise), the recurring characters, setting and style. Then add its books with add_story {series}: each gets the series and the earlier books (summaries, cast end states, open threads), and book N starts only when book N-1 is published. Returns the series slug.',
+      inputSchema: { title: z.string().describe('The series title'), ...seriesInput },
+      annotations: WRITE
+    },
+    run(async (a: { title: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; genre?: string }) => {
+      checkFormat(a.format)
+      if (!a.title.trim()) fail('a series needs a title')
+      const s = await engine.addSeries(seriesBrief(a)).catch((err: Error) => fail(err.message))
+      return { slug: s.slug, file: `series/${s.slug}.md`, series: await seriesRow(s.slug) }
+    })
+  )
+
+  server.registerTool(
+    'update_series',
+    {
+      description: 'Change a series. Only the fields you give change. `characters` replaces the whole cast; `add_characters` adds characters (one with a name that is already there is replaced). An empty string clears a text field. Its books stay.',
+      inputSchema: {
+        series: z.string().describe('Series slug'),
+        title: z.string().optional(),
+        ...seriesInput,
+        add_characters: z.array(characterSchema).optional().describe('Adds to the cast')
+      },
+      annotations: WRITE
+    },
+    run(
+      async (a: {
+        series: string
+        title?: string
+        premise?: string
+        plot?: string
+        characters?: z.infer<typeof characterSchema>[]
+        add_characters?: z.infer<typeof characterSchema>[]
+        setting?: string
+        style?: string
+        sections?: z.infer<typeof sectionSchema>[]
+        format?: string
+        genre?: string
+      }) => {
+        const s = await needSeries(a.series)
+        checkFormat(a.format)
+        const brief = { ...s.brief }
+        if (a.title !== undefined) brief.title = a.title.trim()
+        if (a.premise !== undefined) brief.premise = a.premise
+        if (a.plot !== undefined) brief.plot = a.plot
+        if (a.setting !== undefined) brief.setting = a.setting
+        if (a.style !== undefined) brief.style = a.style
+        if (a.sections !== undefined) brief.sections = a.sections
+        if (a.characters !== undefined) brief.characters = a.characters.filter((c) => c.name.trim()).map(toCharacter)
+        for (const c of a.add_characters ?? []) {
+          if (!c.name.trim()) continue
+          const next = toCharacter(c)
+          const i = brief.characters.findIndex((x) => x.name.toLowerCase() === next.name.toLowerCase())
+          if (i >= 0) brief.characters[i] = next
+          else brief.characters.push(next)
+        }
+        for (const k of ['format', 'genre'] as const) {
+          if (a[k] === undefined) continue
+          if (a[k]!.trim()) brief[k] = a[k]!.trim()
+          else delete brief[k]
+        }
+        const updated = await engine.updateSeries(a.series, brief).catch((err: Error) => fail(err.message))
+        return { slug: updated.slug, file: `series/${updated.slug}.md`, series: await seriesRow(updated.slug) }
       }
     )
   )

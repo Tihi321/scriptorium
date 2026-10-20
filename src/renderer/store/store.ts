@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla'
-import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
+import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, SeriesSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
 import {
   asAgentState,
   bookColor,
@@ -38,6 +38,10 @@ export interface OfficeState {
   topics: TopicSummary[]
   /** The owner's open stories and the last used ones. */
   ideas: IdeaSummary[]
+  /** The series, with their books in order. */
+  series: SeriesSummary[]
+  /** "Next book" was clicked in a series: the story form opens with this series (slug) selected, then clears it. */
+  storySeries: string | null
   /** The enabled formats, for the story form. */
   formats: FormatSummary[]
   settings: SettingsSummary | null
@@ -79,6 +83,8 @@ export interface OfficeActions {
   openDraft(slug: string | null): void
   setTerminal(open: boolean, mode?: 'agent' | 'book'): void
   setView(view: 'office' | 'library'): void
+  /** Asks the story form (Ideas tab) to open with this series selected. The form clears it with null. */
+  setStorySeries(series: string | null): void
   openBookCard(slug: string | null, reading?: boolean): void
   setReading(reading: boolean): void
   setSettingsOpen(open: boolean): void
@@ -113,6 +119,8 @@ function initial(): OfficeState {
     checkingServers: false,
     topics: [],
     ideas: [],
+    series: [],
+    storySeries: null,
     formats: [],
     settings: null,
     secretsSet: [],
@@ -211,6 +219,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         books: booksFromSnapshot(e.books, now),
         topics: e.topics,
         ideas: e.ideas ?? [],
+        series: e.series ?? [],
         formats: e.formats ?? [],
         spend: e.spend,
         models: e.models,
@@ -252,6 +261,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       return { topics: e.topics }
     case 'ideas.updated':
       return { ideas: e.ideas }
+    case 'series.updated':
+      return { series: e.series }
     case 'kindle.sent':
       return { kindle: { ...s.kindle, [e.book]: e.ok ? { state: 'ok' } : { state: 'error', error: e.error } } }
     case 'secrets.updated':
@@ -382,6 +393,9 @@ export function createOfficeStore() {
     },
     setView(view) {
       set({ view })
+    },
+    setStorySeries(series) {
+      set({ storySeries: series })
     },
     openBookCard(slug, reading = false) {
       set({ openBook: slug, reading: slug ? reading : false })

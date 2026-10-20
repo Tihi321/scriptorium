@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { readReaderPages } from './publish/reader'
 import { briefOf } from '../shared/brief'
-import type { AgentSummary, BookSummary, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, ServerStatus, TopicSummary } from '../shared/protocol'
+import type { AgentSummary, BookSummary, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, SeriesSummary, ServerStatus, TopicSummary } from '../shared/protocol'
 import type { FormatEntry } from '../shared/schemas'
 import type { AgentDef } from './agents/agents'
 import type { BookStore } from './pipeline/books'
@@ -10,6 +10,8 @@ import type { ModelRegistry } from './models/registry'
 import type { ModelRouter } from './models/router'
 import type { Scheduler } from './queue/scheduler'
 import type { IdeaFile } from './store/ideas'
+import { bookRefs, seriesMembers } from './store/series'
+import type { SeriesFile, SeriesStore } from './store/series'
 import type { TopicRow } from './store/topics'
 
 const exists = (file: string) => fs.access(file).then(() => true, () => false)
@@ -37,8 +39,25 @@ export const ideaSummary = (i: IdeaFile): IdeaSummary => {
     book: i.data.book,
     titleFixed: i.data.title_fixed === true,
     characters: brief.characters.length,
+    ...(i.data.series ? { series: i.data.series, seriesIndex: i.data.series_index ?? null } : {}),
     brief
   }
+}
+
+/** One series with its books and waiting stories in order. */
+export const seriesSummary = (s: SeriesFile, members: ReturnType<typeof seriesMembers>): SeriesSummary => ({
+  slug: s.slug,
+  title: s.title,
+  genre: s.data.genre?.trim() || null,
+  format: s.data.format?.trim() || null,
+  brief: s.brief,
+  books: members.map((m) => ({ slug: m.slug, title: m.title, index: m.index, kind: m.kind, stage: m.stage, score: m.score }))
+})
+
+/** Every series with its books in order (a story no book has started yet is listed after the books before it). */
+export async function seriesSummaries(d: { series: SeriesStore; books: BookStore; ideas: { list(): Promise<IdeaFile[]> } }): Promise<SeriesSummary[]> {
+  const [all, refs, ideas] = await Promise.all([d.series.list(), bookRefs(d.books), d.ideas.list()])
+  return all.map((s) => seriesSummary(s, seriesMembers(s.slug, refs, ideas)))
 }
 
 /** The owner's open stories (oldest first, the order they are picked) and the last `used` ones that books were made from (newest first). */

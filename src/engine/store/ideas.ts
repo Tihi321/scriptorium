@@ -33,6 +33,7 @@ const briefFields = (b: StoryBrief) => ({
   topic: b.topic?.trim() || null,
   format: b.format?.trim() || null,
   ...(b.genre?.trim() ? { genre: b.genre.trim() } : {}),
+  ...(b.series?.trim() ? { series: b.series.trim(), ...(b.seriesIndex ? { series_index: b.seriesIndex } : {}) } : {}),
   ...(b.models && Object.keys(b.models).length ? { role_models: b.models } : {})
 })
 
@@ -130,7 +131,7 @@ export class IdeaStore {
     const doc = parseMd(await fs.readFile(idea.file, 'utf8'), idea.file)
     const fixed = !!brief.title.trim()
     const title = fixed ? brief.title.trim() : briefLabel(brief) || 'Untitled story'
-    const { format: _f, topic: _t, genre: _g, title_fixed: _x, role_models: _m, ...rest } = doc.data
+    const { format: _f, topic: _t, genre: _g, title_fixed: _x, role_models: _m, series: _s, series_index: _si, ...rest } = doc.data
     const data = { ...rest, kind: 'idea', title, ...(fixed ? { title_fixed: true } : {}), ...briefFields(brief) }
     const body = renderBrief(brief)
     await writeMd(idea.file, data, '\n' + body + '\n')

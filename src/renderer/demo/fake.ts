@@ -6,7 +6,7 @@
  * Recorded commands are in `window.__scriptoriumFake.commands`.
  */
 import { briefLabel } from '../../shared/brief'
-import type { AgentState, AgentSummary, CatalogModel, Command, EngineEvent, IdeaSummary, ModelSummary, ProviderSummary } from '../../shared/protocol'
+import type { AgentState, AgentSummary, CatalogModel, Command, EngineEvent, IdeaSummary, ModelSummary, ProviderSummary, SeriesSummary } from '../../shared/protocol'
 import { bookSummary as summaryOfBook, makeBookUrl, makeBooks, makeTopics, topicSummaries } from './library'
 import type { RendererApi } from '../api'
 
@@ -124,6 +124,7 @@ export function installFakeEngine(params: URLSearchParams): void {
   const topics = makeTopics()
   const books = makeBooks()
   const ideas: IdeaSummary[] = []
+  const seriesList: { slug: string; title: string; brief: SeriesSummary['brief'] }[] = []
   const formats = [
     { id: 'short-story', name: 'Short story', kinds: ['fiction'] },
     { id: 'novella', name: 'Novella', kinds: ['fiction'] },
@@ -191,6 +192,19 @@ export function installFakeEngine(params: URLSearchParams): void {
     book: a.book,
     jobId: a.jobId
   })
+  /** The demo's series: its stories in order (the demo has no books in a series). */
+  const seriesSummaries = (): SeriesSummary[] =>
+    seriesList.map((s) => ({
+      slug: s.slug,
+      title: s.title,
+      genre: s.brief.genre ?? null,
+      format: s.brief.format ?? null,
+      brief: s.brief,
+      books: ideas
+        .filter((i) => i.series === s.slug)
+        .sort((a, b) => (a.seriesIndex ?? 0) - (b.seriesIndex ?? 0))
+        .map((i) => ({ slug: i.slug, title: i.title, index: i.seriesIndex ?? 0, kind: 'story' as const, stage: 'story', score: null }))
+    }))
   const snapshot = (): EngineEvent => ({
     type: 'snapshot',
     dataDir: 'C:/demo/scriptorium-data',
@@ -200,6 +214,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     books: books.map((b) => summaryOfBook(b, topics)),
     topics: topicSummaries(topics, books),
     ideas: ideas.map((i) => ({ ...i })),
+    series: seriesSummaries(),
     formats,
     models: MODELS,
     providers: PROVIDERS.map((p) => ({ ...p })),
@@ -489,8 +504,30 @@ export function installFakeEngine(params: URLSearchParams): void {
           const title = b.title.trim() || briefLabel(b) || 'Untitled story'
           let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'idea'
           for (let n = 2; ideas.some((x) => x.slug === slug); n++) slug = `${slug.replace(/-\d+$/, '')}-${n}`
-          ideas.push({ slug, title, status: 'open', source: 'user', format: b.format ?? null, topic: b.topic ?? null, book: null, titleFixed: !!b.title.trim(), characters: b.characters.length, brief: b })
+          const series = b.series && seriesList.some((s) => s.slug === b.series) ? b.series : undefined
+          const seriesIndex = series ? Math.max(0, ...ideas.filter((i) => i.series === series).map((i) => i.seriesIndex ?? 0)) + 1 : undefined
+          ideas.push({ slug, title, status: 'open', source: 'user', format: b.format ?? null, topic: b.topic ?? null, book: null, titleFixed: !!b.title.trim(), characters: b.characters.length, ...(series ? { series, seriesIndex } : {}), brief: b })
           emit({ type: 'ideas.updated', ideas: ideas.map((i) => ({ ...i })) })
+          if (series) emit({ type: 'series.updated', series: seriesSummaries() })
+          break
+        }
+        case 'addSeries': {
+          const b = command.brief
+          const title = b.title.trim()
+          if (!title) break
+          let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'series'
+          for (let n = 2; seriesList.some((x) => x.slug === slug); n++) slug = `${slug.replace(/-\d+$/, '')}-${n}`
+          seriesList.push({ slug, title, brief: b })
+          emit({ type: 'series.updated', series: seriesSummaries() })
+          break
+        }
+        case 'updateSeries': {
+          const s = seriesList.find((x) => x.slug === command.series)
+          if (s && command.brief.title.trim()) {
+            s.title = command.brief.title.trim()
+            s.brief = command.brief
+            emit({ type: 'series.updated', series: seriesSummaries() })
+          }
           break
         }
         case 'updateStory': {

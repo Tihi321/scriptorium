@@ -74,7 +74,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -109,6 +109,67 @@ describe('MCP server', () => {
     expect((await call(c, 'add_story', { title: 'X', format: 'no-such-format' })).raw).toMatch(/unknown format/)
     expect((await call(c, 'add_story', { title: 'X', topic: 'no-such-topic' })).raw).toMatch(/unknown topic/)
     expect((await call(c, 'update_story', { story: 'nope', plot: 'x' })).raw).toMatch(/no story/)
+  })
+
+  it('makes a series, adds numbered books to it, and shows the books with stage and score', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    expect((await call(c, 'list_series')).data).toEqual([])
+    expect((await call(c, 'add_series', { title: ' ' })).isError).toBe(true)
+    expect((await call(c, 'add_series', { title: 'X', format: 'no-such-format' })).raw).toMatch(/unknown format/)
+    const added = await call(c, 'add_series', {
+      title: 'The Ninth Hour',
+      premise: 'A fraternity hides behind Paris.',
+      characters: [{ name: 'Dec', role: 'locksmith' }],
+      setting: 'Paris',
+      style: 'Comic',
+      genre: 'Mystery'
+    })
+    expect(added.isError).toBe(false)
+    expect(added.data).toMatchObject({ slug: 'the-ninth-hour', file: 'series/the-ninth-hour.md' })
+    expect((await readFile(path.join(env!.dir, 'series', 'the-ninth-hour.md'), 'utf8'))).toContain('kind: series')
+
+    // an unknown series is a tool error; books are numbered in the order they are added
+    expect((await call(c, 'add_story', { title: 'Lost', series: 'nope' })).raw).toMatch(/unknown series/)
+    const one = await call(c, 'add_story', { title: 'Case One', premise: 'x', series: 'the-ninth-hour' })
+    const two = await call(c, 'add_story', { title: 'Case Two', premise: 'y', series: 'the-ninth-hour' })
+    expect(one.isError).toBe(false)
+    expect(one.data.story).toMatchObject({ series: 'the-ninth-hour', seriesIndex: 1 })
+    expect(two.data.story).toMatchObject({ series: 'the-ninth-hour', seriesIndex: 2 })
+    // a started book of the series counts, and shows its stage and score
+    await env!.engine.books.create('case-zero', { title: 'Case Zero', stage: 'published', format: 'novel', target_words: 5000, series: 'the-ninth-hour', series_index: 3, score: 8.5 }, '')
+    const three = await call(c, 'add_story', { title: 'Case Three', premise: 'z', series: 'the-ninth-hour' })
+    expect(three.data.story.seriesIndex).toBe(4)
+
+    const got = await call(c, 'get_series', { series: 'the-ninth-hour' })
+    expect(got.data).toMatchObject({ slug: 'the-ninth-hour', title: 'The Ninth Hour', genre: 'Mystery' })
+    expect(got.data.brief.characters[0].name).toBe('Dec')
+    expect(got.data.books.map((b: { slug: string; index: number; kind: string; stage: string; score: number | null }) => [b.slug, b.index, b.kind, b.stage, b.score])).toEqual([
+      ['case-one', 1, 'story', 'story', null],
+      ['case-two', 2, 'story', 'story', null],
+      ['case-zero', 3, 'book', 'published', 8.5],
+      ['case-three', 4, 'story', 'story', null]
+    ])
+    expect((await call(c, 'list_series')).data[0]).toMatchObject({ slug: 'the-ninth-hour', books: [{ slug: 'case-one' }, { slug: 'case-two' }, { slug: 'case-zero', score: 8.5 }, { slug: 'case-three' }] })
+    expect((await call(c, 'get_series', { series: 'nope' })).raw).toMatch(/no series/)
+    expect((await call(c, 'list_stories')).data.find((s: { slug: string }) => s.slug === 'case-two')).toMatchObject({ series: 'the-ninth-hour', seriesIndex: 2 })
+
+    // update: merge the cast, keep the rest
+    const upd = await call(c, 'update_series', { series: 'the-ninth-hour', add_characters: [{ name: 'Ines', role: 'restorer' }], premise: 'New arc.' })
+    expect(upd.isError).toBe(false)
+    expect(upd.data.series.brief.characters.map((x: { name: string }) => x.name)).toEqual(['Dec', 'Ines'])
+    expect(upd.data.series.brief).toMatchObject({ premise: 'New arc.', setting: 'Paris', style: 'Comic' })
+    expect(upd.data.series.books).toHaveLength(4)
+    expect((await call(c, 'update_series', { series: 'nope', premise: 'x' })).raw).toMatch(/no series/)
+
+    // update_story moves a story to a series (renumbered) and out of it
+    const solo = await call(c, 'add_story', { title: 'Solo', premise: 's' })
+    expect(solo.data.story.series).toBeUndefined()
+    const moved = await call(c, 'update_story', { story: 'solo', series: 'the-ninth-hour' })
+    expect(moved.data.story).toMatchObject({ series: 'the-ninth-hour', seriesIndex: 5 })
+    const out = await call(c, 'update_story', { story: 'solo', series: '' })
+    expect(out.data.story.series).toBeUndefined()
+    expect((await call(c, 'update_story', { story: 'solo', series: 'nope' })).raw).toMatch(/unknown series/)
   })
 
   it('refuses to update a used story', async () => {
