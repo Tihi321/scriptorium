@@ -120,6 +120,13 @@ export interface BookSummary {
   /** Topic kind: fiction, juvenile-fiction, ... */
   kind: string | null
   format: string
+  /** `article`: a newspaper article (no cover, no EPUB, a page in `articlePage` instead); `book`: everything else. */
+  medium: 'book' | 'article'
+  /** Articles: the headline and the standfirst (the one-sentence summary under it), or null. */
+  headline: string | null
+  standfirst: string | null
+  /** Articles: `books/<slug>/out/article.html` once it is published, relative to the data folder, else null. */
+  articlePage: string | null
   /** The book this one adapts into a visual novel script: its slug and title (the title is the slug when the book is gone). */
   sourceBook?: { slug: string; title: string } | null
   stage: string

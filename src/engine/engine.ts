@@ -28,7 +28,7 @@ import { IdeaStore } from './store/ideas'
 import { bookRefs, nextSeriesIndex, SeriesStore } from './store/series'
 import type { SeriesFile } from './store/series'
 import type { IdeaFile } from './store/ideas'
-import { TopicsFile } from './store/topics'
+import { ARTICLE_KIND, TopicsFile } from './store/topics'
 import { readMd, writeMd } from './store/atomic'
 import { sendEpub, smtpTransport } from './publish/kindle'
 import type { TransportFactory } from './publish/kindle'
@@ -728,8 +728,26 @@ export class Engine {
     return { ...brief, series: slug, seriesIndex }
   }
 
-  /** Creates a story from a brief. Throws when the brief is empty. */
+  /**
+   * A newspaper article is written for a section (a topic of kind `article`) with an article format, and nothing else is: a brief that names a
+   * book topic with an article format, or a section with a book format, is refused. A story with only a format (no topic) is an article of no section.
+   */
+  private async checkArticleBrief(brief: StoryBrief): Promise<void> {
+    const fmt = brief.format ? this.formats.find((f) => f.id === brief.format) : undefined
+    const topic = brief.topic ? (await this.topics.read()).find((t) => t.id === brief.topic) : undefined
+    const articleFormats = this.formats.filter((f) => f.enabled && f.article).map((f) => f.id).join(', ') || '(no article format is enabled)'
+    if (topic?.kind === ARTICLE_KIND && fmt && !fmt.article) {
+      throw new Error(`"${topic.id}" is a newspaper section (kind article): its format must be an article format (${articleFormats}), not "${fmt.id}"`)
+    }
+    if (fmt?.article && topic && topic.kind !== ARTICLE_KIND) {
+      throw new Error(`"${fmt.id}" is an article format, but "${topic.id}" is a ${topic.kind} topic: articles go in a newspaper section (a topic of kind article, e.g. news-technology; list_topics shows them)`)
+    }
+    if (fmt?.article && brief.sourceBook) throw new Error('an article cannot adapt a book (source_book is for visual novel scripts)')
+  }
+
+  /** Creates a story from a brief. Throws when the brief is empty, or names an article format and a topic that is not a newspaper section (or the other way round). */
   async addStory(brief: StoryBrief): Promise<IdeaFile> {
+    await this.checkArticleBrief(brief)
     brief = await this.withSeries(brief)
     const idea = await this.ideas.createStory(brief)
     this.log(`story "${idea.title}" added (${idea.slug})`)
@@ -747,6 +765,7 @@ export class Engine {
   async adaptBook(input: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }): Promise<IdeaFile> {
     const src = await this.books.read(input.book)
     if (!src) throw new Error(`no book "${input.book}" (list_books shows the slugs)`)
+    if (src.data.article === true) throw new Error(`"${src.data.title}" is a newspaper article: only a book can be adapted into a visual novel`)
     if (src.data.stage !== 'published') throw new Error(`"${src.data.title}" is not published yet (stage ${src.data.stage}): only a finished book can be adapted`)
     const fmt = this.formats.find((f) => f.enabled && f.id === input.format)
     if (!fmt?.script) {
@@ -771,6 +790,7 @@ export class Engine {
 
   /** Replaces the brief of a story. Throws when there is no such story, or a book was already started from it. */
   async updateStory(slug: string, brief: StoryBrief): Promise<IdeaFile> {
+    await this.checkArticleBrief(brief)
     brief = await this.withSeries(brief, (await this.ideas.list()).find((i) => i.slug === slug))
     const idea = await this.ideas.updateStory(slug, brief)
     this.log(`story "${idea.title}" changed (${idea.slug})`)
@@ -809,6 +829,7 @@ export class Engine {
     if (!s.kindleAddress || !s.fromAddress) return fail('set the Kindle address and the sender address in the settings first')
     if (!this.opts.mailTransport && !s.smtpHost) return fail('set the SMTP server in the settings first')
     const epubPath = this.books.file(slug, 'out', `${slug}.epub`)
+    if (book.data.article === true) return fail('an article has no EPUB: it is a web page (out/article.html)')
     if (!(await fs.access(epubPath).then(() => true, () => false))) return fail('this book has no EPUB yet')
     try {
       const transport = (this.opts.mailTransport ?? smtpTransport)(s, resolveKey('SCRIPTORIUM_SMTP_PASSWORD'))

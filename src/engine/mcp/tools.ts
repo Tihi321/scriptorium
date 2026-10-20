@@ -128,6 +128,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         running: engine.scheduler.runningJobs(),
         booksByStage: byStage,
         maxBooksInProgress: engine.factory.max_books_in_progress,
+        maxArticlesInProgress: engine.factory.max_articles_in_progress,
         openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
         clientTasks: engine.clientQueue.counts(),
         agents: { total: agents.length, busy: busy.length, idle: agents.filter((a) => a.state === 'idle').length, paused: agents.filter((a) => a.paused).length },
@@ -139,19 +140,55 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'list_books',
     {
-      description: 'List the books, one compact row each. Optionally only one stage (e.g. published, failed, drafting).',
-      inputSchema: { stage: z.string().optional().describe('Only books in this stage') },
+      description: 'List the books, one compact row each. Optionally only one stage (e.g. published, failed, drafting) or one medium (book or article: the newspaper articles are in the list too, with medium "article"; list_articles is the newspaper view).',
+      inputSchema: { stage: z.string().optional().describe('Only books in this stage'), medium: z.enum(['book', 'article']).optional().describe('Only books (everything but articles) or only newspaper articles') },
       annotations: READ
     },
-    run(async ({ stage }: { stage?: string }) => {
+    run(async ({ stage, medium }: { stage?: string; medium?: 'book' | 'article' }) => {
       const all = await topics()
       const rows = []
       for (const slug of await engine.books.slugs()) {
         const b = await bookSummary(engine.books, slug, all)
-        if (!b || (stage && b.stage !== stage)) continue
-        rows.push({ slug, title: b.title, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused, ...(b.sourceBook ? { sourceBook: b.sourceBook.slug } : {}) })
+        if (!b || (stage && b.stage !== stage) || (medium && b.medium !== medium)) continue
+        rows.push({ slug, title: b.title, medium: b.medium, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused, ...(b.sourceBook ? { sourceBook: b.sourceBook.slug } : {}) })
       }
       return rows
+    })
+  )
+
+  server.registerTool(
+    'list_articles',
+    {
+      description:
+        'The newspaper: the published articles, newest first, one compact row each (slug, headline, standfirst, section, byline, date, words, score, and the path of the page: books/<slug>/out/article.html, with out/article.md beside it). Optionally only one section (a topic id like news-technology, or its name) and only articles published on or after a date. stage "all" lists the articles in progress too.',
+      inputSchema: {
+        section: z.string().optional().describe('A newspaper section: the topic id (news-technology) or its name (Technology)'),
+        since: z.string().optional().describe('Only articles published on or after this date (YYYY-MM-DD, or a full ISO time)'),
+        stage: z.string().optional().describe('Default published. A stage such as drafting, or "all"')
+      },
+      annotations: READ
+    },
+    run(async ({ section, since, stage }: { section?: string; since?: string; stage?: string }) => {
+      let from = 0
+      if (since) {
+        from = Date.parse(since)
+        if (Number.isNaN(from)) fail(`"${since}" is not a date: use YYYY-MM-DD`)
+      }
+      const want = section?.trim().toLowerCase()
+      const all = await topics()
+      const rows: { publishedAt: string | null; row: Record<string, unknown> }[] = []
+      for (const slug of await engine.books.slugs()) {
+        const b = await bookSummary(engine.books, slug, all)
+        if (!b || b.medium !== 'article') continue
+        if ((stage ?? 'published') !== 'all' && b.stage !== (stage ?? 'published')) continue
+        if (want && b.topic?.id.toLowerCase() !== want && b.topic?.name.toLowerCase() !== want) continue
+        if (from && (!b.publishedAt || Date.parse(b.publishedAt) < from)) continue
+        rows.push({
+          publishedAt: b.publishedAt,
+          row: { slug, headline: b.headline ?? b.title, standfirst: b.standfirst, section: b.topic?.name ?? null, sectionId: b.topic?.id ?? null, byline: b.author, publishedAt: b.publishedAt, stage: b.stage, words: b.words, score: b.score, page: b.articlePage }
+        })
+      }
+      return rows.sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')).map((r) => r.row)
     })
   )
 
@@ -250,8 +287,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
         setting: z.string().optional(),
         style: z.string().optional().describe('Voice, tone, point of view'),
         sections: z.array(sectionSchema).optional().describe('Any extra headed text (themes, rules of the world, ...)'),
-        format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks'),
-        topic: z.string().optional().describe('A topic id from list_topics'),
+        format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks. "article" or "feature-article" writes a researched newspaper article (use a topic of kind article, e.g. news-technology; the title is the headline, the premise the subject and angle): it has no cover and no EPUB and appears in list_articles'),
+        topic: z.string().optional().describe('A topic id from list_topics. A newspaper section (kind article) only takes article formats, and article formats only take a newspaper section'),
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
         humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),

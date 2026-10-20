@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrateHumanizer } from './migrations'
+import { migrateHumanizer, migrateNewspaper } from './migrations'
 
 /** Folders created inside the data folder (see "Shared files" in docs/design.md). */
 export const DATA_LAYOUT = [
@@ -106,7 +106,9 @@ export async function initDataFolder(dataDir: string, seedDir: string | undefine
   const skipDirs = new Set(existsSync(path.join(dataDir, 'agents')) ? ['agents'] : [])
   if (seedDir && existsSync(seedDir)) await copyTree(seedDir, dataDir, dataDir, result, skipDirs)
   // files the seed never replaces: what a data folder from before a feature needs to have
-  result.migrated.push(...(await migrateHumanizer(dataDir, seedDir && existsSync(seedDir) ? seedDir : undefined)).changes)
+  const seedOrNone = seedDir && existsSync(seedDir) ? seedDir : undefined
+  result.migrated.push(...(await migrateHumanizer(dataDir, seedOrNone)).changes)
+  result.migrated.push(...(await migrateNewspaper(dataDir, seedOrNone)).changes)
   for (const rel of DATA_LAYOUT) {
     const dir = path.join(dataDir, ...rel.split('/'))
     if (!existsSync(dir)) {

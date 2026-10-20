@@ -47,6 +47,8 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
   }
   const known = (book: string | null) => d.research.store.available(book)
   const formatOfBook = (id: string) => d.getFormats().find((f) => f.id === id)
+  /** A newspaper article: its search asks for recent news, and its notes stay with it. */
+  const isArticle = async (book: string | null) => (book ? (await d.books.read(book))?.data.article === true : false)
 
   // ---- the researcher ----
   sched.register('research', async (ctx) => {
@@ -57,6 +59,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     const askedBy = ctx.job.requested_by
     const purpose = String(ctx.job.purpose ?? '')
     const idea = typeof ctx.job.idea === 'string' ? ctx.job.idea : undefined
+    const news = await isArticle(book)
     const context = [purpose ? `Why it is asked: ${purpose}` : '', book ? `It is for the book "${(await d.books.read(book))?.data.title ?? book}".` : ''].filter(Boolean).join('\n')
 
     // 1. what the library already knows (the shared notes and this book's notes)
@@ -115,7 +118,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
 
     // 3b. the helpers of the steps above
     async function gatherPages(query: string, forQuestion: string, seen: Set<string>) {
-      const found = await d.search.search(query, { signal: ctx.signal, book, agent: ctx.agent.id, limit: 5 })
+      const found = await d.search.search(query, { signal: ctx.signal, book, agent: ctx.agent.id, limit: 5, ...(news ? { news: true, days: 7 } : {}) })
       if (!found) return null
       // read the results (pages that need a download: only the first three), then keep the three that talk most about what was asked
       const terms = searchTerms(forQuestion, 8).map((t) => t.toLowerCase())
@@ -217,12 +220,13 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     const slug = ctx.job.book!
     const book = (await d.books.read(slug))!.data
     const nf = formatOfBook(book.format)?.nonfiction === true
+    const art = book.article === true
     const max = Math.max(0, Math.min(4, nf ? d.getFactory().research_limit_nonfiction : d.getFactory().research_limit_per_book))
     let needs = false
     let questions: string[] = []
     if (max > 0) {
       try {
-        const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', nf ? 'research_plan_nf' : 'research_plan', {
+        const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', art ? 'research_plan_article' : nf ? 'research_plan_nf' : 'research_plan', {
           title: book.title,
           topic: book.topic_name ?? book.genre,
           genre: book.genre,
@@ -240,7 +244,9 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
       }
     }
     // non-fiction: even when the model gave nothing, the book's own subject is researched before the outline
-    if (nf && questions.length === 0 && max > 0) questions = [`${book.title}: an overview`, `${book.topic_name ?? book.genre} history and background`].filter((q) => questionKey(q).length >= 3).slice(0, max)
+    if (nf && questions.length === 0 && max > 0) {
+      questions = (art ? [`${book.title}: the latest news`, `${book.topic_name ?? book.genre} news this week`] : [`${book.title}: an overview`, `${book.topic_name ?? book.genre} history and background`]).filter((q) => questionKey(q).length >= 3).slice(0, max)
+    }
     const asked: { question: string; job: string | null; status: string }[] = []
     for (const q of questions) {
       const a = await d.research.ask({ question: q, book: slug, askedBy: ctx.agent.id, purpose: 'the outline of this book' })
@@ -264,13 +270,14 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     const outline = (await d.books.outline(slug))!
     const entry = outline.chapters.find((c) => c.n === n)
     const nf = formatOfBook(book.format)?.nonfiction === true
+    const art = book.article === true
     const max = Math.max(0, Math.min(3, nf ? d.getFactory().research_limit_nonfiction : d.getFactory().research_limit_per_book))
     const file = d.books.file(slug, 'reports', `prep-ch-${pad2(n)}.md`)
     let questions: string[] = []
     if (entry && max > 0) {
       try {
         const have = await known(slug)
-        const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', nf ? 'research_prep_nf' : 'research_prep', {
+        const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', art ? 'research_prep_article' : nf ? 'research_prep_nf' : 'research_prep', {
           title: book.title,
           genre: book.genre,
           chapter_n: n,

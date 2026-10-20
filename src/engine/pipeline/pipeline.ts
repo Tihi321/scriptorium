@@ -5,7 +5,7 @@ import type { Scheduler } from '../queue/scheduler'
 import { advance, chaptersToRewrite, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
 import { findMarkers } from '../research/markers'
 import type { BookState, ChapterScores, ReviewSummary } from './advance'
-import { countBooksInProgress } from './books'
+import { countBooksInProgress, countInProgress } from './books'
 import type { BookStore } from './books'
 import { bookRefs } from '../store/series'
 import { eligibleTopics, pickNext, registerHandlers } from './handlers'
@@ -445,12 +445,14 @@ export class Pipeline {
   }
 
   private async startBooks(): Promise<void> {
-    const max = this.o.getFactory().max_books_in_progress
+    const factory = this.o.getFactory()
     // pending first, books second: a start job that finishes in between is then counted as a book (never missed)
     const pending = await this.pendingJobs('start_book')
-    const inProgress = await this.countInProgress()
-    if (inProgress + pending >= max || pending > 0) return
-    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books))
+    const open = await countInProgress(this.books)
+    // books and articles have separate limits: a full set of articles never holds a book back, and the other way round
+    const room = { books: open.books < factory.max_books_in_progress, articles: open.articles < factory.max_articles_in_progress }
+    if ((!room.books && !room.articles) || pending > 0) return
+    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room)
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {
@@ -476,7 +478,8 @@ export class Pipeline {
 
   async requestCover(slug: string): Promise<void> {
     const b = await this.books.read(slug)
-    if (!b) return
+    // an article has no cover
+    if (!b || b.data.article === true) return
     if (!this.o.coverRenderer) {
       await this.books.update(slug, () => ({ cover_png: 'pending' }))
       return
@@ -497,7 +500,7 @@ export class Pipeline {
     if (!this.o.coverRenderer) return
     for (const slug of await this.books.slugs()) {
       const b = await this.books.read(slug)
-      if (b && (b.data.cover_png === 'pending' || b.data.cover_png === 'requested') && b.data.stage === 'published') await this.requestCover(slug)
+      if (b && b.data.article !== true && (b.data.cover_png === 'pending' || b.data.cover_png === 'requested') && b.data.stage === 'published') await this.requestCover(slug)
     }
   }
 
@@ -532,6 +535,11 @@ export class Pipeline {
     const b = await this.books.read(slug)
     if (!b || b.data.stage !== 'published') return false
     const d = b.data
+    // an article has no cover: its page is written again (a new headline shows)
+    if (d.article === true) {
+      await this.books.buildArticle(slug)
+      return true
+    }
     await writeCoverHtml(this.o.dataDir, slug, {
       title: d.title,
       author: d.author ?? 'Unknown',
@@ -552,7 +560,7 @@ export class Pipeline {
     const b = await this.books.read(slug)
     if (!clean || clean.length > 200 || !b || b.data.stage !== 'published') return false
     if (clean !== b.data.title) {
-      await this.books.update(slug, () => ({ title: clean }))
+      await this.books.update(slug, () => ({ title: clean, ...(b.data.article === true ? { headline: clean } : {}) }))
       this.o.log(`renamed ${slug}: "${b.data.title}" is now "${clean}"`)
     }
     return this.remakeCover(slug)

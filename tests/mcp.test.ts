@@ -510,3 +510,51 @@ describe('MCP book models', () => {
     expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'visual-novel', models: { writer: 'no/such' } })).isError).toBe(true)
   })
 })
+
+describe('MCP newspaper', () => {
+  const article = (e: TestEnv, slug: string, o: Record<string, unknown> = {}) =>
+    e.engine.books.create(slug, { title: slug, stage: 'published', format: 'article', article: true, nonfiction: true, target_words: 900, topic: 'news-technology', topic_name: 'Technology', author: 'Mara Quill', headline: `Headline of ${slug}`, standfirst: `Standfirst of ${slug}`, published: '2026-10-19T09:00:00.000Z', ...o }, '')
+
+  it('lists list_articles, and add_story takes the article formats with a newspaper section only', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    expect((await c.listTools()).tools.map((t) => t.name)).toContain('list_articles')
+    const ok = await call(c, 'add_story', { premise: 'The new EU rules on AI.', format: 'article', topic: 'news-technology' })
+    expect(ok.isError).toBe(false)
+    expect(ok.data.story).toMatchObject({ format: 'article', topic: 'news-technology' })
+    expect((await call(c, 'add_story', { premise: 'A feature with no section.', format: 'feature-article' })).isError).toBe(false)
+    expect((await call(c, 'add_story', { premise: 'x', format: 'article', topic: 'fic-mystery-cozy' })).raw).toMatch(/article format.*not a newspaper section|articles go in a newspaper section/)
+    expect((await call(c, 'add_story', { premise: 'x', format: 'short-story', topic: 'news-science' })).raw).toMatch(/newspaper section.*must be an article format/)
+    expect((await call(c, 'add_topic', { name: 'Gardening news', kind: 'article' })).isError).toBe(false)
+    expect((await call(c, 'list_topics')).data.find((t: { id: string }) => t.id === 'my-gardening-news')).toMatchObject({ kind: 'article' })
+    // a story can be changed into an unfitting pair neither
+    expect((await call(c, 'update_story', { story: ok.data.slug, topic: 'fic-mystery-cozy' })).isError).toBe(true)
+  })
+
+  it('shows the published articles newest first, by section and date, and the books list has a medium filter', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await article(env!, 'chips', { published: '2026-10-19T09:00:00.000Z' })
+    await article(env!, 'quake', { topic: 'news-science', topic_name: 'Science', published: '2026-10-20T08:00:00.000Z' })
+    await article(env!, 'old-one', { published: '2026-10-10T08:00:00.000Z' })
+    await article(env!, 'in-progress', { stage: 'drafting', published: undefined })
+    await makeBook(env!, 'a-book', 'published')
+    const all = await call(c, 'list_articles')
+    expect(all.data.map((a: { slug: string }) => a.slug)).toEqual(['quake', 'chips', 'old-one'])
+    expect(all.data[0]).toMatchObject({ headline: 'Headline of quake', standfirst: 'Standfirst of quake', section: 'Science', sectionId: 'news-science', byline: 'Mara Quill', stage: 'published' })
+    expect((await call(c, 'list_articles', { section: 'news-technology' })).data.map((a: { slug: string }) => a.slug)).toEqual(['chips', 'old-one'])
+    expect((await call(c, 'list_articles', { section: 'science' })).data.map((a: { slug: string }) => a.slug)).toEqual(['quake'])
+    expect((await call(c, 'list_articles', { since: '2026-10-19' })).data.map((a: { slug: string }) => a.slug)).toEqual(['quake', 'chips'])
+    expect((await call(c, 'list_articles', { section: 'World' })).data).toEqual([])
+    expect((await call(c, 'list_articles', { stage: 'all' })).data.map((a: { slug: string }) => a.slug)).toContain('in-progress')
+    expect((await call(c, 'list_articles', { since: 'yesterday-ish' })).raw).toMatch(/not a date/)
+    const books = await call(c, 'list_books', { medium: 'book' })
+    expect(books.data.map((b: { slug: string }) => b.slug)).toEqual(['a-book'])
+    expect(books.data[0].medium).toBe('book')
+    expect((await call(c, 'list_books', { medium: 'article' })).data.map((b: { slug: string }) => b.slug).sort()).toEqual(['chips', 'in-progress', 'old-one', 'quake'])
+    expect((await call(c, 'list_books')).data).toHaveLength(5)
+    // an article is not a book that can be adapted, and the factory status shows the article limit
+    expect((await call(c, 'adapt_book', { book: 'chips', format: 'visual-novel' })).raw).toMatch(/newspaper article/)
+    expect((await call(c, 'factory_status')).data.maxArticlesInProgress).toBe(3)
+  })
+})

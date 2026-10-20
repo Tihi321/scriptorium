@@ -62,7 +62,7 @@ export class SearchService {
    * Searches with the first provider that gives results. A provider that fails, or has no results, falls through to the next.
    * A paid provider is skipped while a budget cap is reached. Every request that was answered is written to the spend rows.
    */
-  async search(query: string, ctx: { signal?: AbortSignal; book?: string | null; agent?: string; limit?: number } = {}): Promise<SearchOutcome | null> {
+  async search(query: string, ctx: { signal?: AbortSignal; book?: string | null; agent?: string; limit?: number; news?: boolean; days?: number } = {}): Promise<SearchOutcome | null> {
     for (const p of this.providers()) {
       if (ctx.signal?.aborted) throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
       if (p.pricePerRequest > 0 && this.o.budget && !this.o.budget.isExhausted(ctx.book).ok) {
@@ -71,7 +71,7 @@ export class SearchService {
       }
       const started = Date.now()
       try {
-        const results = await p.search(query, { signal: ctx.signal, limit: ctx.limit ?? 5 })
+        const results = await p.search(query, { signal: ctx.signal, limit: ctx.limit ?? 5, ...(ctx.news ? { news: true, days: ctx.days } : {}) })
         await this.recordSpend(p, ctx, Date.now() - started)
         if (results.length > 0) return { provider: p.id, results }
         this.o.log?.(`search provider ${p.id}: no results for "${query}"`)

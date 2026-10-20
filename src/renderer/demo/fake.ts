@@ -134,7 +134,9 @@ export function installFakeEngine(params: URLSearchParams): void {
     { id: 'picture-book', name: 'Picture book', kinds: ['juvenile-fiction'] },
     { id: 'short-nonfiction', name: 'Short non-fiction book', kinds: ['nonfiction'] },
     { id: 'visual-novel', name: 'Visual novel', kinds: ['visual-novel'] },
-    { id: 'choice-visual-novel', name: 'Visual novel with choices', kinds: ['visual-novel'] }
+    { id: 'choice-visual-novel', name: 'Visual novel with choices', kinds: ['visual-novel'] },
+    { id: 'article', name: 'Newspaper article', kinds: ['article'] },
+    { id: 'feature-article', name: 'Feature article', kinds: ['article'] }
   ]
   const agents: FakeAgent[] = STAFF.map(([role, name, id, model]) => ({ id, name, role, paused: false, state: 'idle', model, override: null, ticks: 0, tokens: 0, phase: 'main' }))
   const activeBooks = books.filter((b) => !['published', 'rejected', 'idea'].includes(b.stage))
@@ -512,6 +514,17 @@ export function installFakeEngine(params: URLSearchParams): void {
           const series = b.series && seriesList.some((s) => s.slug === b.series) ? b.series : undefined
           const seriesIndex = series ? Math.max(0, ...ideas.filter((i) => i.series === series).map((i) => i.seriesIndex ?? 0)) + 1 : undefined
           ideas.push({ slug, title, status: 'open', source: 'user', format: b.format ?? null, topic: b.topic ?? null, book: null, titleFixed: !!b.title.trim(), characters: b.characters.length, ...(series ? { series, seriesIndex } : {}), brief: b })
+          // a newspaper article starts at once in the demo (like an adaptation): a book of its section, with a headline from the subject
+          const sectionIndex = b.topic ? topics.findIndex((x) => x.id === b.topic && x.kind === 'article') : -1
+          if (sectionIndex >= 0 || (b.format && formats.some((x) => x.id === b.format && x.kinds.includes('article')))) {
+            let aSlug = slug
+            for (let n = 2; books.some((x) => x.slug === aSlug); n++) aSlug = `${slug.replace(/-\d+$/, '')}-${n}`
+            const idea = ideas[ideas.length - 1]!
+            Object.assign(idea, { status: 'used', book: aSlug })
+            books.push({ slug: aSlug, title, stage: 'outline', topic: Math.max(0, sectionIndex), rating: null, note: null, article: { standfirst: '', published: '' } })
+            emit({ type: 'book.updated', book: summaryOfBook(books[books.length - 1]!, topics) })
+            emit({ type: 'topics.updated', topics: topicSummaries(topics, books) })
+          }
           emit({ type: 'ideas.updated', ideas: ideas.map((i) => ({ ...i })) })
           if (series) emit({ type: 'series.updated', series: seriesSummaries() })
           break

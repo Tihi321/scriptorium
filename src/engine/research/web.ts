@@ -17,6 +17,10 @@ export interface SearchResult {
 export interface SearchOptions {
   signal?: AbortSignal
   limit?: number
+  /** Recent news: a provider that has a news mode asks for it (Tavily: `topic: "news"` and the last `days`). Others ignore it. */
+  news?: boolean
+  /** With `news`: how many days back. Default 7. */
+  days?: number
 }
 
 export interface SearchProvider {
@@ -216,6 +220,18 @@ async function getJson(fetchImpl: FetchImpl, url: string, init: RequestInit, ret
   }
 }
 
+/** The JSON body of a Tavily search. A news search (articles) uses `topic: "news"` and only the last `days` days (default 7). */
+export function tavilyRequest(query: string, opts: SearchOptions = {}): Record<string, unknown> {
+  return {
+    query,
+    search_depth: 'basic',
+    max_results: opts.limit ?? 5,
+    include_answer: false,
+    include_raw_content: false,
+    ...(opts.news ? { topic: 'news', days: Math.max(1, Math.floor(opts.days ?? 7)) } : {})
+  }
+}
+
 export interface TavilyOptions {
   id?: string
   apiKey: string
@@ -237,7 +253,7 @@ export class TavilyProvider implements SearchProvider {
     const json = (await getJson(this.o.fetchImpl ?? fetch, `${base}/search`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.o.apiKey}`, 'user-agent': USER_AGENT },
-      body: JSON.stringify({ query, search_depth: 'basic', max_results: opts.limit ?? 5, include_answer: false, include_raw_content: false }),
+      body: JSON.stringify(tavilyRequest(query, opts)),
       signal: opts.signal
     })) as { results?: { title?: string; url?: string; content?: string }[] }
     return (json.results ?? [])

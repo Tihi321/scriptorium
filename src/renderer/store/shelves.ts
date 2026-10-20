@@ -7,9 +7,45 @@ export interface Shelf {
   books: BookSummary[]
 }
 
-/** Published books per topic. Shelves exist for active topics and for topics that have books. */
+/** The newspaper articles among these books (medium `article`). The Library shows none of them: they have their own tab. */
+export const newspaperArticles = (books: BookSummary[]): BookSummary[] => books.filter((b) => b.medium === 'article')
+
+/** Articles that are not published (being written, rejected or failed), newest started first is not known: in the order given. */
+export const openArticles = (articles: BookSummary[]): BookSummary[] => articles.filter((a) => a.stage !== 'published')
+
+export interface FrontPageDay {
+  /** `YYYY-MM-DD` (UTC). */
+  day: string
+  sections: { name: string; articles: BookSummary[] }[]
+}
+
+/**
+ * The front page: the published articles by day (newest day first), and inside a day by section (A to Z, "Other" last), newest article first.
+ * An article with no publication time is left out.
+ */
+export function frontPage(articles: BookSummary[]): FrontPageDay[] {
+  const byDay = new Map<string, Map<string, BookSummary[]>>()
+  for (const a of articles) {
+    if (a.stage !== 'published' || !a.publishedAt) continue
+    const day = a.publishedAt.slice(0, 10)
+    const section = a.topic?.name ?? 'Other'
+    const sections = byDay.get(day) ?? new Map<string, BookSummary[]>()
+    sections.set(section, [...(sections.get(section) ?? []), a])
+    byDay.set(day, sections)
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([day, sections]) => ({
+      day,
+      sections: [...sections.entries()]
+        .sort(([a], [b]) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)))
+        .map(([name, list]) => ({ name, articles: [...list].sort((x, y) => (y.publishedAt ?? '').localeCompare(x.publishedAt ?? '')) }))
+    }))
+}
+
+/** Published books per topic (articles are not books: they are left out). Shelves exist for active topics and for topics that have books. */
 export function buildShelves(topics: TopicSummary[], books: BookSummary[]): Shelf[] {
-  const published = books.filter((b) => b.stage === 'published')
+  const published = books.filter((b) => b.stage === 'published' && b.medium !== 'article')
   const byTopic = new Map<string, BookSummary[]>()
   for (const b of published) {
     const id = b.topic?.id ?? '_other'
@@ -17,6 +53,11 @@ export function buildShelves(topics: TopicSummary[], books: BookSummary[]): Shel
   }
   const shelves: Shelf[] = []
   for (const t of topics) {
+    // the newspaper sections have no shelf: their articles are on the Newspaper tab
+    if (t.kind === 'article') {
+      byTopic.delete(t.id)
+      continue
+    }
     const list = byTopic.get(t.id) ?? []
     if (t.active || list.length) shelves.push({ id: t.id, name: t.name, topic: t, books: list })
     byTopic.delete(t.id)

@@ -14,9 +14,10 @@ import { writeMd } from '../store/atomic'
 import type { IdeaFile, IdeaStore } from '../store/ideas'
 import { bookRefs, waitingStories } from '../store/series'
 import type { BookRef, SeriesStore } from '../store/series'
+import { ARTICLE_KIND } from '../store/topics'
 import type { TopicRow, TopicsFile } from '../store/topics'
 import { ideaSummaries, seriesSummaries } from '../summary'
-import { countBooksInProgress, countWords } from './books'
+import { countInProgress, countWords } from './books'
 import type { BookStore } from './books'
 import { reviewersFor, THREAD_CHECK } from './advance'
 import type { Bible } from '../memory/bible'
@@ -31,7 +32,8 @@ import { bibleFor, nonfictionContext } from './nfcontext'
 import { chatJson, cleanProse } from './llm'
 import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
 import { earlierSeriesBooks, seriesSection, withSeriesBible } from './series'
-import { appendToPrompt, buildMessages, loadChoicesSection } from './prompts'
+import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
+import { ARTICLE_IDEAS_RULE, newsHeadlines } from './newspaper'
 import { ancestors, chapterPlace, checkBranches, endLine } from './branches'
 import type { BranchChapter } from './branches'
 import { decide, dimensionsFor } from './scoring'
@@ -86,9 +88,26 @@ export class Run {
 
 const enabledFormats = (formats: FormatEntry[]) => formats.filter((f) => f.enabled)
 
+/** A newspaper article format (`article: true`): one chapter, no cover and no EPUB, its own slot limit. */
+export const isArticleFormat = (f: Pick<FormatEntry, 'article'> | undefined | null): boolean => f?.article === true
+
+/** Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics). */
 export function formatsForKind(formats: FormatEntry[], kind: string | null): FormatEntry[] {
   const on = enabledFormats(formats)
-  return kind ? on.filter((f) => f.kinds.includes(kind)) : on
+  return kind ? on.filter((f) => f.kinds.includes(kind)) : on.filter((f) => !f.article)
+}
+
+/** Open slots: a book can start while fewer than `max_books_in_progress` books are open, an article while fewer than `max_articles_in_progress` articles are. */
+export interface SlotRoom {
+  books: boolean
+  articles: boolean
+}
+
+/** Whether a story (and the topic it names) is an article: its topic is a newspaper section, or it fixes an article format. */
+export function isArticleStory(idea: IdeaFile | undefined, topic: TopicRow | undefined, formats: FormatEntry[]): boolean {
+  if (topic) return topic.kind === ARTICLE_KIND
+  const fixed = idea?.data.format ? formats.find((f) => f.enabled && f.id === idea.data.format) : undefined
+  return isArticleFormat(fixed)
 }
 
 export interface NextPick {
@@ -100,18 +119,23 @@ export interface NextPick {
  * Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic.
  * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
  */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = []): NextPick | null {
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
   const waiting = waitingStories(ideas, books)
   const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug))
-  const ok = (topic?: TopicRow) => formatsForKind(formats, topic?.kind ?? null).length > 0
+  // an article needs a free article slot and a book a free book slot: the two limits are separate
+  const slot = (article: boolean) => (article ? room.articles : room.books)
+  const ok = (topic?: TopicRow, idea?: IdeaFile) => {
+    const article = isArticleStory(idea, topic, formats)
+    return slot(article) && (formatsForKind(formats, topic?.kind ?? null).length > 0 || (!topic && article))
+  }
   for (const i of open.filter((x) => x.data.source === 'user')) {
     const topic = i.data.topic ? byId.get(i.data.topic) : undefined
-    if (ok(topic)) return { idea: i, topic }
+    if (ok(topic, i)) return { idea: i, topic }
   }
   for (const i of open.filter((x) => x.data.source === 'generated')) {
     const topic = i.data.topic ? byId.get(i.data.topic) : undefined
-    if (topic && topic.active && hasRoom(topic) && ok(topic)) return { idea: i, topic }
+    if (topic && topic.active && hasRoom(topic) && ok(topic, i)) return { idea: i, topic }
   }
   const candidates = topics.filter((t) => t.active && hasRoom(t) && ok(t))
   candidates.sort((a, b) => a.done + a.inProgress - (b.done + b.inProgress) || a.line - b.line)
@@ -219,12 +243,17 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const count = Math.max(3, d.getFactory().idea_low_water_mark)
     const existing = [...(await d.ideas.list()).map((i) => i.title)]
     for (const s of await d.books.slugs()) existing.push((await d.books.read(s))?.data.title ?? s)
+    // the newspaper sections: a news search for each active one, so the ideas are about what is in the news now
+    const news = await newsHeadlines(d, eligible.filter((t) => t.kind === ARTICLE_KIND), ctx)
     const { messages, version } = await buildMessages(d.dataDir, ctx, 'idea-generator', 'generate_ideas', {
       count,
-      topics: eligible.map((t) => `- ${t.id}: ${t.topic} (${t.kind}, ${t.done + t.inProgress} books so far)`).join('\n'),
-      existing_titles: existing.length ? existing.map((t) => `- ${t}`).join('\n') : '(none yet)'
+      topics: eligible.map((t) => `- ${t.id}: ${t.topic} (${t.kind}, ${t.done + t.inProgress} ${t.kind === ARTICLE_KIND ? 'articles' : 'books'} so far)`).join('\n'),
+      existing_titles: existing.length ? existing.map((t) => `- ${t}`).join('\n') : '(none yet)',
+      news
     })
     run.version = version
+    // a data folder whose generate_ideas.md has no {{news}} (it predates the newspaper) still gets the headlines and the article rule
+    if (news && !(await loadPrompt(d.dataDir, 'idea-generator', 'generate_ideas')).raw.includes('{{news}}')) appendToPrompt(messages, `${ARTICLE_IDEAS_RULE}\n\n${news}`)
     const schema = z.object({ ideas: z.array(z.object({ title: z.string().min(2), topic: z.string(), pitch: z.string().min(10) })).min(1) })
     const r = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
     run.addJson(r.cost, r.chat.model)
@@ -249,13 +278,18 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const run = new Run(ctx)
     const formats = d.getFormats()
     // the start jobs hold the `factory:start` lock, so they run one at a time: count again here, in case the factory was busy since the job was queued
-    if ((await countBooksInProgress(d.books)) >= d.getFactory().max_books_in_progress) return { result: 'enough books in progress already' }
-    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books))
+    const open = await countInProgress(d.books)
+    const room: SlotRoom = { books: open.books < d.getFactory().max_books_in_progress, articles: open.articles < d.getFactory().max_articles_in_progress }
+    if (!room.books && !room.articles) return { result: 'enough books in progress already' }
+    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books), room)
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it
     const source = idea?.data.source_book ? await sourceOf(d, idea.data.source_book) : null
-    const allowed = formatsForKind(formats, topic?.kind ?? null).filter((f) => !idea?.data.source_book || f.script)
+    let allowed = formatsForKind(formats, topic?.kind ?? null).filter((f) => !idea?.data.source_book || f.script)
+    // a story with no topic that fixes an article format is an article of no section
+    if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.article && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
+    const articleStory = allowed.length > 0 && allowed.every((f) => f.article)
     // the owner's story: its title and format are theirs to fix, and the whole brief goes to the editor
     const fromOwner = idea?.data.source === 'user'
     const brief = idea && fromOwner ? briefOf(idea.data, idea.body) : null
@@ -266,7 +300,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       if (!fixedFormat) d.log(`the story "${idea!.title}" asks for the format "${brief.format}", which ${topic ? 'the topic does not allow' : 'is not enabled'}: the editor chooses`)
     }
     const ideaText = brief ? briefPromptText(brief) : idea?.body ?? ''
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', 'start_book', {
+    const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', articleStory ? 'start_book_article' : 'start_book', {
       source: idea
         ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
           (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
@@ -303,6 +337,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         genre: brief?.genre || source?.genre || r.value.genre || topic?.topic || fmt.name,
         age_band: fmt.age_band,
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
+        ...(fmt.article ? { article: true } : {}),
         ...(fmt.script ? { script: true } : {}),
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
@@ -342,7 +377,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const fmt = formatOf(book.format)
     const brief = await d.books.brief(slug)
     const ideaText = brief ? briefPromptText(brief) : typeof book.idea === 'string' ? ((await d.ideas.list()).find((i) => i.slug === book.idea)?.body ?? '') : ''
-    const mem = d.memory.available() ? d.memory : null
+    // the library's pitch index is for books: an article is not checked against it and is not added to it
+    const mem = d.memory.available() && !fmt.article ? d.memory : null
     // the source of an adaptation (and other adaptations of it) is meant to be close: the similarity check leaves them out
     const family = await adaptationFamily(d, slug)
     let similarityNote = ''
@@ -445,7 +481,10 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       // non-fiction: the argument, the audience and the terms of the fact base
       thesis: z.string().default(''),
       audience: z.string().default(''),
-      terms: z.array(z.object({ term: z.string(), definition: z.string() })).default([])
+      terms: z.array(z.object({ term: z.string(), definition: z.string() })).default([]),
+      // an article: its headline and standfirst
+      headline: z.string().default(''),
+      standfirst: z.string().default('')
     })
     let r = await chatJson(ctx, messages, schema, { maxTokens: fmt.long ? 12000 : 6000 })
     run.addJson(r.cost, r.chat.model)
@@ -521,6 +560,12 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         (fmt.script && places.length ? `\n\n## Places\n${places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
+    }
+    if (fmt.article) {
+      // the headline and the standfirst of the article, kept in book.md (the publisher makes them final)
+      const headline = r.value.headline.replace(/^["'“”]+|["'“”]+$/g, '').replace(/\s+/g, ' ').trim()
+      const standfirst = r.value.standfirst.replace(/\s+/g, ' ').trim()
+      if (headline || standfirst) await d.books.update(slug, () => ({ ...(headline ? { headline } : {}), ...(standfirst ? { standfirst } : {}) }))
     }
     await made(slug, run)
     const endings = fmt.choices ? numbered.filter((c) => !c.choices).length : 0
@@ -844,9 +889,12 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    const article = fmt.article === true
     const schema = z.object({
       title: z.string().min(1),
-      blurb: z.string().min(10),
+      // an article has a standfirst instead of a blurb, and no cover
+      blurb: article ? z.string().default('') : z.string().min(10),
+      standfirst: article ? z.string().min(5) : z.string().default(''),
       subjects: z.array(z.string()).default([]),
       keywords: z.array(z.string()).default([]),
       cover_brief: z.string().default(''),
@@ -857,6 +905,31 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const title = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim() || book.title
     const year = new Date().getFullYear()
     const uuid = book.uuid ?? randomUUID()
+    if (article) {
+      // a newspaper article: no cover brief, cover, EPUB or Kindle. The page (out/article.html) and out/article.md are written before the stage flips.
+      const standfirst = r.value.standfirst.replace(/\s+/g, ' ').trim()
+      await d.books.update(slug, () => ({
+        title,
+        headline: title,
+        standfirst,
+        blurb: standfirst,
+        subjects: r.value.subjects,
+        keywords: r.value.keywords,
+        year,
+        uuid,
+        score: decision.score,
+        scores: decision.byDimension,
+        rounds: round,
+        reasons: [],
+        published: new Date().toISOString()
+      }))
+      await made(slug, run)
+      const page = await d.books.buildArticle(slug)
+      if (book.topic) await d.topics.adjust(book.topic, { done: 1, inProgress: -1 })
+      await d.books.update(slug, () => ({ stage: 'published' }))
+      d.emit({ type: 'book.stage', book: slug, stage: 'published' })
+      return { result: `published "${title}" (score ${decision.score})`, resultPath: path.relative(d.dataDir, page).split(path.sep).join('/') }
+    }
     await writeMd(
       d.books.file(slug, 'cover-brief.md'),
       { kind: 'cover-brief', book: slug },

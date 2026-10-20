@@ -36,7 +36,8 @@ export function LibraryView() {
   const topics = useOffice((s) => s.topics)
   const bookViews = useOffice((s) => s.books)
   const [showRejected, setShowRejected] = useState(false)
-  const books = useMemo(() => Object.values(bookViews).flatMap((v) => (v.summary ? [v.summary] : [])), [bookViews])
+  // the Library holds books only: the newspaper articles are on their own tab
+  const books = useMemo(() => Object.values(bookViews).flatMap((v) => (v.summary && v.summary.medium !== 'article' ? [v.summary] : [])), [bookViews])
   const shelves = useMemo(() => buildShelves(topics, books), [topics, books])
   const rejected = useMemo(() => books.filter((b) => b.stage === 'rejected'), [books])
   const publishedCount = books.filter((b) => b.stage === 'published').length

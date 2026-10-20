@@ -27,7 +27,8 @@ export async function loadPrompt(dataDir: string, role: string, task: string): P
   } catch {
     // a non-fiction or visual novel variant (`<task>_nf`, `<task>_vn`) that a role does not have uses the plain template
     if (/_(nf|vn)$/.test(task)) return loadPrompt(dataDir, role, task.slice(0, -3))
-    if (task.endsWith('_article')) return loadPrompt(dataDir, role, task.slice(0, -8))
+    // an article is non-fiction: a role without an `_article` prompt uses its `_nf` one, then the plain one
+    if (task.endsWith('_article')) return loadPrompt(dataDir, role, `${task.slice(0, -8)}_nf`)
     throw new Error(`prompt template missing: prompts/${role}/${task}.md`)
   }
   return { raw, body: parseMd(raw, file).body.trim() }

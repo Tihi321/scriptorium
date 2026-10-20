@@ -50,8 +50,8 @@ export interface OfficeState {
   mcp: { url: string } | null
   /** Result of the last Send to Kindle per book. */
   kindle: Record<string, { state: 'sending' | 'ok' | 'error'; error?: string }>
-  /** The office or the library. */
-  view: 'office' | 'library'
+  /** The office, the library or the newspaper. */
+  view: 'office' | 'library' | 'newspaper'
   /** The book whose card is open, and whether its reader is showing. */
   openBook: string | null
   reading: boolean
@@ -82,7 +82,7 @@ export interface OfficeActions {
   /** Opens (or with null closes) the draft reader of a book. The component asks the engine to build it. */
   openDraft(slug: string | null): void
   setTerminal(open: boolean, mode?: 'agent' | 'book'): void
-  setView(view: 'office' | 'library'): void
+  setView(view: 'office' | 'library' | 'newspaper'): void
   /** Asks the story form (Ideas tab) to open with this series selected. The form clears it with null. */
   setStorySeries(series: string | null): void
   openBookCard(slug: string | null, reading?: boolean): void

@@ -223,6 +223,8 @@ export interface PipelineCounters {
   calls: Record<string, number>
   /** Queries the fake search provider got, and the URLs the fake page fetch got. */
   searches: string[]
+  /** The options each search got (news, days, ...), in the same order as `searches`. */
+  searchOptions: { news?: boolean; days?: number }[]
   fetches: string[]
 }
 
@@ -273,7 +275,7 @@ export async function makePipelineEnv(o: PipelineEnvOptions = {}, engineOpts: Pa
   const times: number[] = []
   const logs: string[] = []
   const mock = new MockProvider('mock', { chunkDelayMs: 1, chunks: 3 })
-  const counters: PipelineCounters = { calls: {}, searches: [], fetches: [] }
+  const counters: PipelineCounters = { calls: {}, searches: [], searchOptions: [], fetches: [] }
   scriptMock(mock, o, counters)
   const pages = o.pages ?? [
     { url: 'https://example.test/sea-routes', title: 'Sea routes', content: 'The passage from Lisbon to Goa took about six months in the early 1600s, sailing with the monsoon winds around the Cape of Good Hope. '.repeat(3) },
@@ -283,8 +285,9 @@ export async function makePipelineEnv(o: PipelineEnvOptions = {}, engineOpts: Pa
   const fakeSearch = {
     id: 'fakesearch',
     pricePerRequest: o.searchPrice ?? 0.005,
-    search: async (query: string) => {
+    search: async (query: string, opts: { news?: boolean; days?: number } = {}) => {
       counters.searches.push(query)
+      counters.searchOptions.push({ ...(opts.news ? { news: opts.news } : {}), ...(opts.days ? { days: opts.days } : {}) })
       const list = o.pagesFor ? o.pagesFor(query) : pages
       for (const p of list) known.set(p.url, p)
       return list.map((p) => ({ title: p.title, url: p.url, snippet: p.content.slice(0, 80), content: p.inline ? p.content : (undefined as string | undefined) }))
@@ -512,6 +515,7 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     return JSON.stringify({
       title: 'The Sleepy Fox',
       blurb: 'A fox who cannot sleep finds out what the moon sings at night.',
+      standfirst: 'A fox who cannot sleep finds out what the moon sings at night.',
       subjects: ['Bedtime stories'],
       keywords: ['fox', 'moon', 'sleep'],
       cover_brief: 'A round orange fox asleep in hay under a big friendly moon.',

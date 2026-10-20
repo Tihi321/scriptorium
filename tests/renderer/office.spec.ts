@@ -156,9 +156,9 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
 
   // the topic overview: grouped by section, the emptiest section first (a tie keeps the file order), counts per topic, and a filter
   const sections = page.locator('[data-testid^="topic-section-"]')
-  await expect(sections).toHaveCount(4)
-  expect(await sections.evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))).toEqual(['topic-section-Non-fiction', 'topic-section-Law & Politics', 'topic-section-Fiction', 'topic-section-Children'])
-  await expect(page.getByTestId('topic-summary')).toContainText('5 of 9 on')
+  await expect(sections).toHaveCount(5)
+  expect(await sections.evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))).toEqual(['topic-section-Non-fiction', 'topic-section-Law & Politics', 'topic-section-Fiction', 'topic-section-Children', 'topic-section-Newspaper'])
+  await expect(page.getByTestId('topic-summary')).toContainText('6 of 12 on')
   await expect(page.getByTestId('topic-jfic-bedtime-and-dreams')).toBeChecked()
   await expect(page.getByTestId('topic-count-jfic-bedtime-and-dreams')).toHaveText('2/5 +1')
   await expect(page.getByTestId('topic-count-nf-history')).toHaveText('0/3 +1')

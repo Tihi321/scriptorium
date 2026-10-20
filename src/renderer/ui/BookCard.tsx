@@ -46,17 +46,20 @@ export function BookCard() {
 
   if (!slug || !book) return null
   const close = () => officeStore.getState().openBookCard(null)
+  /** A newspaper article: no cover, no EPUB, no Kindle; its page is the "book". */
+  const article = book.medium === 'article'
 
   if (reading) {
     const pages = book.readerPages
     const current = pages.some((p) => p.file === page) ? page : 'index.html'
-    const src = book.readerDir ? bookUrl(`${book.readerDir.replace(/\/+$/, '')}/${current}`) : null
+    // an article is one page (out/article.html), not a reader folder
+    const src = article ? (book.articlePage ? bookUrl(book.articlePage) : null) : book.readerDir ? bookUrl(`${book.readerDir.replace(/\/+$/, '')}/${current}`) : null
     return (
       <div className="dialog-backdrop" onClick={close}>
         <div className="reader" onClick={(e) => e.stopPropagation()} data-testid="reader">
           <div className="row spread reader-bar">
             <b>{book.title}</b>
-            {src && <PageNav pages={pages} current={current} onGo={setPage} testId="reader" />}
+            {src && !article && <PageNav pages={pages} current={current} onGo={setPage} testId="reader" />}
             <span className="row">
               <button onClick={() => officeStore.getState().setReading(false)} data-testid="reader-back">
                 Back to card
@@ -161,35 +164,39 @@ export function BookCard() {
           </div>
         )}
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="primary" disabled={!book.readerDir} onClick={() => officeStore.getState().setReading(true)} data-testid="card-read">
-            Read
+          <button className="primary" disabled={article ? !book.articlePage : !book.readerDir} onClick={() => officeStore.getState().setReading(true)} data-testid="card-read">
+            {article ? 'Open article' : 'Read'}
           </button>
           <button onClick={() => void openFolder(`books/${book.slug}`)} data-testid="card-folder">
             Open folder
           </button>
-          <button
-            disabled={!book.epub || kindle?.state === 'sending'}
-            onClick={() => {
-              officeStore.getState().markKindleSending(book.slug)
-              sendCommand({ type: 'sendToKindle', book: book.slug })
-            }}
-            data-testid="card-kindle"
-          >
-            Send to Kindle
-          </button>
+          {!article && (
+            <button
+              disabled={!book.epub || kindle?.state === 'sending'}
+              onClick={() => {
+                officeStore.getState().markKindleSending(book.slug)
+                sendCommand({ type: 'sendToKindle', book: book.slug })
+              }}
+              data-testid="card-kindle"
+            >
+              Send to Kindle
+            </button>
+          )}
           {published && (
             <>
               <button disabled={newTitle !== null || drawing} onClick={() => setNewTitle(book.title)} data-testid="card-rename" title="A new title: the cover, EPUB and reader are made again. The folder keeps its name.">
                 Rename
               </button>
-              {!book.sourceBook && book.kind !== 'visual-novel' && (
+              {!article && !book.sourceBook && book.kind !== 'visual-novel' && (
                 <button onClick={() => setAdapting(true)} data-testid="card-adapt" title="Adapt this book into a visual novel script (linear or with choices)">
                   Adapt to visual novel
                 </button>
               )}
-              <button disabled={drawing} onClick={() => sendCommand({ type: 'regenerateCover', book: book.slug })} data-testid="card-cover" title="Draw the cover again from templates/cover.html">
-                Remake cover
-              </button>
+              {!article && (
+                <button disabled={drawing} onClick={() => sendCommand({ type: 'regenerateCover', book: book.slug })} data-testid="card-cover" title="Draw the cover again from templates/cover.html">
+                  Remake cover
+                </button>
+              )}
             </>
           )}
           <span data-testid="cover-status" className={book.coverState === 'failed' ? 'err' : 'dim'}>

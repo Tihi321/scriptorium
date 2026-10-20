@@ -124,6 +124,8 @@ export const factorySchema = configBase('factory').extend({
   /** Persisted "pause all": no new jobs start while true. */
   paused: z.boolean().default(false),
   max_books_in_progress: z.number().int().positive().default(3),
+  /** How many newspaper articles (formats with `article: true`) are worked on at the same time. They do not count toward max_books_in_progress. */
+  max_articles_in_progress: z.number().int().positive().default(3),
   idea_low_water_mark: z.number().int().nonnegative().default(5),
   /** How many research questions one book may ask in total (0 = none). */
   research_limit_per_book: z.number().int().nonnegative().default(10),
@@ -192,6 +194,12 @@ export const formatEntrySchema = z.looseObject({
    * machine and more like a person. Needs a hired humanizer agent; a book can switch it off with `humanize: false` in book.md.
    */
   humanize: z.boolean().default(true),
+  /**
+   * A newspaper article: one chapter, written like a non-fiction book (research, fact base, numbered sources) but with the `_article`
+   * prompts, a recent-news search, its own research notes, and a single styled page (`out/article.html`, `out/article.md`) instead of
+   * a cover and an EPUB. Articles have their own slot limit (`max_articles_in_progress` in config/factory.md).
+   */
+  article: z.boolean().default(false),
   /** Rewrite rounds for this format. Falls back to quality.max_rounds. */
   max_rounds: z.number().int().nonnegative().optional(),
   /** Overrides the default reviewer list. */
@@ -304,6 +312,11 @@ export const bookSchema = z.looseObject({
   series_index: z.number().int().positive().optional(),
   /** Slug of the published book this book adapts into a visual novel script (copied from the story). */
   source_book: z.string().optional(),
+  /** A newspaper article (copied from the format's `article` flag): no cover and no EPUB, an `out/article.html` page instead. */
+  article: z.boolean().optional(),
+  /** Articles: the headline and the standfirst (the one-sentence summary under it). Set by the architect, final from the publisher. */
+  headline: z.string().optional(),
+  standfirst: z.string().optional(),
   /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
   humanize: z.boolean().optional(),
   age_band: z.string().nullable().default(null),
