@@ -6,6 +6,7 @@ import { briefOf, emptyBrief, renderBrief } from '../../shared/brief'
 import type { BriefCharacter, StoryBrief } from '../../shared/brief'
 import type { BookSummary } from '../../shared/protocol'
 import { ROLES } from '../../shared/schemas'
+import { DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
 import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, serverStatuses, topicSummary } from '../summary'
@@ -44,6 +45,7 @@ const characterSchema = z.object({
   description: z.string().optional().describe('Looks, voice, history: free text')
 })
 const sectionSchema = z.object({ heading: z.string(), text: z.string() })
+const modelsSchema = z.record(z.string(), z.string())
 
 const toCharacter = (c: z.infer<typeof characterSchema>): BriefCharacter => ({ name: c.name.trim(), role: c.role?.trim() ?? '', description: c.description?.trim() ?? '' })
 
@@ -71,9 +73,22 @@ export function registerTools(server: McpServer, engine: Engine): void {
   const checkTopic = async (topic?: string) => {
     if (topic && !(await topics()).some((t) => t.id === topic)) fail(`unknown topic "${topic}" (list_topics shows the ids)`)
   }
+  const needRole = (role: string) => {
+    if (!(ROLES as readonly string[]).includes(role) && !(role in engine.registry.roles.roles)) fail(`unknown role "${role}"`)
+  }
+  const needModel = (ref: string) => {
+    const m = engine.registry.getModel(ref) ?? fail(`unknown model "${ref}" (list_models shows the refs)`)
+    if (!m.provider.available) fail(`the provider of "${ref}" is not available (${m.provider.unavailableReason ?? 'switched off'}): jobs would skip it`)
+  }
+  const checkRoleModels = (models?: Record<string, string>) => {
+    for (const [role, ref] of Object.entries(models ?? {})) {
+      needRole(role)
+      needModel(ref)
+    }
+  }
   const book = async (slug: string) => {
     const s = await bookSummary(engine.books, slug, await topics())
-    return s ? slim(s) : null
+    return s ? { ...slim(s), roleModels: (await engine.books.read(slug))?.data.role_models ?? {} } : null
   }
   const agent = (id: string) => {
     const def = engine.agents.get(id)
@@ -85,7 +100,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: paused or not, spend against the caps, local model servers, running jobs, books per stage, agents busy and idle.',
+      description: 'Overview of the factory: paused or not, spend against the caps, local model servers, running jobs, books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -105,6 +120,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         booksByStage: byStage,
         maxBooksInProgress: engine.factory.max_books_in_progress,
         openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
+        clientTasks: engine.clientQueue.counts(),
         agents: { total: agents.length, busy: busy.length, idle: agents.filter((a) => a.state === 'idle').length, paused: agents.filter((a) => a.paused).length },
         busyAgents: busy.map((a) => ({ id: a.id, state: a.state, task: a.task, book: a.book }))
       }
@@ -227,13 +243,15 @@ export function registerTools(server: McpServer, engine: Engine): void {
         sections: z.array(sectionSchema).optional().describe('Any extra headed text (themes, rules of the world, ...)'),
         format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks'),
         topic: z.string().optional().describe('A topic id from list_topics'),
-        genre: z.string().optional()
+        genre: z.string().optional(),
+        models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
+        checkRoleModels(a.models)
         const brief: StoryBrief = {
           ...emptyBrief(),
           title: a.title?.trim() ?? '',
@@ -245,7 +263,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
           sections: a.sections ?? [],
           ...(a.format ? { format: a.format } : {}),
           ...(a.topic ? { topic: a.topic } : {}),
-          ...(a.genre ? { genre: a.genre } : {})
+          ...(a.genre ? { genre: a.genre } : {}),
+          ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
         return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
@@ -270,7 +289,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
         sections: z.array(sectionSchema).optional().describe('Replaces the extra sections'),
         format: z.string().optional(),
         topic: z.string().optional(),
-        genre: z.string().optional()
+        genre: z.string().optional(),
+        models: modelsSchema.optional().describe('Replaces the models of this story (role -> provider/model); {} clears them')
       }
     },
     run(
@@ -287,12 +307,18 @@ export function registerTools(server: McpServer, engine: Engine): void {
         format?: string
         topic?: string
         genre?: string
+        models?: Record<string, string>
       }) => {
         const idea = await needStory(a.story)
         if (idea.data.status !== 'open') fail(`the story "${a.story}" was already used by a book (${idea.data.book ?? 'unknown'}): add a note to that book instead (add_book_note)`)
         checkFormat(a.format)
         await checkTopic(a.topic)
+        checkRoleModels(a.models)
         const brief = briefOf(idea.data, idea.body)
+        if (a.models !== undefined) {
+          if (Object.keys(a.models).length) brief.models = a.models
+          else delete brief.models
+        }
         if (a.title !== undefined) brief.title = a.title.trim()
         if (a.premise !== undefined) brief.premise = a.premise
         if (a.plot !== undefined) brief.plot = a.plot
@@ -358,6 +384,52 @@ export function registerTools(server: McpServer, engine: Engine): void {
   )
 
   server.registerTool(
+    'set_book_model',
+    {
+      description:
+        'Set the model ONE book uses for a role (model null removes it). Its jobs of that role try this model first, before any model set on the agent, and any agent of the role may take them; the role list stays the fallback. Use it to put one book on client/claude-code without touching the others. Running jobs of the book switch at once. Works on books in progress and on rejected ones (so it can be set before reopen_book).',
+      inputSchema: { book: z.string(), role: z.string(), model: z.string().nullable().describe('A provider/model ref from list_models, or null to remove') },
+      annotations: WRITE
+    },
+    run(async ({ book: slug, role, model }: { book: string; role: string; model: string | null }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (!b || (TERMINAL_BOOK_STAGES.has(b.data.stage) && b.data.stage !== 'rejected')) fail(`"${slug}" is ${b?.data.stage}: a book model can be set on a book in progress or a rejected one`)
+      needRole(role)
+      if (model !== null) needModel(model)
+      await engine.handleCommand({ type: 'setBookModel', book: slug, role, model })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'reopen_book',
+    {
+      description:
+        'Give a REJECTED book one more round (retry_book is for failed books). mode "rewrite": the chapters (the ones you give, or the ones the reviews of the last round name) are rewritten, then reviewed again. mode "review": the book is reviewed again with no rewrite. Either way the publisher then decides again (publish or reject). It counts toward max_books_in_progress again. Agents assigned to the book were freed when it was rejected: assign them again.',
+      inputSchema: {
+        book: z.string(),
+        mode: z.enum(['rewrite', 'review']),
+        chapters: z.array(z.number().int().positive()).optional().describe('Chapter numbers to rewrite (mode rewrite). Default: the ones the reviews name')
+      },
+      annotations: WRITE
+    },
+    run(async ({ book: slug, mode, chapters }: { book: string; mode: 'rewrite' | 'review'; chapters?: number[] }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.stage !== 'rejected') fail(`"${slug}" is not a rejected book (stage: ${b?.data.stage}): only rejected books can be reopened (retry_book is for failed ones)`)
+      if (chapters?.length && mode !== 'rewrite') fail('chapters only apply to mode rewrite')
+      if (chapters?.length) {
+        const written = new Set((await engine.books.chapters(slug)).map((c) => c.n))
+        const missing = chapters.filter((n) => !written.has(n))
+        if (missing.length) fail(`chapter ${missing.join(', ')} of "${slug}" is not written`)
+      }
+      await engine.handleCommand({ type: 'reopenBook', book: slug, mode, chapters })
+      const after = await engine.books.read(slug)
+      if (after?.data.stage === 'rejected') fail(`"${slug}" could not be reopened (see the engine log)`)
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
     'rate_book',
     { description: 'Give a book your rating (1 to 5) and an optional note.', inputSchema: { book: z.string(), rating: z.number().int().min(1).max(5), note: z.string().optional() }, annotations: WRITE },
     run(async ({ book: slug, rating, note }: { book: string; rating: number; note?: string }) => {
@@ -389,6 +461,59 @@ export function registerTools(server: McpServer, engine: Engine): void {
       await engine.handleCommand({ type: 'regenerateCover', book: slug })
       return book(slug)
     })
+  )
+
+  // ---- client tasks: do the model work yourself ----
+  server.registerTool(
+    'list_client_tasks',
+    {
+      description: 'The model requests that wait for you: jobs whose model is a `client` one (for example client/claude-code). Oldest first, with their age. Take one with get_client_task.',
+      annotations: READ
+    },
+    run(async () => ({ ...engine.clientQueue.counts(), tasks: engine.clientQueue.list() }))
+  )
+
+  server.registerTool(
+    'get_client_task',
+    {
+      description:
+        'Take the oldest waiting model request (optionally of one role, book or task) and hold it for 30 minutes. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
+      inputSchema: { role: z.string().optional(), book: z.string().optional().describe('Book slug'), task: z.string().optional().describe('Job task, e.g. draft_chapter, review, outline') },
+      annotations: WRITE
+    },
+    run(async (f: { role?: string; book?: string; task?: string }) => {
+      const t = engine.clientQueue.lease(f, DEFAULT_LEASE_MS)
+      if (!t) return { none: true, waiting: engine.clientQueue.counts().waiting }
+      const rest = t.messages.filter((m) => m.role !== 'system')
+      return {
+        taskId: t.id,
+        meta: { job: t.job, call: t.call, role: t.role, task: t.task, book: t.book, agent: t.agent, unit: t.unit },
+        system: t.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
+        user: rest.map((m) => m.content).join('\n\n'),
+        ...(t.messages.length > 1 ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
+        ...(t.schema ? { schema: t.schema } : {}),
+        ...(t.maxTokens ? { maxTokens: t.maxTokens } : {}),
+        output: t.schema ? 'Reply with one JSON object that matches `schema`. No prose, no code fence.' : 'Reply with the text only: no preamble, no notes, no code fence.',
+        leaseMinutes: DEFAULT_LEASE_MS / 60_000
+      }
+    })
+  )
+
+  server.registerTool(
+    'submit_client_task',
+    {
+      description:
+        'Answer a task you took with get_client_task. When the task has a schema, the text is checked first: a bad answer comes back as {accepted: false, problems} and the task stays yours, so fix it and submit again. A task that is gone (aborted, answered, or the engine restarted) is refused.',
+      inputSchema: { taskId: z.string(), text: z.string() },
+      annotations: WRITE
+    },
+    run(async ({ taskId, text: answer }: { taskId: string; text: string }) => engine.clientQueue.submit(taskId, answer))
+  )
+
+  server.registerTool(
+    'release_client_task',
+    { description: 'Give a task you took back, so it waits for the next get_client_task.', inputSchema: { taskId: z.string() }, annotations: WRITE },
+    run(async ({ taskId }: { taskId: string }) => ({ released: engine.clientQueue.release(taskId) }))
   )
 
   // ---- factory ----

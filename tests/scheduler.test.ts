@@ -491,3 +491,110 @@ describe('agent controls and hot reload', () => {
     expect(env.events.some((e) => e.type === 'pong' && e.id === 'p1')).toBe(true)
   })
 })
+
+describe('client provider in the scheduler', () => {
+  const clientEnv = () => makeEnv({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+  const taskSchema = { type: 'object', required: ['a'], properties: { a: { type: 'number' } } }
+
+  it('a job on client waits for an answer through the queue, then completes with no spend', async () => {
+    env = await clientEnv()
+    registerChat(env)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const q = env.engine.clientQueue
+    await waitFor(() => q.counts().waiting === 1, 5000, 'a waiting client task')
+    expect(await jobsIn(env, 'running')).toEqual(['b1--t--u1--r0.md']) // parked, not failed or requeued
+    expect(q.list()[0]).toMatchObject({ id: 'b1--t--u1--r0#1', job: 'b1--t--u1--r0', call: 1, role: 'writer', task: 't', book: 'b1', agent: 'writer-ann', unit: 'u1', state: 'waiting' })
+    const t = q.lease({ book: 'b1' })!
+    expect(t.messages.at(-1)!.content).toBe('do b1--t--u1--r0')
+    expect(q.submit(t.id, 'the chapter text')).toEqual({ accepted: true })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done')
+    const done = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8'))
+    expect(done.data).toMatchObject({ model: 'client/claude-code', paid: false, attempts: 0, cost_usd: 0 })
+    expect(done.body).toContain('the chapter text')
+    expect(env.events.filter((e) => e.type === 'spend')).toMatchObject([{ provider: 'client', model: 'claude-code', costUsd: 0 }])
+    expect(q.counts()).toEqual({ waiting: 0, leased: 0 })
+  })
+
+  it('a structured answer that fails the schema is refused and the task stays leased; a good one completes the job', async () => {
+    env = await clientEnv()
+    env.engine.scheduler.register('t', async (ctx) => {
+      const r = await ctx.chat({ messages: [{ role: 'user', content: 'give a' }], schema: taskSchema })
+      return { result: r.text }
+    })
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const q = env.engine.clientQueue
+    await waitFor(() => q.counts().waiting === 1, 5000, 'a waiting client task')
+    const t = q.lease()!
+    expect(t.schema).toEqual(taskSchema)
+    expect(q.submit(t.id, '{"b": 1}')).toMatchObject({ accepted: false, problems: ['a: missing (required)'] })
+    expect(q.counts()).toEqual({ waiting: 0, leased: 1 })
+    expect(await jobsIn(env, 'done')).toEqual([])
+    expect(q.submit(t.id, '{"a": 1}')).toEqual({ accepted: true })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done')
+    expect(q.list()).toEqual([]) // no repair round was asked for
+  })
+
+  it('stopping the job drops its task and requeues it without counting an attempt; the next run makes a new task', async () => {
+    env = await clientEnv()
+    registerChat(env)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const q = env.engine.clientQueue
+    await waitFor(() => q.counts().waiting === 1, 5000, 'a waiting client task')
+    const first = q.lease()!
+    await env.engine.handleCommand({ type: 'pauseAll' })
+    env.engine.scheduler.stopAll('stopNow')
+    await waitFor(async () => (await jobsIn(env!, 'queued')).length === 1, 5000, 'job requeued')
+    expect(q.counts()).toEqual({ waiting: 0, leased: 0 })
+    expect(q.submit(first.id, 'too late')).toMatchObject({ accepted: false, problems: [expect.stringMatching(/task not found/)] })
+    const requeued = parseMd(await readFile(path.join(env.dir, 'jobs', 'queued', 'b1--t--u1--r0.md'), 'utf8'))
+    expect(requeued.data.attempts).toBe(0)
+    await env.engine.handleCommand({ type: 'resumeAll' })
+    await waitFor(() => q.counts().waiting === 1, 5000, 'a new task')
+    expect(q.list()[0]!.id).toBe('b1--t--u1--r0#2')
+  })
+})
+
+describe('book models in the scheduler', () => {
+  it('a book with role_models parks its writer jobs in the client queue while another book goes to the mock, whoever the agent is', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }],
+      roles: { writer: ['loc/m1'] },
+      agents: [{ role: 'writer', name: 'Ann' }, { role: 'writer', name: 'Bob' }]
+    })
+    await env.engine.books.create('b1', { title: 'One', stage: 'drafting', format: 'novel', target_words: 5000, role_models: { writer: 'client/claude-code' } }, '')
+    await env.engine.books.create('b2', { title: 'Two', stage: 'drafting', format: 'novel', target_words: 5000 }, '')
+    registerChat(env)
+    for (const book of ['b1', 'b2']) await env.engine.jobs.enqueue({ id: `${book}--t--u1--r0`, task: 't', role: 'writer', book, unit: 'u1', requested_by: 'engine' })
+    const q = env.engine.clientQueue
+    await waitFor(() => q.counts().waiting === 1, 5000, 'b1 waiting for the client')
+    await waitFor(async () => (await jobsIn(env!, 'done')).includes('b2--t--u1--r0.md'), 5000, 'b2 done on the mock')
+    expect(q.list()[0]).toMatchObject({ id: 'b1--t--u1--r0#1', book: 'b1' })
+    expect(await jobsIn(env, 'done')).toEqual(['b2--t--u1--r0.md'])
+    const t = q.lease()!
+    q.submit(t.id, 'from claude')
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 2, 5000, 'b1 done')
+    const b1 = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8'))
+    expect(b1.data.model).toBe('client/claude-code')
+  })
+
+  it('setBookModel changes the model of a running job at once, and removing it sends later requests back to the role list', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }],
+      roles: { writer: ['loc/m1'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+    await env.engine.books.create('b1', { title: 'One', stage: 'drafting', format: 'novel', target_words: 5000 }, '')
+    env.mock.onAny({ text: 'slow '.repeat(20), chunks: 20, chunkDelayMs: 80 })
+    registerChat(env)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(() => env!.mock.calls.length === 1, 5000, 'the mock request started')
+    await env.engine.handleCommand({ type: 'setBookModel', book: 'b1', role: 'writer', model: 'client/claude-code' })
+    expect((await env.engine.books.read('b1'))!.data.role_models).toEqual({ writer: 'client/claude-code' })
+    const q = env.engine.clientQueue
+    await waitFor(() => q.counts().waiting === 1, 5000, 'the request restarted on the client model')
+    await env.engine.handleCommand({ type: 'setBookModel', book: 'b1', role: 'writer', model: null })
+    expect((await env.engine.books.read('b1'))!.data.role_models).toEqual({})
+    await waitFor(() => q.counts().waiting === 0, 5000, 'the client task dropped')
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 8000, 'job done on the mock')
+  })
+})

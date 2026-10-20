@@ -291,6 +291,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
         ...(fmt.script ? { script: true } : {}),
         target_words: target,
+        ...(idea && idea.data.role_models && typeof idea.data.role_models === 'object' ? { role_models: idea.data.role_models } : {}),
         idea: idea?.slug ?? null,
         created: new Date().toISOString(),
         cost_usd: 0

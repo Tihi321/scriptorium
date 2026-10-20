@@ -5,6 +5,8 @@ export interface ChatMessage {
 
 /** Who a request is for. Used by the mock provider to pick a scripted answer, and for spend rows. */
 export interface RequestMeta {
+  /** The id of the job that asks. The client provider names its tasks `<job>#<call>`. */
+  job?: string
   role?: string
   task?: string
   book?: string

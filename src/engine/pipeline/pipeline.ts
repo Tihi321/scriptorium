@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { parseMd } from '../../shared/md'
 import { COVER_HEIGHT, COVER_WIDTH, genreClass, writeCoverHtml } from '../publish/cover'
 import type { Scheduler } from '../queue/scheduler'
-import { advance, TERMINAL_STAGES } from './advance'
+import { advance, chaptersToRewrite, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
 import { findMarkers } from '../research/markers'
 import type { BookState, ChapterScores, ReviewSummary } from './advance'
 import { countBooksInProgress } from './books'
@@ -105,6 +105,65 @@ export class Pipeline {
     return run.then((ok) => {
       if (ok) this.kick()
       return ok
+    })
+  }
+
+  /**
+   * Gives a rejected book one more round. `rewrite`: the chapters (the given ones, or the ones the round's reviews name, see
+   * `chaptersToRewrite`) are rewritten as round r+1, then reviewed again. `review`: the book is reviewed again as round r+1, with
+   * no rewrite. `extra_rounds` in book.md goes up by one, so the book may have that round, and the publisher then decides again.
+   * Runs between ticks. Returns the error text when the book can't be reopened.
+   */
+  reopenBook(slug: string, mode: 'rewrite' | 'review', chapters?: number[]): Promise<{ ok: true; stage: string; round: number; chapters: number[] } | { ok: false; error: string }> {
+    const run = this.chain.then(async () => {
+      const b = await this.books.read(slug)
+      if (!b) return { ok: false as const, error: `no book "${slug}"` }
+      if (b.data.stage !== 'rejected') return { ok: false as const, error: `"${slug}" is not a rejected book (stage: ${b.data.stage})` }
+      const state = await this.loadState(slug, new Map())
+      if (!state) return { ok: false as const, error: `book "${slug}" can't be read (its format is unknown or it has no outline yet)` }
+      const total = state.outlineChapters ?? 0
+      const r = b.data.round
+      const next = r + 1
+      let list: number[] = []
+      let tension: number[] = []
+      if (mode === 'rewrite') {
+        if (chapters?.length) {
+          const bad = chapters.filter((n) => !Number.isInteger(n) || n < 1 || n > total)
+          if (bad.length) return { ok: false as const, error: `chapters ${bad.join(', ')} are not in the book (it has ${total})` }
+          list = [...new Set(chapters)].sort((a, c) => a - c)
+        } else {
+          const keys = state.format.long ? [...reviewersFor(state.format), THREAD_CHECK] : reviewersFor(state.format)
+          const revise = keys.flatMap((role) => {
+            const rev = state.reviews.get(`${role}:${r}`)
+            return rev && rev.verdict === 'revise' ? [{ role, rev }] : []
+          })
+          const picked = chaptersToRewrite(state, revise, total)
+          list = picked.chapters
+          tension = picked.flat
+        }
+      }
+      await this.books.update(slug, (d) => {
+        delete d.score
+        delete d.scores
+        return {
+          stage: mode === 'rewrite' ? 'rewriting' : 'reviewing',
+          round: next,
+          rewrite_chapters: list,
+          tension_rewrite: tension,
+          extra_rounds: Number(d.extra_rounds ?? 0) + 1,
+          reasons: []
+        }
+      })
+      if (b.data.topic) await this.o.topics.adjust(b.data.topic, { inProgress: 1 })
+      const stage = mode === 'rewrite' ? 'rewriting' : 'reviewing'
+      this.o.emit({ type: 'book.stage', book: slug, stage })
+      this.o.log(`book ${slug} reopened for a ${mode} round ${next}${mode === 'rewrite' ? ` of chapters ${list.join(', ')}` : ''}`)
+      return { ok: true as const, stage, round: next, chapters: list }
+    })
+    this.chain = run.catch(() => undefined)
+    return run.then((res) => {
+      if (res.ok) this.kick()
+      return res
     })
   }
 
@@ -239,6 +298,7 @@ export class Pipeline {
       stage: d.stage,
       round: d.round,
       rewriteChapters: d.rewrite_chapters,
+      extraRounds: d.extra_rounds,
       writerFamily: d.writer_family,
       writerAgent: d.writer_agent,
       format,

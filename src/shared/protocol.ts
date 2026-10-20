@@ -334,6 +334,10 @@ export type Command =
   | { type: 'pauseBook'; book: string; paused: boolean }
   /** Puts a failed book's failed jobs back in the queue and continues the book from the stage it failed in. */
   | { type: 'retryBook'; book: string }
+  /** Gives a rejected book one more round: `rewrite` (the given chapters, or the ones the reviews name, then reviewed again) or `review` (reviewed again, no rewrite). Then the publisher decides again. */
+  /** Sets (or with `model: null` removes) the model one book uses for a role (`role_models` in book.md). Its jobs of that role try it first. */
+  | { type: 'setBookModel'; book: string; role: string; model: string | null }
+  | { type: 'reopenBook'; book: string; mode: 'rewrite' | 'review'; chapters?: number[] }
   /** Draws a published book's cover again from templates/cover.html and book.md, then rebuilds the EPUB. Answers with `book.updated`. */
   | { type: 'regenerateCover'; book: string }
   /** Gives a published book a new title (its folder and slug stay), then remakes the cover, the EPUB and the reader. Answers with `book.updated`. */
@@ -406,6 +410,8 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   addBookNote: true,
   pauseBook: true,
   retryBook: true,
+  reopenBook: true,
+  setBookModel: true,
   regenerateCover: true,
   renameBook: true
 }
