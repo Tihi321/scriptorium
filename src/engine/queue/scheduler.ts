@@ -72,6 +72,8 @@ interface RunningJob {
   first?: string
   /** The agent's or role's model changed: the job's next request builds its model list again. */
   modelChanged?: boolean
+  /** The book's own model for the job's role (`role_models` in book.md), first in its model list. */
+  bookModel?: string
 }
 
 interface AgentRuntime {
@@ -101,6 +103,8 @@ export interface SchedulerDeps {
   onAgentsChanged?: () => void
   /** True for a book paused on its own (`paused: true` in book.md): its jobs wait, running ones finish. */
   isBookPaused?: (book: string) => boolean
+  /** The model a book sets for a role (`role_models` in book.md), if any. */
+  getBookModel?: (book: string, role: string) => Promise<string | undefined>
 }
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex').slice(0, 8)
@@ -182,11 +186,12 @@ export class Scheduler {
    * takes the new model list from its next request; a request in flight on a model that is no longer first starts again on the new one.
    * Earlier requests of the job are kept. Returns how many requests were restarted.
    */
-  changeModel(match: { agent?: string; role?: string } = {}): number {
+  changeModel(match: { agent?: string; role?: string; book?: string } = {}): number {
     let n = 0
     for (const rj of this.running.values()) {
       if (match.agent && rj.agentId !== match.agent) continue
       if (match.role && rj.job.data.role !== match.role) continue
+      if (match.book && rj.job.data.book !== match.book) continue
       rj.modelChanged = true
       const first = this.modelsFor(rj)[0]
       if (rj.request && first && first.ref !== rj.first) {
@@ -200,7 +205,15 @@ export class Scheduler {
   /** The models a running job may use now: the agent's own model (as its file says now), then its role's list. */
   private modelsFor(rj: RunningJob): ModelInfo[] {
     const def = this.d.agents.get(rj.agentId)
-    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family })
+    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family, bookModel: rj.bookModel })
+  }
+
+  /** A book's model for a role was set or cleared: its running jobs of that role switch (see `changeModel`). */
+  bookModelChanged(book: string, role: string, model: string | undefined): number {
+    for (const rj of this.running.values()) {
+      if (rj.job.data.book === book && rj.job.data.role === role) rj.bookModel = model
+    }
+    return this.changeModel({ book, role })
   }
 
   /** Fire: graceful lets the current job finish, then removes the file. Now aborts it and removes the file at once. */
@@ -292,7 +305,8 @@ export class Scheduler {
         const agent = this.pickAgent(j, defs)
         if (!agent) continue
         const rt = this.runtimeFor(agent.id)
-        const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family })
+        const bookModel = j.book ? await this.d.getBookModel?.(j.book, j.role) : undefined
+        const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family, bookModel })
         if (models.length === 0) {
           rt.errorUntil = t + 3000
           this.setState(rt, agent, 'error', 'no model available for this role')
@@ -320,7 +334,7 @@ export class Scheduler {
           continue
         }
         for (const l of j.locks) this.locks.add(l)
-        this.launch(claimed, agent, models.slice(models.indexOf(chosen)), chosen)
+        this.launch(claimed, agent, models.slice(models.indexOf(chosen)), chosen, bookModel)
       }
     }
     for (const rt of this.runtimes.values()) {
@@ -375,10 +389,10 @@ export class Scheduler {
 
   // ---- running a job ----
 
-  private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo): void {
+  private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo, bookModel?: string): void {
     const rt = this.runtimeFor(agent.id)
     const controller = new AbortController()
-    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref }
+    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref, bookModel }
     this.running.set(job.id, rj)
     rt.running.set(job.id, rj)
     rj.done = this.run(rj, agent, models, leased).catch((err) => { console.error('[engine] job runner failed:', err) }).finally(() => {
@@ -468,7 +482,7 @@ export class Scheduler {
                 maxTokens: o.maxTokens,
                 temperature: o.temperature,
                 signal: request.signal,
-                meta: { role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined }
+                meta: { job: j.id, role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined }
               },
               rj.held
             )) {

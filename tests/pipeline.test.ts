@@ -364,9 +364,74 @@ describe('bedtime story, mock e2e', () => {
     // the folder stays: pitch, chapters and reviews are still there
     expect(existsSync(path.join(env.dir, 'books', slug, 'reviews', 'book-child-safety-reviewer-r2.md'))).toBe(true)
   }, 90000)
+
+  it('a rejected book is reopened for a rewrite round, rejected again, then reopened for a review round and published', async () => {
+    // child safety says revise in rounds 0-3: the book is rejected at round 2 (the format's limit), and again at round 3 after the reopened rewrite
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', maxBooks: 1, revise: { 'child-safety-reviewer': [0, 1, 2, 3] } })
+    const e = env
+    const slug = (await waitStage(e, 'rejected'))!
+    // freeze the factory (it would start the next book) and let running jobs end
+    await e.engine.handleCommand({ type: 'pauseAll' })
+    await waitFor(() => e.engine.scheduler.runningJobs().length === 0, 20000, 'running jobs to end')
+    expect((await bookMd(e, slug)).data).toMatchObject({ stage: 'rejected', round: 2 })
+    const topicRow = async () => parseTopics(await readFile(path.join(e.dir, 'topics.md'), 'utf8')).find((r) => r.id === 'jfic-bedtime-and-dreams')!
+    const rejectedInProgress = (await topicRow()).inProgress
+
+    // a chapter that is not in the book is refused (nothing changes)
+    await e.engine.handleCommand({ type: 'reopenBook', book: slug, mode: 'rewrite', chapters: [9] })
+    expect(e.logs.some((l) => l.includes('reopenBook:') && l.includes('not in the book'))).toBe(true)
+    expect((await bookMd(e, slug)).data.stage).toBe('rejected')
+
+    // round 3: rewrite chapter 1
+    await e.engine.handleCommand({ type: 'reopenBook', book: slug, mode: 'rewrite', chapters: [1] })
+    const reopened = (await bookMd(e, slug)).data
+    expect(reopened).toMatchObject({ stage: 'rewriting', round: 3, extra_rounds: 1, rewrite_chapters: [1], reasons: [] })
+    expect(reopened.score).toBeUndefined()
+    expect((await topicRow()).inProgress).toBe(rejectedInProgress + 1)
+    expect(e.events.some((ev) => ev.type === 'book.stage' && ev.book === slug && ev.stage === 'rewriting')).toBe(true)
+    // reopening a book that is no longer rejected does nothing
+    await e.engine.handleCommand({ type: 'reopenBook', book: slug, mode: 'review' })
+    expect(e.logs.some((l) => l.includes(`reopenBook: "${slug}" is not a rejected book`))).toBe(true)
+    await e.engine.handleCommand({ type: 'resumeAll' })
+    await waitFor(async () => {
+      const d = (await bookMd(e, slug)).data
+      return d.stage === 'rejected' && d.round === 3
+    }, 60000, 'the book rejected again at round 3')
+    // the rewrite ran as new jobs of round 3, and the reviews of round 3 exist
+    expect(existsSync(path.join(e.dir, 'jobs', 'done', `${slug}--rewrite--ch01--r3.md`))).toBe(true)
+    expect(existsSync(path.join(e.dir, 'books', slug, 'reviews', 'book-child-safety-reviewer-r3.md'))).toBe(true)
+    expect(String(((await bookMd(e, slug)).data.reasons as string[]).join(' '))).toMatch(/must-pass gate failed: child-safety-reviewer/)
+
+    // round 4: a review only, no rewrite. Child safety passes in round 4, so the book is published
+    await e.engine.handleCommand({ type: 'pauseAll' })
+    await waitFor(() => e.engine.scheduler.runningJobs().length === 0, 20000, 'running jobs to end')
+    await e.engine.handleCommand({ type: 'reopenBook', book: slug, mode: 'review' })
+    expect((await bookMd(e, slug)).data).toMatchObject({ stage: 'reviewing', round: 4, extra_rounds: 2 })
+    await e.engine.handleCommand({ type: 'resumeAll' })
+    await waitFor(async () => (await bookMd(e, slug)).data.stage === 'published', 60000, 'the book published at round 4')
+    expect(existsSync(path.join(e.dir, 'jobs', 'done', `${slug}--rewrite--ch01--r4.md`))).toBe(false) // a review round rewrites nothing
+    expect(existsSync(path.join(e.dir, 'books', slug, 'out', `${slug}.epub`))).toBe(true)
+    expect((await bookMd(e, slug)).data.rounds).toBe(4)
+  }, 180000)
 })
 
 describe('choosing what to write', () => {
+  it('a story with role models starts a book that carries them in book.md', async () => {
+    env = await makePipelineEnv({
+      activate: ['jfic-bedtime-and-dreams'],
+      format: 'bedtime-toddler',
+      beforeStart: async (dir) => {
+        const { IdeaStore } = await import('../src/engine/store/ideas')
+        await new IdeaStore(dir).createStory({ title: 'The Bell Fox', premise: 'A fox rings a bell.', plot: '', characters: [], setting: '', style: '', sections: [], models: { writer: 'w/writer-model' } })
+      }
+    })
+    const slug = (await waitFor(async () => (await firstBook(env!)) ?? null, 30000, 'first book'))!
+    const data = (await waitFor(async () => (await bookMd(env!, slug).catch(() => null))?.data.title ? (await bookMd(env!, slug)).data : null, 30000, 'book.md')) as Record<string, unknown>
+    expect(data.role_models).toEqual({ writer: 'w/writer-model' })
+    expect(data.title).toBe('The Bell Fox')
+    expect(parseMd(await readFile(path.join(env.dir, 'books', slug, 'brief.md'), 'utf8')).data.role_models).toEqual({ writer: 'w/writer-model' })
+  }, 90000)
+
   it('your ideas are picked before generated ones', async () => {
     env = await makePipelineEnv({
       activate: ['jfic-bedtime-and-dreams'],

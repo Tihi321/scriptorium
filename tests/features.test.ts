@@ -43,6 +43,7 @@ describe('protocol', () => {
       { type: 'addBookNote', book: 'b', text: 'note' },
       { type: 'pauseBook', book: 'b', paused: true },
       { type: 'retryBook', book: 'b' },
+      { type: 'reopenBook', book: 'b', mode: 'rewrite', chapters: [1] },
       { type: 'saveSettings' }
     ]) expect(isCommand(c), c.type).toBe(true)
     expect(isCommand({ type: 'noSuchCommand' })).toBe(false)

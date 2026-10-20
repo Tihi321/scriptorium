@@ -31,6 +31,8 @@ export interface StoryBrief {
   format?: string
   topic?: string
   genre?: string
+  /** Role -> `provider/model` for the book made from this story (frontmatter `role_models`). */
+  models?: Record<string, string>
 }
 
 export const emptyBrief = (): StoryBrief => ({ title: '', premise: '', plot: '', characters: [], setting: '', style: '', sections: [] })
@@ -144,5 +146,10 @@ export function briefOf(data: Record<string, unknown>, body: string): StoryBrief
   if (format) brief.format = format
   if (topic) brief.topic = topic
   if (genre) brief.genre = genre
+  const rm = data.role_models
+  if (rm && typeof rm === 'object' && !Array.isArray(rm)) {
+    const models = Object.fromEntries(Object.entries(rm).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k, (v as string).trim()]))
+    if (Object.keys(models).length) brief.models = models
+  }
   return brief
 }

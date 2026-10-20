@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { loadMcpConfig, startMcpServer } from '../src/engine/mcp/server'
 import type { McpHandle } from '../src/engine/mcp/server'
 import { acquireEngineLock } from '../src/engine/store/dataFolder'
-import { makeEnv } from './helpers'
+import { parseMd } from '../src/shared/md'
+import { makeEnv, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
 
 let env: TestEnv | undefined
@@ -73,7 +74,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -280,5 +281,127 @@ describe('engine lock', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('MCP client tasks and reopen_book', () => {
+  it('lists the client task tools and reopen_book', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    const names = (await c.listTools()).tools.map((t) => t.name)
+    for (const n of ['list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'reopen_book']) expect(names).toContain(n)
+  })
+
+  it('takes a model request, answers it over MCP, and the job completes', async () => {
+    env = await makeEnv({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const taskSchema = { type: 'object', required: ['title'], properties: { title: { type: 'string' } } }
+    env.engine.scheduler.register('t', async (ctx) => {
+      const r = await ctx.chat({
+        messages: [
+          { role: 'system', content: 'Be brief.' },
+          { role: 'system', content: 'Be kind.' },
+          { role: 'user', content: 'Name the book.' }
+        ],
+        schema: taskSchema,
+        maxTokens: 300
+      })
+      const plain = await ctx.chat({ messages: [{ role: 'user', content: 'One more line.' }] })
+      return { result: `${r.text} | ${plain.text}` }
+    })
+    expect((await call(c, 'get_client_task')).data).toEqual({ none: true, waiting: 0 })
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const listed = await waitFor(async () => {
+      const r = await call(c, 'list_client_tasks')
+      return r.data.waiting === 1 ? r.data : null
+    })
+    expect(listed).toMatchObject({ waiting: 1, leased: 0, tasks: [{ id: 'b1--t--u1--r0#1', state: 'waiting', role: 'writer', book: 'b1' }] })
+    expect((await call(c, 'factory_status')).data.clientTasks).toEqual({ waiting: 1, leased: 0 })
+    expect((await call(c, 'get_client_task', { book: 'other' })).data).toEqual({ none: true, waiting: 1 })
+
+    const got = (await call(c, 'get_client_task', { role: 'writer', task: 't' })).data
+    expect(got).toMatchObject({
+      taskId: 'b1--t--u1--r0#1',
+      meta: { job: 'b1--t--u1--r0', call: 1, role: 'writer', task: 't', book: 'b1', agent: 'writer-ann', unit: 'u1' },
+      system: 'Be brief.\n\nBe kind.',
+      user: 'Name the book.',
+      schema: taskSchema,
+      maxTokens: 300,
+      output: 'Reply with one JSON object that matches `schema`. No prose, no code fence.',
+      leaseMinutes: 30
+    })
+    expect(got.messages).toHaveLength(3)
+    expect((await call(c, 'factory_status')).data.clientTasks).toEqual({ waiting: 0, leased: 1 })
+    // a bad answer comes back with its problems and keeps the task; give it back and take it again
+    const bad = await call(c, 'submit_client_task', { taskId: got.taskId, text: '{"name": "x"}' })
+    expect(bad.isError).toBe(false)
+    expect(bad.data).toEqual({ accepted: false, problems: ['title: missing (required)'] })
+    expect((await call(c, 'release_client_task', { taskId: got.taskId })).data).toEqual({ released: true })
+    expect((await call(c, 'release_client_task', { taskId: 'nope#1' })).data).toEqual({ released: false })
+    const again = (await call(c, 'get_client_task')).data
+    expect(again.taskId).toBe(got.taskId)
+    expect((await call(c, 'submit_client_task', { taskId: again.taskId, text: '{"title": "The Bell"}' })).data).toEqual({ accepted: true })
+    expect((await call(c, 'submit_client_task', { taskId: again.taskId, text: '{"title": "The Bell"}' })).data.problems[0]).toMatch(/task not found/)
+
+    // the second request of the job: prose, a single message, no schema
+    const second = await waitFor(async () => {
+      const r = await call(c, 'get_client_task')
+      return r.data.taskId ? r.data : null
+    })
+    expect(second).toMatchObject({ taskId: 'b1--t--u1--r0#2', system: '', user: 'One more line.', output: 'Reply with the text only: no preamble, no notes, no code fence.' })
+    expect(second).not.toHaveProperty('schema')
+    expect(second).not.toHaveProperty('messages')
+    expect((await call(c, 'submit_client_task', { taskId: second.taskId, text: 'The end.' })).data).toEqual({ accepted: true })
+    await waitFor(async () => (await readdir(path.join(env!.dir, 'jobs', 'done'))).includes('b1--t--u1--r0.md'))
+    expect((await call(c, 'factory_status')).data.clientTasks).toEqual({ waiting: 0, leased: 0 })
+  })
+
+  it('reopen_book refuses a book that is not rejected, a bad mode and unwritten chapters', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await makeBook(env!)
+    await makeBook(env!, 'running-book', 'drafting')
+    await makeBook(env!, 'rejected-book', 'rejected')
+    expect((await call(c, 'reopen_book', { book: 'demo-book', mode: 'rewrite' })).raw).toMatch(/not a rejected book \(stage: published\)/)
+    expect((await call(c, 'reopen_book', { book: 'running-book', mode: 'review' })).raw).toMatch(/not a rejected book \(stage: drafting\)/)
+    expect((await call(c, 'reopen_book', { book: 'nobody', mode: 'review' })).raw).toMatch(/no book/)
+    expect((await call(c, 'reopen_book', { book: 'rejected-book', mode: 'redo' })).isError).toBe(true)
+    expect((await call(c, 'reopen_book', { book: 'rejected-book', mode: 'review', chapters: [1] })).raw).toMatch(/only apply to mode rewrite/)
+    expect((await call(c, 'reopen_book', { book: 'rejected-book', mode: 'rewrite', chapters: [4] })).raw).toMatch(/chapter 4 of "rejected-book" is not written/)
+    // nothing changed
+    expect((await env!.engine.books.read('rejected-book'))!.data).toMatchObject({ stage: 'rejected', round: 0, extra_rounds: 0 })
+    expect((await env!.engine.books.read('demo-book'))!.data.stage).toBe('published')
+  })
+})
+
+describe('MCP book models', () => {
+  it('add_story with models is stored in the story, set_book_model checks its input, and a model can be removed', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['loc/m1'] }, paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const added = await call(c, 'add_story', { title: 'The Bell', premise: 'A bell.', models: { writer: 'client/claude-code' } })
+    expect(added.isError).toBe(false)
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.role_models).toEqual({ writer: 'client/claude-code' })
+    expect((await call(c, 'get_story', { story: 'the-bell' })).data.brief.models).toEqual({ writer: 'client/claude-code' })
+    expect((await call(c, 'add_story', { title: 'X', models: { writer: 'nope/nope' } })).raw).toMatch(/unknown model/)
+    expect((await call(c, 'add_story', { title: 'X', models: { nobody: 'loc/m1' } })).raw).toMatch(/unknown role/)
+    const upd = await call(c, 'update_story', { story: 'the-bell', models: {} })
+    expect(upd.isError).toBe(false)
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.role_models).toBeUndefined()
+
+    await makeBook(env, 'running-book', 'drafting')
+    await makeBook(env, 'rejected-book', 'rejected')
+    await makeBook(env, 'done-book', 'published')
+    const set = await call(c, 'set_book_model', { book: 'running-book', role: 'writer', model: 'client/claude-code' })
+    expect(set.isError).toBe(false)
+    expect(set.data.roleModels).toEqual({ writer: 'client/claude-code' })
+    expect((await env.engine.books.read('running-book'))!.data.role_models).toEqual({ writer: 'client/claude-code' })
+    expect((await call(c, 'set_book_model', { book: 'rejected-book', role: 'writer', model: 'loc/m1' })).data.roleModels).toEqual({ writer: 'loc/m1' })
+    expect((await call(c, 'set_book_model', { book: 'done-book', role: 'writer', model: 'loc/m1' })).raw).toMatch(/published/)
+    expect((await call(c, 'set_book_model', { book: 'running-book', role: 'writer', model: 'nope/nope' })).raw).toMatch(/unknown model/)
+    expect((await call(c, 'set_book_model', { book: 'running-book', role: 'nobody', model: 'loc/m1' })).raw).toMatch(/unknown role/)
+    expect((await call(c, 'set_book_model', { book: 'nobody', role: 'writer', model: null })).isError).toBe(true)
+    expect((await call(c, 'set_book_model', { book: 'running-book', role: 'writer', model: null })).data.roleModels).toEqual({})
   })
 })

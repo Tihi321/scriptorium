@@ -44,6 +44,8 @@ export interface BookState {
   stage: string
   round: number
   rewriteChapters: number[]
+  /** book.md `extra_rounds`: rounds added by `reopen_book`. */
+  extraRounds?: number
   writerFamily: string | null
   writerAgent: string | null
   format: FormatEntry
@@ -207,7 +209,8 @@ function factStep(s: BookState, n: number): Plan | null {
 }
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
 
-export const maxRoundsOf = (s: Pick<BookState, 'format' | 'quality'>) => s.format.max_rounds ?? s.quality.max_rounds
+/** Rewrite rounds a book may have: the format's (or quality's) `max_rounds`, plus one for every time `reopen_book` gave a rejected book another round. */
+export const maxRoundsOf = (s: Pick<BookState, 'format' | 'quality'> & { extraRounds?: number }) => (s.format.max_rounds ?? s.quality.max_rounds) + (s.extraRounds ?? 0)
 
 function lengthNote(words: number, min: number, max: number, total: number): string {
   const per = Math.max(1, Math.round(clamp(words < min ? min * 1.1 : max * 0.9, min, max) / total))

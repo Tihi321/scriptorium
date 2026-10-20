@@ -137,7 +137,8 @@ export function providerSummaries(registry: ModelRegistry, limiter: ProviderLimi
     .map((p) => ({
       id: p.id,
       kind: p.kind,
-      local: p.local,
+      // a client provider (Claude Code over MCP) is local and free, never paid or down
+      local: p.local || p.kind === 'client',
       available: p.available,
       reason: p.available ? undefined : p.unavailableReason,
       canList: p.kind === 'openai-compat',

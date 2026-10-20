@@ -37,12 +37,15 @@ export const providerModelSchema = z.looseObject({
   extra_body: z.record(z.string(), z.unknown()).nullable().optional(),
   /** `load_models` providers (LM Studio): load this model with this context window and parallel count instead of the settings' ones. */
   load_context: z.number().int().min(2048).optional(),
-  load_parallel: z.number().int().min(1).max(16).optional()
+  load_parallel: z.number().int().min(1).max(16).optional(),
+  /** `kind: client`: the answering client can look at images. Not used by Scriptorium's own jobs (they send no images); VN Studio's art critic does. */
+  vision: z.boolean().optional()
 })
 
 export const providerEntrySchema = z.looseObject({
   id: z.string().min(1),
-  kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock', 'search']),
+  /** `client`: no model server. A request waits in the engine's client task queue until an MCP client (Claude Code) answers it. */
+  kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock', 'search', 'client']),
   enabled: z.boolean().default(true),
   local: z.boolean().default(false),
   base_url: z.string().optional(),
@@ -256,6 +259,8 @@ export const ideaSchema = z.looseObject({
   source: z.enum(['user', 'generated']).default('user'),
   /** Format id from config/formats.md. Empty means "the editor-in-chief picks". */
   format: z.string().nullable().default(null),
+  /** Role -> `provider/model` for the book made from this story (copied to the book's `role_models`). */
+  role_models: z.record(z.string(), z.string()).optional(),
   book: z.string().nullable().default(null),
   created: z.string().optional()
 })
@@ -276,6 +281,14 @@ export const bookSchema = z.looseObject({
   writer_agent: z.string().nullable().default(null),
   writer_family: z.string().nullable().default(null),
   rewrite_chapters: z.array(z.number().int()).default([]),
+  /** Rounds added to the format's `max_rounds` by `reopen_book`, one per reopening. */
+  extra_rounds: z.number().int().nonnegative().default(0),
+  /**
+   * Role -> `provider/model` for this book only (`add_story {models}`, `set_book_model`): a job of the book in that role tries this model first,
+   * before the agent's own model, and any agent of the role may take it. The role's list stays the fallback. (`models` in book.md is the
+   * count of jobs per model, written by the engine.)
+   */
+  role_models: z.record(z.string(), z.string()).default({}),
   uuid: z.string().optional(),
   cover_png: z.string().nullable().default(null),
   cost_usd: z.number().default(0),

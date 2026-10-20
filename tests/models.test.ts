@@ -9,13 +9,14 @@ import { Budget } from '../src/engine/budget/spend'
 import { AnthropicClient } from '../src/engine/models/anthropic'
 import { GeminiClient } from '../src/engine/models/gemini'
 import { deleteStoredKey, getStoredKey, setStoredKey } from '../src/engine/models/keys'
+import { ClientProvider, ClientTaskQueue, DEFAULT_LEASE_MS } from '../src/engine/models/client'
 import { MockProvider } from '../src/engine/models/mock'
 import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
 import { ModelRouter, isDailyLimitError, problemKind } from '../src/engine/models/router'
-import { BudgetError, collect, ProviderError } from '../src/engine/models/types'
+import { BudgetError, collect, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
 import { parseMd } from '../src/shared/md'
@@ -811,5 +812,179 @@ describe('daily request limits', () => {
     const again = new ModelRegistry(dir, { keys })
     await again.load()
     expect(again.providers.get('openrouter')).toMatchObject({ concurrency: 2, rpd: 1000 })
+  })
+})
+
+describe('client provider', () => {
+  const msgs = [{ role: 'system' as const, content: 'You are a writer.' }, { role: 'user' as const, content: 'Write chapter one.' }]
+  const objectSchema = { type: 'object', required: ['title', 'n'], properties: { title: { type: 'string' }, n: { type: 'integer' }, tags: { type: 'array', items: { type: 'string' } } } }
+
+  it('the seed lists a client provider that is switched off, so a new install never routes to it', async () => {
+    const registry = new ModelRegistry(dir, { keys: () => undefined })
+    await registry.load()
+    expect(registry.providers.get('client')).toMatchObject({ kind: 'client', available: false, local: true })
+    expect(registry.providers.get('client')?.unavailableReason).toMatch(/disabled/)
+    expect(registry.getModel('client/claude-code')).toBeTruthy()
+    expect(registry.providers.get('client')?.client).toBeUndefined()
+  })
+
+  it('resolves as a local, free provider without a key, and routes a role to it', async () => {
+    const { registry } = await registryWith({ providers: [{ id: 'client', kind: 'client', local: false, models: ['claude-code'] }], roles: { writer: ['client/claude-code'] } })
+    const p = registry.providers.get('client')!
+    expect(p).toMatchObject({ kind: 'client', local: true, available: true })
+    expect(p.client).toBeInstanceOf(ClientProvider)
+    expect(isPaidModel(registry.getModel('client/claude-code')!)).toBe(false)
+    expect(registry.groupOf('client/claude-code')).toBeUndefined()
+    expect(new ModelRouter(registry, undefined).candidates('writer').map((m) => m.ref)).toEqual(['client/claude-code'])
+    // the registry makes its own queue; an engine passes its own
+    const queue = new ClientTaskQueue()
+    const reg2 = new ModelRegistry(dir, { mock: new MockProvider(), clientQueue: queue })
+    await reg2.load()
+    expect(reg2.clientQueue).toBe(queue)
+  })
+
+  it('numbers tasks <job>#<call>, per job, and names an anonymous request adhoc-<n>', () => {
+    const q = new ClientTaskQueue()
+    const meta = { job: 'b1--draft--ch01--r0', role: 'writer', task: 'draft_chapter', book: 'b1', agent: 'writer-ann', unit: 'ch01' }
+    const a = q.add({ messages: msgs }, meta).task
+    const b = q.add({ messages: msgs, schema: objectSchema, maxTokens: 500 }, meta).task
+    const c = q.add({ messages: msgs }, { ...meta, job: 'other' }).task
+    expect([a.id, b.id, c.id]).toEqual(['b1--draft--ch01--r0#1', 'b1--draft--ch01--r0#2', 'other#1'])
+    expect(a).toMatchObject({ job: 'b1--draft--ch01--r0', call: 1, role: 'writer', task: 'draft_chapter', book: 'b1', agent: 'writer-ann', unit: 'ch01' })
+    expect(b).toMatchObject({ call: 2, maxTokens: 500, schema: objectSchema })
+    expect(q.add({ messages: msgs }).task.id).toBe('adhoc-1#1')
+    expect(q.add({ messages: msgs }).task.id).toBe('adhoc-2#1')
+    expect(q.counts()).toEqual({ waiting: 5, leased: 0 })
+  })
+
+  it('leases the oldest matching task, lists states and ages, and gives back an expired lease', () => {
+    let t = 1000
+    const q = new ClientTaskQueue({ now: () => t })
+    q.add({ messages: msgs }, { job: 'j1', role: 'writer', task: 'draft_chapter', book: 'b1' })
+    t += 10
+    q.add({ messages: msgs }, { job: 'j2', role: 'line-editor', task: 'review', book: 'b1' })
+    t += 10
+    q.add({ messages: msgs }, { job: 'j3', role: 'line-editor', task: 'review', book: 'b2' })
+    expect(q.lease({ role: 'nobody' })).toBeNull()
+    expect(q.lease({ task: 'review', book: 'b2' })?.id).toBe('j3#1')
+    const first = q.lease({ role: 'line-editor' }, 60_000)!
+    expect(first.id).toBe('j2#1')
+    expect(first.leaseUntil).toBe(t + 60_000)
+    expect(q.lease({ role: 'line-editor' })).toBeNull() // both are leased
+    t += 5
+    const rows = q.list()
+    expect(rows.map((r) => [r.id, r.state])).toEqual([['j1#1', 'waiting'], ['j2#1', 'leased'], ['j3#1', 'leased']])
+    expect(rows[0]).toMatchObject({ ageMs: 25, role: 'writer', task: 'draft_chapter', book: 'b1', unit: '' })
+    expect(rows[1]!.leaseMsLeft).toBe(60_000 - 5)
+    expect(q.counts()).toEqual({ waiting: 1, leased: 2 })
+    // the 30 minute default lease runs out: j3 waits again and can be taken by the next caller
+    t += DEFAULT_LEASE_MS
+    expect(q.counts()).toEqual({ waiting: 3, leased: 0 })
+    expect(q.lease({ book: 'b2' })?.id).toBe('j3#1')
+    // release puts a task back at once
+    expect(q.release('j3#1')).toBe(true)
+    expect(q.release('nope#1')).toBe(false)
+    expect(q.list().find((r) => r.id === 'j3#1')?.state).toBe('waiting')
+  })
+
+  it('checks a structured answer on submit and keeps the task leased when it fails', async () => {
+    const q = new ClientTaskQueue()
+    const { task, done } = q.add({ messages: msgs, schema: objectSchema }, { job: 'j1' })
+    expect(q.lease()!.id).toBe(task.id)
+    const bad = q.submit(task.id, 'I think the title is Bell.')
+    expect(bad).toMatchObject({ accepted: false })
+    expect((bad as { problems: string[] }).problems[0]).toMatch(/not a JSON object/)
+    const wrong = q.submit(task.id, '{"title": 5, "tags": ["a", 2]}') as { accepted: false; problems: string[] }
+    expect(wrong.problems).toEqual(expect.arrayContaining(['title: expected string, got number', 'tags[1]: expected string, got number', 'n: missing (required)']))
+    expect(q.submit(task.id, '   ')).toEqual({ accepted: false, problems: ['the text is empty'] })
+    expect(q.counts()).toEqual({ waiting: 0, leased: 1 }) // still leased: nothing was resolved
+    // a fenced answer passes, read the way extractJson reads it for the job
+    const ok = '```json\n{"title": "Bell", "n": 2}\n```'
+    expect(q.submit(task.id, ok)).toEqual({ accepted: true })
+    expect(await done).toBe(ok)
+    expect(q.counts()).toEqual({ waiting: 0, leased: 0 })
+    expect(q.submit(task.id, ok)).toEqual({ accepted: false, problems: ['task not found (it was aborted, answered, or the engine restarted)'] })
+    // prose has nothing to check
+    const prose = q.add({ messages: msgs }, { job: 'j2' })
+    expect(q.submit(prose.task.id, 'Once upon a time.')).toEqual({ accepted: true })
+    expect(await prose.done).toBe('Once upon a time.')
+  })
+
+  it('chat waits for the answer, yields it as one delta with estimated usage, and costs nothing', async () => {
+    const { registry } = await registryWith({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] } })
+    const router = new ModelRouter(registry, undefined)
+    const models = router.candidates('writer')
+    const events: string[] = []
+    let done: { usage: { inputTokens: number; outputTokens: number }; costUsd: number } | undefined
+    let text = ''
+    const run = (async () => {
+      for await (const ev of router.chat(models, { messages: msgs, meta: { job: 'j1', role: 'writer', task: 'draft_chapter' } })) {
+        events.push(ev.type)
+        if (ev.type === 'delta') text += ev.text
+        if (ev.type === 'done') done = ev
+      }
+    })()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(events).toEqual(['attempt']) // no answer yet, and no timeout
+    expect(registry.clientQueue.counts()).toEqual({ waiting: 1, leased: 0 })
+    const leased = registry.clientQueue.lease()!
+    expect(leased.id).toBe('j1#1')
+    expect(registry.clientQueue.submit(leased.id, 'x'.repeat(40))).toEqual({ accepted: true })
+    await run
+    expect(text).toBe('x'.repeat(40))
+    expect(done).toMatchObject({ costUsd: 0, usage: { inputTokens: Math.ceil('You are a writer.\nWrite chapter one.'.length / 4), outputTokens: 10 } })
+    expect(registry.providers.get('client')!.down).toBe(false)
+  })
+
+  it('an abort drops the task, throws an abort error, and a later submit is refused', async () => {
+    const queue = new ClientTaskQueue()
+    const provider = new ClientProvider('client', queue)
+    const ctrl = new AbortController()
+    const outcome = collect(provider.chat({ model: 'claude-code', messages: msgs, signal: ctrl.signal, meta: { job: 'j1' } })).then(() => null, (e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(queue.list().map((r) => r.id)).toEqual(['j1#1'])
+    queue.lease()
+    ctrl.abort()
+    expect(isAbortError(await outcome)).toBe(true)
+    expect(queue.counts()).toEqual({ waiting: 0, leased: 0 })
+    expect(queue.submit('j1#1', 'late')).toMatchObject({ accepted: false })
+    // already aborted before it starts: nothing is queued
+    const again = await collect(provider.chat({ model: 'claude-code', messages: msgs, signal: ctrl.signal })).then(() => null, (e: unknown) => e)
+    expect(isAbortError(again)).toBe(true)
+    expect(queue.counts()).toEqual({ waiting: 0, leased: 0 })
+    expect(queue.cancel('j1#1')).toBe(false)
+  })
+})
+
+describe('client provider and book models', () => {
+  it('model_order never sorts a client model behind the groups, and the schema check leaves out fields with a default', async () => {
+    const { registry } = await registryWith({
+      providers: [{ id: 'loc', models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }],
+      roles: { writer: ['loc/m1', 'client/claude-code'] }
+    })
+    registry.setDefaults({ aliases: { paid: 'loc/m1', strata: 'strata/x', lmstudio: 'lmstudio/y' }, order: ['paid', 'strata', 'lmstudio'], lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    await registry.load()
+    // loc is a non-local provider here (a paid-group model); the client model still goes first
+    expect(registry.roleEntries('writer')).toEqual(['client/claude-code', 'loc/m1'])
+    expect(registry.roleModelRefs('writer')[0]).toBe('client/claude-code')
+    // jsonSchemaOf-style schema: `subjects` has a default, so zod lists it as required but with a `default`
+    const { z } = await import('zod')
+    const { jsonSchemaOf } = await import('../src/engine/pipeline/llm')
+    const schema = jsonSchemaOf(z.object({ title: z.string(), subjects: z.array(z.string()).default([]) }))
+    const { checkAgainstSchema } = await import('../src/engine/models/client')
+    expect(checkAgainstSchema('{"title": "x"}', schema)).toEqual([])
+    expect(checkAgainstSchema('{"subjects": []}', schema)).toEqual(['title: missing (required)'])
+  })
+
+  it("a book's role model goes first, before the agent's own model, and a client model counts as its own family for reviewers", async () => {
+    const { registry } = await registryWith({
+      providers: [{ id: 'loc', local: true, family: 'qwen', models: ['m1', 'm2'] }, { id: 'client', kind: 'client', models: ['claude-code'] }],
+      roles: { 'line-editor': ['loc/m1', 'loc/m2'] }
+    })
+    const router = new ModelRouter(registry, undefined)
+    expect(router.candidates('line-editor', { agentModel: 'loc/m2', bookModel: 'client/claude-code' }).map((m) => m.ref)).toEqual(['client/claude-code', 'loc/m2', 'loc/m1'])
+    // avoid_family qwen: the chosen client model stays first, qwen models go last
+    expect(router.candidates('line-editor', { bookModel: 'client/claude-code', avoidFamily: 'qwen' }).map((m) => m.ref)).toEqual(['client/claude-code', 'loc/m1', 'loc/m2'])
+    expect(router.candidates('line-editor', { avoidFamily: 'claude' }).map((m) => m.ref)).toEqual(['loc/m1', 'loc/m2'])
   })
 })

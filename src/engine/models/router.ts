@@ -10,6 +10,8 @@ import type { ProblemKind } from '../../shared/protocol'
 export interface CandidateOptions {
   /** The agent's own `provider/model` override. Goes first. */
   agentModel?: string | null
+  /** The book's own model for this role (`role_models` in book.md). Goes before the agent's own model. */
+  bookModel?: string | null
   /** Reviewers prefer another family than the book's writer. Models of this family go last. */
   avoidFamily?: string | null
 }
@@ -86,7 +88,9 @@ export class ModelRouter {
    */
   candidates(role: string, o: CandidateOptions = {}): ModelInfo[] {
     const own = o.agentModel ? this.registry.resolve(o.agentModel) : undefined
-    const refs = [...(own ? [own] : []), ...this.registry.roleModelRefs(role)]
+    const book = o.bookModel ? this.registry.resolve(o.bookModel) : undefined
+    const chosen = [book, own].filter((r): r is string => !!r)
+    const refs = [...chosen, ...this.registry.roleModelRefs(role)]
     const seen = new Set<string>()
     let list: ModelInfo[] = []
     for (const ref of refs) {
@@ -98,8 +102,10 @@ export class ModelRouter {
     const up = list.filter((m) => this.usable(m.provider))
     if (up.length > 0) list = up
     if (o.avoidFamily) {
-      // the agent's own model was picked on purpose: it stays first even in the writer's family
-      const first = list[0]?.ref === own ? list.slice(0, 1) : []
+      // the book's and the agent's own model were picked on purpose: they stay first even in the writer's family
+      let lead = 0
+      while (lead < list.length && chosen.includes(list[lead]!.ref)) lead++
+      const first = list.slice(0, lead)
       const rest = list.slice(first.length)
       const keep = rest.filter((m) => m.family !== o.avoidFamily)
       const avoid = rest.filter((m) => m.family === o.avoidFamily)

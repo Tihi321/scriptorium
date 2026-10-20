@@ -56,7 +56,8 @@ function formatContext(n?: number): string {
   return n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`
 }
 
-function formatPrice(r: Row, local: boolean): string {
+function formatPrice(r: Row, local: boolean, client = false): string {
+  if (client) return 'free (Claude Code)'
   if (local) return 'local'
   if (r.priceIn === undefined || r.priceOut === undefined) return 'no price'
   if (r.priceIn === 0 && r.priceOut === 0) return 'free'
@@ -96,6 +97,8 @@ export function ModelsDialog() {
   const current = providers.find((p) => p.id === provider) ?? providers.find((p) => p.available) ?? providers[0]
   const catalog = current ? catalogs[current.id] : undefined
   const local = !!current?.local
+  // kind client: an MCP client (Claude Code) answers the requests, so it is local and free, never paid or down
+  const client = current?.kind === 'client'
 
   // today's request counts are fresh when the panel opens
   useEffect(() => {
@@ -287,7 +290,7 @@ export function ModelsDialog() {
                 <button
                   disabled={!current.available || !current.canList || catalog?.loading}
                   onClick={() => detect(current.id)}
-                  title={current.canList ? `Ask ${current.id} for every model it has` : `${current.id} can't list its models: add them by id below`}
+                  title={current.canList ? `Ask ${current.id} for every model it has` : client ? `${current.id} has the models listed in providers.md` : `${current.id} can't list its models: add them by id below`}
                   data-testid="models-detect"
                 >
                   {catalog?.loading ? 'Detecting...' : 'Detect models'}
@@ -309,7 +312,9 @@ export function ModelsDialog() {
                     ? current.reason?.startsWith('no key')
                       ? 'No key: store it in Settings, under Provider API key'
                       : (current.reason ?? 'not available')
-                    : !current.canList
+                    : client
+                      ? 'Answered by Claude Code over MCP: free. Its models are listed in providers.md'
+                      : !current.canList
                       ? "Can't list its models: add them by id below"
                       : catalog?.error
                         ? `Could not list: ${catalog.error}`
@@ -338,7 +343,7 @@ export function ModelsDialog() {
                     <input type="checkbox" checked={r.shown} disabled={!r.pickable} onChange={(e) => sendCommand({ type: 'showModels', refs: [r.ref], shown: e.target.checked })} />
                     <span className="model-id">{r.id}</span>
                     <span className="dim">{formatContext(r.context)}</span>
-                    <span className={r.priceIn === 0 && r.priceOut === 0 && !local ? 'free' : 'dim'}>{formatPrice(r, local)}</span>
+                    <span className={r.priceIn === 0 && r.priceOut === 0 && !local ? 'free' : 'dim'}>{formatPrice(r, local, client)}</span>
                     <span className="dim">{r.source ? SOURCE_LABEL[r.source] : ''}</span>
                   </label>
                 ))}

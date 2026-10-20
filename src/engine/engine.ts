@@ -9,6 +9,7 @@ import { AgentStore } from './agents/agents'
 import { Budget } from './budget/spend'
 import { LogWriter } from './logs/logs'
 import { resolveKey, setStoredKey } from './models/keys'
+import { ClientTaskQueue } from './models/client'
 import { ModelRegistry, guessFamily, modelDefaultsOf } from './models/registry'
 import type { ListedModel } from './models/openaiCompat'
 import type { RegistryOptions } from './models/registry'
@@ -59,6 +60,8 @@ const MODELS_MD_BODY = "# Models in the pickers\n\nWhich models the model picker
 /** The engine core: config, models, budget, agents, jobs and the scheduler, plus the command handler. */
 export class Engine {
   readonly registry: ModelRegistry
+  /** The model requests of `client` providers, waiting for Claude Code (or another MCP client) to answer them. One per engine: the MCP server is stateless. */
+  readonly clientQueue: ClientTaskQueue
   readonly budget: Budget
   readonly router: ModelRouter
   readonly jobs: JobStore
@@ -106,7 +109,8 @@ export class Engine {
     }
     this.log = opts.log ?? (() => undefined)
     const dir = opts.dataDir
-    this.registry = new ModelRegistry(dir, opts.registry)
+    this.clientQueue = opts.registry?.clientQueue ?? new ClientTaskQueue()
+    this.registry = new ModelRegistry(dir, { ...opts.registry, clientQueue: this.clientQueue })
     this.budget = new Budget(dir, {
       onWarn: (message) => {
         this.log(`budget warning: ${message}`)
@@ -141,7 +145,8 @@ export class Engine {
       emit: this.emit,
       pollMs: opts.pollMs,
       onAgentsChanged: () => this.syncAgents(),
-      isBookPaused: (book) => this.pipeline.pausedBooks.has(book)
+      isBookPaused: (book) => this.pipeline.pausedBooks.has(book),
+      getBookModel: (book, role) => this.bookModel(book, role)
     })
     this.books = new BookStore(dir)
     this.topics = new TopicsFile(dir, () => void this.emitTopics())
@@ -491,6 +496,33 @@ export class Engine {
     this.scheduler.kick()
   }
 
+  /** Book slug -> its `role_models`, read from book.md and kept for a few seconds (the scheduler asks for every queued job on every tick). */
+  private bookModels = new Map<string, { at: number; models: Record<string, string> }>()
+
+  private async bookModel(book: string, role: string): Promise<string | undefined> {
+    let hit = this.bookModels.get(book)
+    if (!hit || Date.now() - hit.at > 3000) {
+      hit = { at: Date.now(), models: (await this.books.read(book))?.data.role_models ?? {} }
+      this.bookModels.set(book, hit)
+    }
+    return hit.models[role] || undefined
+  }
+
+  /** Sets or removes the model a book uses for a role. Its running jobs of that role switch at once. */
+  private async setBookModel(book: string, role: string, model: string | null): Promise<void> {
+    const b = await this.books.read(book)
+    if (!b) return this.log(`setBookModel: no book "${book}"`)
+    const next = { ...b.data.role_models }
+    if (model) next[role] = model
+    else delete next[role]
+    await this.books.update(book, () => ({ role_models: next }))
+    this.bookModels.delete(book)
+    this.log(`book ${book}: ${role} ${model ? `uses ${model}` : 'back to its role list'}`)
+    this.scheduler.bookModelChanged(book, role, model ?? undefined)
+    await this.emitBookUpdated(book)
+    this.scheduler.kick()
+  }
+
   /** A published or rejected book has no more jobs: its assigned agents go back to taking any job. */
   private async releasePins(book: string): Promise<void> {
     for (const def of this.agents.list()) {
@@ -826,6 +858,14 @@ export class Engine {
         if (!(await this.pipeline.retryBook(cmd.book))) this.log(`retryBook: "${cmd.book}" is not a failed book`)
         else await this.emitBookUpdated(cmd.book)
         return
+      case 'setBookModel':
+        return this.setBookModel(cmd.book, cmd.role, cmd.model)
+      case 'reopenBook': {
+        const res = await this.pipeline.reopenBook(cmd.book, cmd.mode, cmd.chapters)
+        if (!res.ok) this.log(`reopenBook: ${res.error}`)
+        else await this.emitBookUpdated(cmd.book)
+        return
+      }
       case 'regenerateCover':
         if (!(await this.pipeline.remakeCover(cmd.book))) this.log(`regenerateCover: "${cmd.book}" is not a published book`)
         else await this.emitBookUpdated(cmd.book)

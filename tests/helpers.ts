@@ -21,6 +21,8 @@ export interface TestProvider {
   price?: number
   family?: string
   models?: string[]
+  /** Default `mock`. `client`: requests wait in the engine's client task queue. */
+  kind?: 'mock' | 'client'
 }
 
 export interface EnvOptions {
@@ -41,7 +43,7 @@ export async function writeTestConfig(dir: string, o: EnvOptions): Promise<void>
       kind: 'providers',
       providers: providers.map((p) => ({
         id: p.id,
-        kind: 'mock',
+        kind: p.kind ?? 'mock',
         local: p.local ?? false,
         concurrency: p.concurrency ?? 4,
         models: (p.models ?? ['m1']).map((m) => ({

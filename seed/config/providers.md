@@ -122,6 +122,17 @@ providers:
     concurrency: 1
     discover: true
     models: []
+  # Claude Code (or any MCP client) does the model work: a request waits in the engine until the client answers it (see docs/mcp.md).
+  # Switched off here so a new install never routes to it: set `enabled: true`, then point one agent or role at client/claude-code.
+  - id: client
+    kind: client
+    enabled: false
+    local: true                   # free, never paid, never budget-checked, no key
+    concurrency: 8                # requests that may wait for the client at once
+    models:
+      - id: claude-code
+        family: claude
+        vision: true
   # Search services for the researcher (kind: search). They have no models. The order is search_order at the end of the list.
   # price_per_request is logged to the spend files for every answered request (USD, to verify on the provider's pricing page).
   - id: tavily
@@ -176,7 +187,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 ## Fields of a provider
 
 - `id`: the name used in model references. A model is written `provider/model`, for example `lmstudio/nail-qwen3.6-35b-a3b-mtp`.
-- `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `mock` (scripted answers, only for the tests: the app's own config has none, so the model pickers never offer one) or `search` (web search for the researcher: `engine` names the service, see below).
+- `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `client` (no model server: an MCP client such as Claude Code answers, see below), `mock` (scripted answers, only for the tests: the app's own config has none, so the model pickers never offer one) or `search` (web search for the researcher: `engine` names the service, see below).
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing and never count against the caps. Their tokens and time are still recorded.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
@@ -206,6 +217,15 @@ One key (`OPENROUTER_API_KEY`, stored in the app's settings) gives many models. 
 ## DeepSeek
 
 - `json_schema: false`: DeepSeek answers `response_format: json_schema` with HTTP 400 ("This response_format type is unavailable now"), so every structured job failed there at once. The prompt asks for the JSON shape instead, and the engine checks and repairs the answer. Checked 2026-10-12.
+
+## Client provider (`kind: client`)
+
+Claude Code (or another MCP client) does the model work. A request to `client/claude-code` is not sent anywhere: it waits in the engine's task queue, with no time limit, until the client takes it with `get_client_task` and answers it with `submit_client_task` (see `docs/mcp.md`). The book carries on as if a model had answered. The provider is local (free, never paid, never counted against the caps, no key) and is never marked down, so nothing is spent. `concurrency` is how many requests may wait at once. It is switched off in the seed (`enabled: false`).
+
+- Use it for one book: `add_story {models: {writer: "client/claude-code"}}` or `set_book_model` puts that book's jobs of a role on it, so the factory's own ideas keep using their models and never wait for you. Or set a whole role to it with `set_model`. (An agent pinned to a book with `assign_agent` only prefers its jobs.)
+- A role left on `client` when nobody is answering stalls every book that needs it: switch it back when you are done.
+- `vision: true` on the model is for clients that can look at images (VN Studio sends images to its art critic; Scriptorium's jobs send none).
+- Tasks live in memory only. If the engine restarts, the jobs that waited are requeued and make new tasks.
 
 ## Search providers (`kind: search`)
 
