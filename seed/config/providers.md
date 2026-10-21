@@ -132,6 +132,7 @@ providers:
     models:
       - id: claude-code
         family: claude
+        context: 200000
         vision: true
   # Search services for the researcher (kind: search). They have no models. The order is search_order at the end of the list.
   # price_per_request is logged to the spend files for every answered request (USD, to verify on the provider's pricing page).
@@ -233,6 +234,7 @@ Claude Code (or another MCP client) does the model work. A request to `client/cl
 
 - Use it for one book: `add_story {models: {writer: "client/claude-code"}}` or `set_book_model` puts that book's jobs of a role on it, so the factory's own ideas keep using their models and never wait for you. Or set a whole role to it with `set_model`. (An agent pinned to a book with `assign_agent` only prefers its jobs.)
 - A role left on `client` when nobody is answering stalls every book that needs it: switch it back when you are done.
+- `context: 200000`: Claude's window. It sizes the memory context (45%) and source excerpts (30%); without it Scriptorium uses its smaller defaults.
 - `vision: true` on the model is for clients that can look at images (VN Studio sends images to its art critic; Scriptorium's jobs send none).
 - Tasks live in memory only. If the engine restarts, the jobs that waited are requeued and make new tasks.
 

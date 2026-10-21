@@ -350,7 +350,7 @@ describe('humanizer: the role, the seed and the migration', () => {
   it('the role is known everywhere the roles are listed, and the seed has a humanizer agent and prompts', async () => {
     expect(ROLES).toContain('humanizer')
     const roles = parseMd(await readFile(path.join(seedDir, 'config', 'roles.md'), 'utf8')).data.roles as Record<string, { models: string[] }>
-    expect(roles.humanizer!.models).toEqual(['strata', 'paid']) // SCP-13: the line editor's first model, then the paid default, no LM Studio step
+    expect(roles.humanizer!.models).toEqual(['deepseek/deepseek-flash', 'paid']) // SCP-14: DeepSeek Flash, then the paid default, no LM Studio step (SCP-13 had Strata first)
     const agent = parseMd(await readFile(path.join(seedDir, 'agents', 'humanizer-iris-vane.md'), 'utf8'))
     expect(agent.data).toMatchObject({ kind: 'agent', role: 'humanizer', name: 'Iris Vane' })
     for (const f of ['humanize_chapter.md', 'humanize_chapter_vn.md']) expect(existsSync(path.join(seedDir, 'prompts', 'humanizer', f))).toBe(true)
@@ -372,14 +372,14 @@ describe('humanizer: the role, the seed and the migration', () => {
     return dir
   }
 
-  it('an old data folder gets the role (the line editor chain) and the agent, once', async () => {
+  it('an old data folder gets the role (DeepSeek Flash, then paid) and the agent, once', async () => {
     const dir = await oldFolder()
     const first = await initDataFolder(dir, seedDir)
     expect(first.migrated).toHaveLength(2)
-    expect(first.migrated[0]).toMatch(/roles\.md: added the humanizer role .*lmstudio, paid/)
+    expect(first.migrated[0]).toMatch(/roles\.md: added the humanizer role .*deepseek\/deepseek-flash, paid/)
     expect(first.migrated[1]).toMatch(/humanizer-iris-vane\.md: hired the starter humanizer/)
     const doc = parseMd(await readFile(path.join(dir, 'config', 'roles.md'), 'utf8'))
-    expect((doc.data.roles as Record<string, { models: string[] }>).humanizer!.models).toEqual(['lmstudio', 'paid'])
+    expect((doc.data.roles as Record<string, { models: string[] }>).humanizer!.models).toEqual(['deepseek/deepseek-flash', 'paid'])
     expect(doc.body).toContain('# Roles') // the text below the frontmatter is kept
     expect(parseMd(await readFile(path.join(dir, 'agents', 'humanizer-iris-vane.md'), 'utf8')).data.role).toBe('humanizer')
     // the other agents are as they were, and a second start changes nothing

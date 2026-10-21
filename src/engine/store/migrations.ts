@@ -2,15 +2,19 @@ import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { parseMd } from '../../shared/md'
 import { atomicWrite, readMd, writeMd } from './atomic'
+import { SEED_HISTORY, seedHash } from './seedHistory'
 
 export interface MigrationResult {
   /** One line per change made, for the log. */
   changes: string[]
 }
 
+/** The humanizer's model chain for a data folder that has none: DeepSeek Flash, then the paid default (SCP-14, as in the seed). */
+const HUMANIZER_MODELS = ['deepseek/deepseek-flash', 'paid']
+
 /**
  * The humanizer arrived after data folders existed, and the seed only fills in files that are missing (the starter staff only
- * a data folder without agents/). So at every start: a `humanizer` entry in config/roles.md (the line editor's model list) when
+ * a data folder without agents/). So at every start: a `humanizer` entry in config/roles.md (DeepSeek Flash, then the paid default) when
  * there is none, and the seed's humanizer agent when no agent of that role exists. Running it again changes nothing once both are
  * there. (A humanizer that was fired comes back at the next start, because the pass needs one; to go without the pass, set
  * `humanize: false` on the formats or on a book.) A folder without config/roles.md or without agents/ is not a data folder yet
@@ -23,10 +27,9 @@ export async function migrateHumanizer(dataDir: string, seedDir: string | undefi
     const doc = await readMd(rolesFile)
     const roles = { ...((doc.data.roles as Record<string, { models?: string[] }> | undefined) ?? {}) }
     if (!roles.humanizer) {
-      const chain = roles['line-editor']?.models
-      roles.humanizer = { models: chain && chain.length ? [...chain] : ['strata', 'lmstudio', 'paid'] }
+      roles.humanizer = { models: [...HUMANIZER_MODELS] }
       await writeMd(rolesFile, { ...doc.data, roles }, doc.body)
-      changes.push(`config/roles.md: added the humanizer role with the line editor's models (${roles.humanizer.models!.join(', ')})`)
+      changes.push(`config/roles.md: added the humanizer role (${roles.humanizer.models!.join(', ')})`)
     }
   }
   const agentsDir = path.join(dataDir, 'agents')
@@ -186,5 +189,125 @@ export async function migrateClientSearch(dataDir: string): Promise<MigrationRes
   }
   await atomicWrite(file, lines.join(eol))
   changes.push(`config/providers.md: added the client web search provider (${CLIENT_SEARCH_ID}, wait_minutes 10)${ordered ? ' and put it into search_order after tavily' : ''}`)
+  return { changes }
+}
+
+/** The model of the client provider and the window that sizes the memory context and source excerpts (Claude's). */
+const CLIENT_MODEL_ID = 'claude-code'
+const CLIENT_CONTEXT = 200000
+
+/** The client provider as the seed has it, for a data folder whose seed can't be read. */
+const CLIENT_PROVIDER_BLOCK = [
+  '  # Claude Code (or any MCP client) does the model work: a request waits in the engine until the client answers it (see docs/mcp.md).',
+  '  # Switched off here so a new install never routes to it: set `enabled: true`, then point one agent or role at client/claude-code.',
+  '  - id: client',
+  '    kind: client',
+  '    enabled: false',
+  '    local: true                   # free, never paid, never budget-checked, no key',
+  '    concurrency: 8                # requests that may wait for the client at once',
+  '    models:',
+  `      - id: ${CLIENT_MODEL_ID}`,
+  '        family: claude',
+  `        context: ${CLIENT_CONTEXT}`,
+  '        vision: true'
+]
+
+/** The line range [from, to) of the first provider `  - id: <id>` in the frontmatter lines (end = index of the closing ---) whose text matches, with the `  #` comment lines right above it. */
+function providerRange(lines: string[], end: number, match: (block: string) => boolean): { from: number; to: number } | null {
+  const starts: number[] = []
+  for (let i = 1; i < end; i++) if (/^ {2}- id:\s*\S+/.test(lines[i]!)) starts.push(i)
+  for (let k = 0; k < starts.length; k++) {
+    let to = k + 1 < starts.length ? starts[k + 1]! : end
+    // the block stops at the first line that is not indented (search_order:), and the comments of the next provider are not its own
+    for (let i = starts[k]! + 1; i < to; i++) {
+      if (/^\S/.test(lines[i]!)) {
+        to = i
+        break
+      }
+    }
+    while (to > starts[k]! + 1 && /^ {2}#/.test(lines[to - 1]!)) to--
+    if (!match(lines.slice(starts[k]!, to).join('\n'))) continue
+    let from = starts[k]!
+    while (from - 1 > 0 && /^ {2}#/.test(lines[from - 1]!)) from--
+    return { from, to }
+  }
+  return null
+}
+
+/**
+ * The client model provider (`client/claude-code`) arrived after data folders existed, and the seed only fills in files that are
+ * missing. At every start, in config/providers.md: a data folder with no `kind: client` provider (and no `id: client`) gets the seed's
+ * block (switched off, with its comments), put before the first search provider; and a client provider whose `claude-code` model has
+ * no `context` gets `context: 200000` (the memory context and the source excerpts are sized from the window). A provider the user
+ * has is never switched on. Everything else stays as it is, including comments and line endings. Running it again changes nothing.
+ * A folder without the file is not touched.
+ */
+export async function migrateClientProvider(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  const changes: string[] = []
+  const file = path.join(dataDir, 'config', 'providers.md')
+  if (!existsSync(file)) return { changes }
+  const text = await fs.readFile(file, 'utf8')
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (lines[0]?.trim() !== '---' || end < 0) return { changes }
+  const isClient = (block: string) => /^ {4}kind:\s*client\b/m.test(block) || /^ {2}- id:\s*client\s*$/.test(block.split('\n')[0]!)
+  const have = providerRange(lines, end, isClient)
+  if (!have) {
+    let block = CLIENT_PROVIDER_BLOCK
+    const seedFile = seedDir ? path.join(seedDir, 'config', 'providers.md') : ''
+    if (seedFile && existsSync(seedFile)) {
+      const seedLines = (await fs.readFile(seedFile, 'utf8')).split(/\r?\n/)
+      const seedEnd = seedLines.findIndex((l, i) => i > 0 && l.trim() === '---')
+      const r = seedEnd > 0 ? providerRange(seedLines, seedEnd, isClient) : null
+      if (r) block = seedLines.slice(r.from, r.to)
+    }
+    const search = providerRange(lines, end, (b) => /^ {4}kind:\s*search\b/m.test(b))
+    const orderAt = lines.findIndex((l, i) => i > 0 && i < end && /^search_order:/.test(l))
+    lines.splice(search ? search.from : orderAt >= 0 ? orderAt : end, 0, ...block)
+    await atomicWrite(file, lines.join(eol))
+    changes.push(`config/providers.md: added the client provider (client/${CLIENT_MODEL_ID}, switched off, context ${CLIENT_CONTEXT})`)
+    return { changes }
+  }
+  // a client provider whose model has no context
+  for (let i = have.from; i < have.to; i++) {
+    const m = new RegExp(String.raw`^(\s+)- id:\s*${CLIENT_MODEL_ID}\s*$`).exec(lines[i]!)
+    if (!m) continue
+    const indent = m[1]!.length
+    let to = i + 1
+    while (to < have.to && (!lines[to]!.trim() || /^\s*/.exec(lines[to]!)![0].length > indent)) to++
+    const block = lines.slice(i, to)
+    if (block.some((l) => /^\s+context:/.test(l))) break
+    let after = block.findIndex((l) => /^\s+family:/.test(l))
+    if (after < 0) after = 0
+    lines.splice(i + after + 1, 0, `${' '.repeat(indent + 2)}context: ${CLIENT_CONTEXT}`)
+    await atomicWrite(file, lines.join(eol))
+    changes.push(`config/providers.md: client/${CLIENT_MODEL_ID} got context ${CLIENT_CONTEXT} (the window of Claude)`)
+    break
+  }
+  return { changes }
+}
+
+/**
+ * Seed prompts and templates are only copied when missing, so an improved seed prompt never reached a data folder that had the old
+ * one. At every start, for each file the history knows: when the data file is not the current seed file, but is an earlier seed
+ * version (line endings aside), it was never edited and is replaced with the current one, in the file's own line endings. A file
+ * that matches no seed version is the owner's and stays. `history` is generated by `yarn seed:hashes` (see seedHistory.ts).
+ */
+export async function migrateSeedPrompts(dataDir: string, seedDir: string | undefined, history: Record<string, string[]> = SEED_HISTORY): Promise<MigrationResult> {
+  const changes: string[] = []
+  if (!seedDir) return { changes }
+  for (const rel of Object.keys(history).sort()) {
+    const dataFile = path.join(dataDir, ...rel.split('/'))
+    const seedFile = path.join(seedDir, ...rel.split('/'))
+    if (!existsSync(dataFile) || !existsSync(seedFile)) continue
+    const data = await fs.readFile(dataFile, 'utf8')
+    const seed = await fs.readFile(seedFile, 'utf8')
+    const h = seedHash(data)
+    if (h === seedHash(seed) || !history[rel]!.includes(h)) continue
+    const eol = data.includes('\r\n') ? '\r\n' : '\n'
+    await atomicWrite(dataFile, seed.replace(/\r\n/g, '\n').split('\n').join(eol))
+    changes.push(`${rel}: upgraded to the current seed version (it was an unedited earlier version)`)
+  }
   return { changes }
 }
