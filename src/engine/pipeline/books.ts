@@ -9,7 +9,8 @@ import type { BookFrontmatter } from '../../shared/schemas'
 import { atomicWrite, readMd, writeMd } from '../store/atomic'
 import { buildEpub } from '../publish/epub'
 import { writeReaderDir } from '../publish/reader'
-import { buildReferences, FactBase } from '../memory/factbase'
+import { buildReferences, citedNumbers, FactBase } from '../memory/factbase'
+import { buildArticleHtml, buildArticleMarkdown } from '../publish/article'
 import { endLine, isBranching } from './branches'
 import type { Choice } from './branches'
 
@@ -29,14 +30,23 @@ export const slugify = (s: string) =>
 /** Stages in which a book needs no more work. */
 export const TERMINAL_BOOK_STAGES = new Set(['published', 'rejected', 'failed'])
 
-/** Books that are not finished. A folder whose book.md can't be read right now (it is being written) counts as in progress. */
-export async function countBooksInProgress(books: BookStore): Promise<number> {
-  let n = 0
+/**
+ * Books and articles that are not finished, counted apart: articles (`article: true` in book.md) have their own limit and do not count
+ * toward `max_books_in_progress`. A folder whose book.md can't be read right now (it is being written) counts as a book in progress.
+ */
+export async function countInProgress(books: BookStore): Promise<{ books: number; articles: number }> {
+  const n = { books: 0, articles: 0 }
   for (const slug of await books.slugs()) {
     const b = await books.read(slug)
-    if (!b || !TERMINAL_BOOK_STAGES.has(b.data.stage)) n++
+    if (!b) n.books++
+    else if (!TERMINAL_BOOK_STAGES.has(b.data.stage)) n[b.data.article === true ? 'articles' : 'books']++
   }
   return n
+}
+
+/** Books (not articles) that are not finished. */
+export async function countBooksInProgress(books: BookStore): Promise<number> {
+  return (await countInProgress(books)).books
 }
 
 export const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0)
@@ -50,6 +60,8 @@ export interface ChapterFile {
   agent?: string
   /** Fixes already applied to this chapter: `len` (length rewrite). */
   fixes: string[]
+  /** The round the humanizer last rewrote this chapter in (`humanized` in the chapter file). Missing: not humanized since it was last written. */
+  humanized?: number
 }
 
 export interface OutlineChapter {
@@ -60,6 +72,8 @@ export interface OutlineChapter {
   choices?: Choice[]
   /** A story with choices: how this ending ends. */
   ending?: string
+  /** An adaptation: the chapters of the source book this chapter is made from. */
+  source_chapters?: number[]
 }
 
 export class BookStore {
@@ -239,7 +253,8 @@ export class BookStore {
       title: String(c.title ?? `Chapter ${i + 1}`),
       summary: String(c.summary ?? ''),
       ...(Array.isArray(c.choices) ? { choices: (c.choices as Record<string, unknown>[]).map((ch) => ({ text: String(ch.text ?? ''), to: Number(ch.to) })) } : {}),
-      ...(typeof c.ending === 'string' ? { ending: c.ending } : {})
+      ...(typeof c.ending === 'string' ? { ending: c.ending } : {}),
+      ...(Array.isArray(c.source_chapters) && c.source_chapters.length ? { source_chapters: (c.source_chapters as unknown[]).map(Number).filter((x) => Number.isInteger(x) && x > 0) } : {})
     }))
     return { chapters, body: doc.body }
   }
@@ -267,25 +282,28 @@ export class BookStore {
         words: Number(doc.data.words ?? countWords(doc.body)),
         body: doc.body.trim(),
         agent: doc.data.agent ? String(doc.data.agent) : undefined,
-        fixes: Array.isArray(doc.data.fixes) ? (doc.data.fixes as unknown[]).map(String) : []
+        fixes: Array.isArray(doc.data.fixes) ? (doc.data.fixes as unknown[]).map(String) : [],
+        ...(Number.isInteger(doc.data.humanized) ? { humanized: Number(doc.data.humanized) } : {})
       })
     }
     return out.sort((a, b) => a.n - b.n)
   }
 
   /** Writes a chapter. The version it replaces is kept in chapters/history/. */
-  async writeChapter(slug: string, ch: { n: number; title: string; round: number; body: string; agent?: string; model?: string; fixes?: string[] }): Promise<void> {
+  async writeChapter(slug: string, ch: { n: number; title: string; round: number; body: string; agent?: string; model?: string; fixes?: string[]; humanized?: number }): Promise<void> {
     const file = this.chapterFile(slug, ch.n)
     try {
       const old = await fs.readFile(file, 'utf8')
-      const oldRound = Number(parseMd(old).data.round ?? 0)
-      await atomicWrite(this.file(slug, 'chapters', 'history', `ch-${pad2(ch.n)}-r${oldRound}.md`), old)
+      const oldDoc = parseMd(old)
+      const oldRound = Number(oldDoc.data.round ?? 0)
+      // a humanized version is kept beside the version it was made from (the same round), not over it
+      await atomicWrite(this.file(slug, 'chapters', 'history', `ch-${pad2(ch.n)}-r${oldRound}${Number.isInteger(oldDoc.data.humanized) ? '-humanized' : ''}.md`), old)
     } catch {
       /* first version */
     }
     await writeMd(
       file,
-      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined },
+      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined, humanized: ch.humanized },
       '\n' + ch.body.trim() + '\n'
     )
   }
@@ -324,11 +342,40 @@ export class BookStore {
     return buildReferences(this, new FactBase(this), slug)
   }
 
-  /** Writes books/<slug>/out/reader/ (unzipped XHTML, CSS, cover, index.html) for the in-app reader. */
+  /**
+   * Writes a newspaper article's page: books/<slug>/out/article.html (masthead, section, headline, standfirst, byline, date, text and the numbered
+   * references it cites, from the fact base) and out/article.md. Returns the path of article.html. The date is the day it was published.
+   */
+  async buildArticle(slug: string): Promise<string> {
+    const book = await this.read(slug)
+    if (!book) throw new Error(`no book ${slug}`)
+    const d = book.data
+    const body = (await this.chapters(slug)).map((c) => c.body.trim()).filter(Boolean).join('\n\n')
+    const cited = new Set(citedNumbers(body))
+    const sources = (await new FactBase(this).sources(slug)).filter((s) => cited.has(s.n))
+    const published = typeof d.published === 'string' ? new Date(d.published) : new Date()
+    const input = {
+      headline: d.headline?.trim() || d.title,
+      standfirst: d.standfirst?.trim() ?? '',
+      section: d.topic_name ?? '',
+      byline: d.author ?? '',
+      date: Number.isNaN(published.getTime()) ? new Date() : published,
+      body,
+      sources
+    }
+    const html = this.file(slug, 'out', 'article.html')
+    await fs.mkdir(path.dirname(html), { recursive: true })
+    await atomicWrite(html, buildArticleHtml(input))
+    await atomicWrite(this.file(slug, 'out', 'article.md'), buildArticleMarkdown(input))
+    return html
+  }
+
+  /** Writes books/<slug>/out/reader/ (unzipped XHTML, CSS, cover, index.html) for the in-app reader. An article has no reader: its page is written instead. */
   async buildReader(slug: string): Promise<string> {
     const book = await this.read(slug)
     if (!book) throw new Error(`no book ${slug}`)
     const d = book.data
+    if (d.article === true) return path.dirname(await this.buildArticle(slug))
     const chapters = [...(await this.chapters(slug))]
     const refs = await this.references(slug)
     const script = d.script === true
@@ -405,11 +452,12 @@ export class BookStore {
     })
   }
 
-  /** Builds out/<slug>.epub from the files, with out/cover.png when it exists. */
+  /** Builds out/<slug>.epub from the files, with out/cover.png when it exists. An article has no EPUB: its page is written instead and its path returned. */
   async buildEpubFile(slug: string): Promise<string> {
     const book = await this.read(slug)
     if (!book) throw new Error(`no book ${slug}`)
     const d = book.data
+    if (d.article === true) return this.buildArticle(slug)
     const chapters = await this.chapters(slug)
     const refs = await this.references(slug)
     const links = await this.choiceLinks(slug, chapters)

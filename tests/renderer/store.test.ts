@@ -28,6 +28,10 @@ export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSum
     topic: { id: 'jfic', name: 'Bedtime' },
     kind: 'juvenile-fiction',
     format: 'bedtime-toddler',
+    medium: 'book',
+    headline: null,
+    standfirst: null,
+    articlePage: null,
     stage: 'drafting',
     paused: false,
     chaptersWritten: 1,
@@ -210,6 +214,7 @@ describe('book highlight', () => {
     store.getState().applyEvent({ type: 'book.stage', book: 'fox-book', stage: 'editing' }, T0)
     expect(store.getState().books['fox-book']?.stage).toBe('editing')
     expect(['new', 'outline', 'drafting', 'review-2', 'published', 'rejected', 'weird'].map(stageColumn)).toEqual(['idea', 'outline', 'drafting', 'editing', 'published', 'rejected', 'other'])
+    expect(['pitch', 'research', 'rewriting', 'length-fix', 'humanizing'].map(stageColumn)).toEqual(['idea', 'outline', 'editing', 'editing', 'editing'])
   })
 })
 

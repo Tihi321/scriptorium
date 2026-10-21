@@ -120,6 +120,15 @@ export interface BookSummary {
   /** Topic kind: fiction, juvenile-fiction, ... */
   kind: string | null
   format: string
+  /** `article`: a newspaper article (no cover, no EPUB, a page in `articlePage` instead); `book`: everything else. */
+  medium: 'book' | 'article'
+  /** Articles: the headline and the standfirst (the one-sentence summary under it), or null. */
+  headline: string | null
+  standfirst: string | null
+  /** Articles: `books/<slug>/out/article.html` once it is published, relative to the data folder, else null. */
+  articlePage: string | null
+  /** The book this one adapts into a visual novel script: its slug and title (the title is the slug when the book is gone). */
+  sourceBook?: { slug: string; title: string } | null
   stage: string
   /** Paused on its own: its jobs wait. */
   paused: boolean
@@ -184,6 +193,8 @@ export interface IdeaSummary {
   /** The owner gave the title (the book keeps it). */
   titleFixed: boolean
   characters: number
+  /** The published book the story adapts into a visual novel script (slug), when it adapts one. */
+  sourceBook?: string
   /** The series the story belongs to (slug) and its position, when it has one. */
   series?: string
   seriesIndex?: number | null
@@ -383,6 +394,11 @@ export type Command =
   | { type: 'addIdea'; text: string; topic?: string }
   /** Creates a story from a brief (title, premise, plot, characters, ...) in ideas/. */
   | { type: 'addStory'; brief: StoryBrief }
+  /**
+   * The script writer: adapts a published book (`book`, its slug) into a visual novel script. `format` is a script format id
+   * (`visual-novel` linear, `choice-visual-novel` with choices). Creates a story that the factory starts a book from.
+   */
+  | { type: 'adaptBook'; book: string; format: string; title?: string; notes?: string }
   /** Replaces the brief of a story that no book has started yet. `idea` is the story's slug. */
   | { type: 'updateStory'; idea: string; brief: StoryBrief }
   /** Creates a series from a brief (title, premise = the series arc, recurring characters, setting, style) in series/. */
@@ -432,6 +448,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   addTopic: true,
   addIdea: true,
   addStory: true,
+  adaptBook: true,
   updateStory: true,
   addSeries: true,
   updateSeries: true,

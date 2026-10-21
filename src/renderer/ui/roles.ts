@@ -17,7 +17,8 @@ export const KNOWN_ROLES = [
   'originality-checker',
   'fact-checker',
   'researcher',
-  'archivist'
+  'archivist',
+  'humanizer'
 ]
 
 /** The refs the pickers offer: every enabled model shown in the Models dialog, plus the one in use. */

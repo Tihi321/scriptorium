@@ -60,7 +60,7 @@ test.afterAll(async () => {
 test('the real app: office, agents at work, terminal from real logs, pause all, library, reader and rating', async () => {
   // the office renders with the real engine's agents
   await expect(page.locator('.office-canvas canvas')).toBeVisible({ timeout: 30_000 })
-  await expect.poll(() => page.evaluate(() => (globalThis as unknown as Dbg).__office?.agentCount() ?? 0), { timeout: 30_000 }).toBe(27)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as Dbg).__office?.agentCount() ?? 0), { timeout: 30_000 }).toBe(28)
   await expect(page.getByTestId('statusbar')).toContainText('engine')
   await expect(page.getByTestId('whiteboard')).toContainText('Moon')
 

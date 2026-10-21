@@ -223,6 +223,46 @@ formats:
       A fact book for children aged seven to ten. Short sentences, everyday words, one idea per paragraph, a friendly voice that explains
       new words and asks the odd question. Facts must be right, simple and gentle: nothing frightening or graphic. Every fact comes from
       the sourced notes and carries the number of its source in square brackets, like [2]. Never state a date, number or name the notes do not give.
+  - id: article
+    name: Newspaper article
+    enabled: true
+    nonfiction: true
+    article: true
+    humanize: true
+    max_rounds: 1
+    kinds: [article]
+    juvenile: false
+    age_band: null
+    words: [600, 1800]
+    chapters: [1, 1]
+    read_aloud: false
+    reviewers: [fact-checker, line-editor, copy-editor, beta-reader]
+    guidance: |
+      A researched newspaper article for general readers: a headline, a standfirst (one or two sentences that sum it up), and a body that opens
+      with the news or the most interesting fact, then gives the context, who said what, and what happens next. Plain, lively, accurate prose,
+      short paragraphs, concrete detail, no jargon left unexplained. Every fact comes from the sourced notes and carries the number of its source
+      in square brackets, like [2]; the sources are recent reporting, and the article says who said or did what and when. Never state a date, number,
+      name, quote or event that the notes do not give. No invented quotes, no invented people. Say plainly what is not yet known.
+  - id: feature-article
+    name: Feature article
+    enabled: true
+    nonfiction: true
+    article: true
+    humanize: true
+    max_rounds: 1
+    kinds: [article]
+    juvenile: false
+    age_band: null
+    words: [1800, 4000]
+    chapters: [1, 1]
+    read_aloud: false
+    reviewers: [fact-checker, line-editor, copy-editor, beta-reader]
+    guidance: |
+      A researched long-form feature for general readers: a headline, a standfirst, and a body of several short sections that tells a story or
+      explains a development in depth (the scene or the case that opens it, the background, the people and what they say, the competing views, what
+      it means). Vivid but accurate, with a clear voice and a thread that pulls the reader on. Every fact comes from the sourced notes and carries the
+      number of its source in square brackets, like [2]. Never state a date, number, name, quote or event that the notes do not give. No invented
+      quotes, no invented people or scenes. Say plainly what is disputed or unknown.
 ---
 # Formats
 
@@ -235,6 +275,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `guidance`: instructions added to the writer and reviewer prompts.
 - `long`: use the book memory (see below). `max_rounds`: rewrite rounds for this format (default: `quality.max_rounds`).
 - `nonfiction`: the non-fiction variant. Research for every chapter (required), a fact base in `factbase/` instead of a story bible, non-fiction prompts (`*_nf.md` in `prompts/`), the fact-checker in place of the continuity checker (it must pass), and a references section at the end of the EPUB and the reader. Non-fiction formats are short books (not `long`).
+- `article`: a newspaper article (one chapter, `chapters: [1, 1]`, with `nonfiction: true`). It is researched like a non-fiction book, with the `_article` prompts (`pitch_article.md`, `research_plan_article.md`, `outline_article.md`, `draft_chapter_article.md`, `rewrite_chapter_article.md`, `humanize_chapter_article.md`, `publish_article.md`; roles without an `_article` prompt use their `_nf` one), a search for recent news, and research notes that belong to the article alone (never reused from or added to the shared library notes). It gets no cover, no EPUB and no Kindle: the publisher writes `out/article.html` (a styled page with headline, standfirst, byline, date, text and numbered references) and `out/article.md`. Articles are for topics of kind `article` (the sections of the newspaper, in `topics.md`) and never for another kind, and they have their own limit, `max_articles_in_progress` in `config/factory.md`.
 - `research_prep`: the writer lists research questions before each chapter (one short model call per chapter, answered by the researcher before the chapter is written). `false` by default; books whose genre or topic contains a word of `research_prep_genres` in `config/factory.md` get it too, whatever the format says.
 - `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel formats are for topics of kind `visual-novel` and `juvenile-visual-novel`, so they are never picked for an ordinary fiction topic.
 - `choices`: a story with choices (a choose-your-path book or a visual novel with choices). The architect plans a map of chapters: some end with two or three choices, each leading to a later chapter, and the story has at least two endings. The writer sees only the chapters that can lead to the one it writes, the reviewers read every path, and the EPUB and the reader end those chapters with links to the chapters the choices lead to ("The End" on an ending). The extra instructions are in `prompts/_choices.md`. The choice formats are for topics of kind `interactive-fiction`, `juvenile-interactive-fiction`, `visual-novel` and `juvenile-visual-novel`. Short formats only (not `long`).

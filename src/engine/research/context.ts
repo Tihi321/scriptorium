@@ -30,7 +30,7 @@ export async function researchNotesFor(d: ResearchContextDeps, book: string | nu
   const chosen: NoteFile[] = []
   if (d.memory.available()) {
     try {
-      const hits = await d.memory.getIndex().search(query, { kinds: ['research'], books: [book ?? '', ''], k: max * 3 })
+      const hits = await d.memory.getIndex().search(query, { kinds: ['research'], books: (await d.research.store.isolated(book)) ? [book!] : [book ?? '', ''], k: max * 3 })
       for (const h of hits) {
         const n = byFile.get(h.file)
         if (n && !chosen.includes(n)) chosen.push(n)

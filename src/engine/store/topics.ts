@@ -3,8 +3,11 @@ import path from 'node:path'
 import { atomicWrite } from './atomic'
 import { slugify } from './ideas'
 
-export type TopicKind = 'fiction' | 'nonfiction' | 'juvenile-fiction' | 'juvenile-nonfiction' | 'visual-novel' | 'juvenile-visual-novel' | 'interactive-fiction' | 'juvenile-interactive-fiction'
-export const TOPIC_KINDS: readonly TopicKind[] = ['fiction', 'nonfiction', 'juvenile-fiction', 'juvenile-nonfiction', 'visual-novel', 'juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction']
+export type TopicKind = 'fiction' | 'nonfiction' | 'juvenile-fiction' | 'juvenile-nonfiction' | 'visual-novel' | 'juvenile-visual-novel' | 'interactive-fiction' | 'juvenile-interactive-fiction' | 'article'
+export const TOPIC_KINDS: readonly TopicKind[] = ['fiction', 'nonfiction', 'juvenile-fiction', 'juvenile-nonfiction', 'visual-novel', 'juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction', 'article']
+
+/** The topic kind of the newspaper sections: the formats with `article: true` are written for it, and for no other kind. */
+export const ARTICLE_KIND = 'article'
 
 /** The section topics added from the UI go into. */
 export const MY_TOPICS_SECTION = 'My topics'

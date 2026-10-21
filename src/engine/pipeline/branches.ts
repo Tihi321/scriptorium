@@ -14,6 +14,8 @@ export interface BranchChapter {
   choices?: Choice[]
   /** For an ending: a few words on how it ends. */
   ending?: string
+  /** An adaptation: the chapters of the source book this chapter is made from. */
+  source_chapters?: number[]
 }
 
 /** At most this many choices end a chapter. */

@@ -132,6 +132,34 @@ export class FactBase {
     return list
   }
 
+  /** The research notes (files) whose sources and facts are already in the fact base: `factbase/merged.md`. */
+  async merged(slug: string): Promise<Set<string>> {
+    const t = await this.books.readText(slug, 'factbase', 'merged.md')
+    const raw = t ? parseMd(t).data.notes : null
+    return new Set(Array.isArray(raw) ? (raw as unknown[]).map(String) : [])
+  }
+
+  /** The book round in which a refresh merged each late note (notes merged by the chapter fact step have no entry). */
+  async mergedRounds(slug: string): Promise<Map<string, number>> {
+    const t = await this.books.readText(slug, 'factbase', 'merged.md')
+    const raw = t ? parseMd(t).data.rounds : null
+    return new Map(raw && typeof raw === 'object' ? Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k, Number(v)] as [string, number]).filter(([, v]) => Number.isFinite(v)) : [])
+  }
+
+  /** `round`: the book round of a refresh, so the writer of a later chapter version still sees those notes as new. */
+  async markMerged(slug: string, files: string[], round?: number): Promise<void> {
+    const have = await this.merged(slug)
+    const rounds = await this.mergedRounds(slug)
+    const before = have.size
+    for (const f of files) {
+      have.add(f)
+      if (round !== undefined && !rounds.has(f)) rounds.set(f, round)
+    }
+    if (have.size === before && round === undefined) return
+    const list = [...have].sort()
+    await writeMd(this.file(slug, 'merged.md'), { kind: 'factbase', part: 'merged', notes: list, ...(rounds.size ? { rounds: Object.fromEntries(rounds) } : {}) }, `\n# Merged research notes\n\nThe notes whose sources and facts are in this fact base.\n\n${list.map((f) => `- ${f}`).join('\n')}\n`)
+  }
+
   /** Key facts per chapter. A chapter that is in the map has had its fact step, even when it has no facts. */
   async facts(slug: string): Promise<Map<number, KeyFact[]>> {
     const t = await this.books.readText(slug, 'factbase', 'facts.md')

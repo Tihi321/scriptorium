@@ -5,6 +5,7 @@ import { formatUsd } from '../store/model'
 import { officeStore } from '../store/store'
 import { CoverImage } from './Library'
 import { PageNav } from './PageNav'
+import { ScriptWriter } from './ScriptWriter'
 
 function Stars({ value, onPick }: { value: number; onPick(n: number): void }) {
   return (
@@ -30,6 +31,8 @@ export function BookCard() {
   const [page, setPage] = useState('index.html')
   /** The new title being typed, or null when not renaming. */
   const [newTitle, setNewTitle] = useState<string | null>(null)
+  /** The script writer panel is open (adapt this book into a visual novel). */
+  const [adapting, setAdapting] = useState(false)
 
   useEffect(() => {
     setRating(book?.rating ?? 0)
@@ -39,20 +42,24 @@ export function BookCard() {
 
   useEffect(() => setPage('index.html'), [slug, reading])
   useEffect(() => setNewTitle(null), [slug])
+  useEffect(() => setAdapting(false), [slug])
 
   if (!slug || !book) return null
   const close = () => officeStore.getState().openBookCard(null)
+  /** A newspaper article: no cover, no EPUB, no Kindle; its page is the "book". */
+  const article = book.medium === 'article'
 
   if (reading) {
     const pages = book.readerPages
     const current = pages.some((p) => p.file === page) ? page : 'index.html'
-    const src = book.readerDir ? bookUrl(`${book.readerDir.replace(/\/+$/, '')}/${current}`) : null
+    // an article is one page (out/article.html), not a reader folder
+    const src = article ? (book.articlePage ? bookUrl(book.articlePage) : null) : book.readerDir ? bookUrl(`${book.readerDir.replace(/\/+$/, '')}/${current}`) : null
     return (
       <div className="dialog-backdrop" onClick={close}>
         <div className="reader" onClick={(e) => e.stopPropagation()} data-testid="reader">
           <div className="row spread reader-bar">
             <b>{book.title}</b>
-            {src && <PageNav pages={pages} current={current} onGo={setPage} testId="reader" />}
+            {src && !article && <PageNav pages={pages} current={current} onGo={setPage} testId="reader" />}
             <span className="row">
               <button onClick={() => officeStore.getState().setReading(false)} data-testid="reader-back">
                 Back to card
@@ -66,6 +73,16 @@ export function BookCard() {
           ) : (
             <div className="empty">This book has no reader folder yet.</div>
           )}
+        </div>
+      </div>
+    )
+  }
+
+  if (adapting) {
+    return (
+      <div className="dialog-backdrop" onClick={close}>
+        <div className="dialog book-card" onClick={(e) => e.stopPropagation()} data-testid="book-card">
+          <ScriptWriter book={book} onDone={() => setAdapting(false)} />
         </div>
       </div>
     )
@@ -118,6 +135,12 @@ export function BookCard() {
               <span>
                 {book.kind ?? 'n/a'}, {book.format}
               </span>
+              {book.sourceBook && (
+                <>
+                  <span>Adapted from</span>
+                  <span data-testid="card-adapted-from">{book.sourceBook.title}</span>
+                </>
+              )}
               <span>Year</span>
               <span>{book.year ?? 'n/a'}</span>
               <span>Length</span>
@@ -141,30 +164,39 @@ export function BookCard() {
           </div>
         )}
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="primary" disabled={!book.readerDir} onClick={() => officeStore.getState().setReading(true)} data-testid="card-read">
-            Read
+          <button className="primary" disabled={article ? !book.articlePage : !book.readerDir} onClick={() => officeStore.getState().setReading(true)} data-testid="card-read">
+            {article ? 'Open article' : 'Read'}
           </button>
           <button onClick={() => void openFolder(`books/${book.slug}`)} data-testid="card-folder">
             Open folder
           </button>
-          <button
-            disabled={!book.epub || kindle?.state === 'sending'}
-            onClick={() => {
-              officeStore.getState().markKindleSending(book.slug)
-              sendCommand({ type: 'sendToKindle', book: book.slug })
-            }}
-            data-testid="card-kindle"
-          >
-            Send to Kindle
-          </button>
+          {!article && (
+            <button
+              disabled={!book.epub || kindle?.state === 'sending'}
+              onClick={() => {
+                officeStore.getState().markKindleSending(book.slug)
+                sendCommand({ type: 'sendToKindle', book: book.slug })
+              }}
+              data-testid="card-kindle"
+            >
+              Send to Kindle
+            </button>
+          )}
           {published && (
             <>
               <button disabled={newTitle !== null || drawing} onClick={() => setNewTitle(book.title)} data-testid="card-rename" title="A new title: the cover, EPUB and reader are made again. The folder keeps its name.">
                 Rename
               </button>
-              <button disabled={drawing} onClick={() => sendCommand({ type: 'regenerateCover', book: book.slug })} data-testid="card-cover" title="Draw the cover again from templates/cover.html">
-                Remake cover
-              </button>
+              {!article && !book.sourceBook && book.kind !== 'visual-novel' && (
+                <button onClick={() => setAdapting(true)} data-testid="card-adapt" title="Adapt this book into a visual novel script (linear or with choices)">
+                  Adapt to visual novel
+                </button>
+              )}
+              {!article && (
+                <button disabled={drawing} onClick={() => sendCommand({ type: 'regenerateCover', book: book.slug })} data-testid="card-cover" title="Draw the cover again from templates/cover.html">
+                  Remake cover
+                </button>
+              )}
             </>
           )}
           <span data-testid="cover-status" className={book.coverState === 'failed' ? 'err' : 'dim'}>

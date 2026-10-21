@@ -10,6 +10,12 @@ export interface FakeBook {
   note: string | null
   paused?: boolean
   notes?: string
+  /** The published book this one adapts into a visual novel script (its slug). */
+  source?: string
+  /** Its title, for "adapted from". */
+  sourceTitle?: string
+  /** A newspaper article: its standfirst and the day it was published (a published article has a page, no cover and no EPUB). */
+  article?: { standfirst: string; published: string }
 }
 
 export interface FakeTopic {
@@ -31,12 +37,16 @@ export function makeTopics(): FakeTopic[] {
     { id: 'fic-historical', name: 'Historical Fiction', kind: 'fiction', section: 'Fiction', active: false, target: 4 },
     { id: 'nf-printing', name: 'History of Books & Printing', kind: 'nonfiction', section: 'Non-fiction', active: false, target: 3 },
     { id: 'jnon-pirates', name: 'Pirates (juvenile fact book)', kind: 'juvenile-nonfiction', section: 'Children', active: false, target: 5 },
-    { id: 'law-civics', name: 'Civics Basics', kind: 'nonfiction', section: 'Law & Politics', active: false, target: 5 }
+    { id: 'law-civics', name: 'Civics Basics', kind: 'nonfiction', section: 'Law & Politics', active: false, target: 5 },
+    { id: 'news-technology', name: 'Technology', kind: 'article', section: 'Newspaper', active: true, target: 0 },
+    { id: 'news-science', name: 'Science', kind: 'article', section: 'Newspaper', active: false, target: 0 },
+    { id: 'news-world', name: 'World', kind: 'article', section: 'Newspaper', active: false, target: 0 }
   ]
 }
 
 export function makeBooks(): FakeBook[] {
   const b = (slug: string, title: string, stage: string, topic: number, rating: number | null = null): FakeBook => ({ slug, title, stage, topic, rating, note: null })
+  const article = (slug: string, title: string, topic: number, standfirst: string, published: string): FakeBook => ({ slug, title, stage: 'published', topic, rating: null, note: null, article: { standfirst, published } })
   return [
     b('the-lantern-and-the-fox', 'The Lantern and the Fox', 'drafting', 1),
     b('moon-bakery-bedtime', 'Moon Bakery Bedtime', 'editing', 0),
@@ -48,7 +58,10 @@ export function makeBooks(): FakeBook[] {
     b('sleepy-owl-lullaby', 'The Sleepy Owl', 'published', 0),
     b('the-tea-shop-murders', 'The Tea Shop Murders', 'published', 2),
     b('dragon-in-the-attic', 'Dragon in the Attic', 'idea', 1),
-    b('the-grey-lighthouse', 'The Grey Lighthouse', 'rejected', 2)
+    b('the-grey-lighthouse', 'The Grey Lighthouse', 'rejected', 2),
+    article('chips-for-the-grid', 'Chipmakers race to power the grid', 9, 'Three firms say their new power chips cut data centre energy use by a fifth.', '2026-10-19T09:30:00Z'),
+    article('quiet-quake-report', 'Seismologists find a quiet fault under the Alps', 10, 'A year of sensor data shows a slow slip nobody had mapped before.', '2026-10-19T14:10:00Z'),
+    article('library-robots', 'Libraries try robot shelvers', 9, 'A pilot in three cities returns books faster, and staff say it frees them for readers.', '2026-10-18T16:45:00Z')
   ]
 }
 
@@ -74,7 +87,12 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     author: 'Mara Quill',
     topic: { id: t.id, name: t.name },
     kind: t.kind,
-    format: t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
+    format: b.source ? 'visual-novel' : b.article || t.kind === 'article' ? 'article' : t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
+    medium: b.article || t.kind === 'article' ? 'article' : 'book',
+    headline: b.article || t.kind === 'article' ? b.title : null,
+    standfirst: b.article?.standfirst ?? null,
+    articlePage: b.article && published ? `books/${b.slug}/out/article.html` : null,
+    ...(b.source ? { sourceBook: { slug: b.source, title: b.sourceTitle ?? b.source } } : {}),
     stage: b.stage,
     paused: !!b.paused,
     chaptersWritten: published ? 3 : 1,
@@ -91,13 +109,13 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     costUsd: published ? 0.021 : 0.004,
     rating: b.rating,
     ratingNote: b.note,
-    coverPng: published ? `books/${b.slug}/out/cover.png` : null,
+    coverPng: published && !b.article ? `books/${b.slug}/out/cover.png` : null,
     coverVersion: null,
-    coverState: published ? 'done' : null,
-    epub: published ? `books/${b.slug}/out/${b.slug}.epub` : null,
-    readerDir: published ? `books/${b.slug}/out/reader` : null,
-    readerPages: published ? READER_PAGES : [],
-    publishedAt: published ? '2026-10-08T12:00:00Z' : null
+    coverState: published && !b.article ? 'done' : null,
+    epub: published && !b.article ? `books/${b.slug}/out/${b.slug}.epub` : null,
+    readerDir: published && !b.article ? `books/${b.slug}/out/reader` : null,
+    readerPages: published && !b.article ? READER_PAGES : [],
+    publishedAt: published ? (b.article?.published ?? '2026-10-08T12:00:00Z') : null
   }
 }
 
@@ -126,6 +144,10 @@ export function makeBookUrl(books: FakeBook[]): (rel: string) => string {
         `<text x="120" y="160" text-anchor="middle" font-family="Georgia" font-size="22" fill="#fff">${esc(book.title)}</text>` +
         `<text x="120" y="300" text-anchor="middle" font-family="Georgia" font-size="14" fill="#fff">Mara Quill</text></svg>`
       return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
+    }
+    if (m[2] === 'article.html' && book.article) {
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Georgia,serif;max-width:34em;margin:2em auto;line-height:1.5}</style></head><body><h1>${esc(book.title)}</h1><p><i>${esc(book.article.standfirst)}</i></p><p>The demo article page.</p></body></html>`
+      return URL.createObjectURL(new Blob([html], { type: 'text/html' }))
     }
     const page = /^reader\/(.+)$/.exec(m[2]!)?.[1]
     if (page === 'index.html' || READER_PAGES.some((p) => p.file === page)) {

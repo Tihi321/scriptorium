@@ -5,6 +5,7 @@ import { AgentPanel, HireDialog } from './ui/AgentPanel'
 import { BookCard } from './ui/BookCard'
 import { DraftReader } from './ui/DraftReader'
 import { LibraryView } from './ui/Library'
+import { NewspaperView } from './ui/Newspaper'
 import { ModelsDialog } from './ui/ModelsDialog'
 import { SettingsDialog } from './ui/Settings'
 import { officeStore } from './store/store'
@@ -31,6 +32,9 @@ export function App() {
             <button className={view === 'library' ? 'on' : ''} onClick={() => officeStore.getState().setView('library')} data-testid="tab-library">
               Library
             </button>
+            <button className={view === 'newspaper' ? 'on' : ''} onClick={() => officeStore.getState().setView('newspaper')} data-testid="tab-newspaper">
+              Newspaper
+            </button>
           </span>
           <button onClick={() => officeStore.getState().setModelsOpen(true)} data-testid="models-open">
             Models
@@ -51,6 +55,7 @@ export function App() {
             <OfficeView />
           </div>
           {view === 'library' && <LibraryView />}
+          {view === 'newspaper' && <NewspaperView />}
         </div>
         <aside className="sidebar">
           <Whiteboard />

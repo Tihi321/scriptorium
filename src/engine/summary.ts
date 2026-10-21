@@ -39,6 +39,7 @@ export const ideaSummary = (i: IdeaFile): IdeaSummary => {
     book: i.data.book,
     titleFixed: i.data.title_fixed === true,
     characters: brief.characters.length,
+    ...(i.data.source_book ? { sourceBook: i.data.source_book } : {}),
     ...(i.data.series ? { series: i.data.series, seriesIndex: i.data.series_index ?? null } : {}),
     brief
   }
@@ -85,6 +86,11 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     topic: d.topic ? { id: d.topic, name: d.topic_name ?? topic?.topic ?? d.topic } : null,
     kind: topic?.kind ?? null,
     format: d.format,
+    medium: d.article === true ? 'article' : 'book',
+    headline: d.article === true ? (d.headline?.trim() || d.title) : null,
+    standfirst: d.article === true ? (d.standfirst?.trim() || null) : null,
+    articlePage: d.article === true && (await exists(books.file(slug, 'out', 'article.html'))) ? rel('out', 'article.html') : null,
+    sourceBook: d.source_book ? { slug: d.source_book, title: (await books.read(d.source_book))?.data.title ?? d.source_book } : null,
     stage: d.stage,
     paused: d.paused === true,
     chaptersWritten: chapters.length,
@@ -103,7 +109,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     coverPng: coverMtime !== null ? rel('out', 'cover.png') : null,
     coverVersion: coverMtime,
     coverState: typeof d.cover_png === 'string' ? d.cover_png : null,
-    epub: (await exists(books.file(slug, epub))) ? rel(epub) : null,
+    epub: d.article !== true && (await exists(books.file(slug, epub))) ? rel(epub) : null,
     readerDir: (await exists(books.file(slug, 'out', 'reader', 'index.html'))) ? rel('out', 'reader') : null,
     readerPages: await readReaderPages(books.file(slug, 'out', 'reader')),
     publishedAt: typeof d.published === 'string' ? d.published : null

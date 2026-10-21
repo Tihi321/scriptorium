@@ -5,12 +5,14 @@ import type { Scheduler } from '../queue/scheduler'
 import { advance, chaptersToRewrite, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
 import { findMarkers } from '../research/markers'
 import type { BookState, ChapterScores, ReviewSummary } from './advance'
-import { countBooksInProgress } from './books'
+import { countBooksInProgress, countInProgress } from './books'
 import type { BookStore } from './books'
 import { bookRefs } from '../store/series'
 import { eligibleTopics, pickNext, registerHandlers } from './handlers'
 import { registerLongHandlers } from './longHandlers'
 import { registerNonfictionHandlers } from './nonfiction'
+import { unmergedNotes as unmergedNotesOf } from './nfcontext'
+import { registerHumanizerHandlers } from './humanizerHandlers'
 import { FactBase } from '../memory/factbase'
 import { registerResearchHandlers } from './researchHandlers'
 import type { PipelineDeps } from './handlers'
@@ -24,6 +26,8 @@ export interface PipelineOptions extends Omit<PipelineDeps, 'requestCover' | 'ki
   coverRenderer: boolean
   /** Interval of the factory tick in ms. Default 5000. */
   tickMs?: number
+  /** True when an agent of this role is hired (agents/). The humanizer pass is skipped while there is none. */
+  hasAgent(role: string): boolean
 }
 
 /**
@@ -46,6 +50,7 @@ export class Pipeline {
     registerLongHandlers(o.scheduler, this.deps)
     registerResearchHandlers(o.scheduler, this.deps)
     registerNonfictionHandlers(o.scheduler, this.deps)
+    registerHumanizerHandlers(o.scheduler, this.deps)
   }
 
   private get books(): BookStore {
@@ -284,9 +289,16 @@ export class Pipeline {
     }
     const researchPending = new Set<string>()
     for (const state of ['queued', 'running'] as const) for (const id of await this.jobs.ids(state)) if (id.startsWith('research--')) researchPending.add(id)
+    // non-fiction: late research the fact base has not merged, and the refresh jobs of this book
+    const unmergedNotes = format.nonfiction ? (await unmergedNotesOf(this.deps, slug)).length : 0
+    const refreshJobs = new Map<string, string>()
+    if (format.nonfiction) {
+      for (const state of ['queued', 'running', 'done'] as const) for (const id of await this.jobs.ids(state)) if (id.startsWith(`${slug}--factbase--refresh--`)) refreshJobs.set(id, state)
+    }
     const factory = this.o.getFactory()
     const genreText = `${d.genre ?? ''} ${d.topic_name ?? ''}`.toLowerCase()
-    const prepEnabled = format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase()))
+    const adaptation = typeof d.source_book === 'string' && d.source_book !== ''
+    const prepEnabled = !adaptation && (format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase())))
     const tensionDoc = await this.books.readText(slug, 'reports', 'tension.md')
     const tensionData = tensionDoc ? parseMd(tensionDoc).data : {}
     for (const [c, v] of Object.entries((tensionData.tension as Record<string, number> | undefined) ?? {})) {
@@ -294,6 +306,13 @@ export class Pipeline {
     }
     const flatChapters = ((tensionData.flat_stretches as [number, number][] | undefined) ?? []).flatMap(([a, b]) => Array.from({ length: Number(b) - Number(a) + 1 }, (_, i) => Number(a) + i))
     const outlineText = await this.books.readText(slug, 'outline.md')
+    // the humanizer pass: the format and the book allow it, and a humanizer is hired (else it is skipped, with one line in the log)
+    const wantsHumanize = format.humanize !== false && d.humanize !== false
+    const hired = this.o.hasAgent('humanizer')
+    if (wantsHumanize && !hired && !this.warned.has(`humanizer:${slug}`)) {
+      this.warned.add(`humanizer:${slug}`)
+      this.o.log(`no humanizer is hired: "${d.title}" (${slug}) goes without the humanizer pass. Hire one (role humanizer) to get it, or set \`humanize: false\` in book.md to silence this.`)
+    }
     return {
       slug,
       stage: d.stage,
@@ -331,7 +350,12 @@ export class Pipeline {
       checkResearch,
       failedJobs: failedByBook.get(slug) ?? [],
       nonfiction: format.nonfiction,
-      factbase: format.nonfiction ? await this.deps.factbase.doneChapters(slug) : new Set<number>()
+      unmergedNotes,
+      refreshJobs,
+      factbase: format.nonfiction ? await this.deps.factbase.doneChapters(slug) : new Set<number>(),
+      adaptation,
+      humanize: wantsHumanize && hired,
+      humanized: new Map(chapterFiles.flatMap((c) => (c.humanized === undefined ? [] : [[c.n, c.humanized] as [number, number]])))
     }
   }
 
@@ -430,12 +454,14 @@ export class Pipeline {
   }
 
   private async startBooks(): Promise<void> {
-    const max = this.o.getFactory().max_books_in_progress
+    const factory = this.o.getFactory()
     // pending first, books second: a start job that finishes in between is then counted as a book (never missed)
     const pending = await this.pendingJobs('start_book')
-    const inProgress = await this.countInProgress()
-    if (inProgress + pending >= max || pending > 0) return
-    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books))
+    const open = await countInProgress(this.books)
+    // books and articles have separate limits: a full set of articles never holds a book back, and the other way round
+    const room = { books: open.books < factory.max_books_in_progress, articles: open.articles < factory.max_articles_in_progress }
+    if ((!room.books && !room.articles) || pending > 0) return
+    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room)
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {
@@ -461,7 +487,8 @@ export class Pipeline {
 
   async requestCover(slug: string): Promise<void> {
     const b = await this.books.read(slug)
-    if (!b) return
+    // an article has no cover
+    if (!b || b.data.article === true) return
     if (!this.o.coverRenderer) {
       await this.books.update(slug, () => ({ cover_png: 'pending' }))
       return
@@ -482,7 +509,7 @@ export class Pipeline {
     if (!this.o.coverRenderer) return
     for (const slug of await this.books.slugs()) {
       const b = await this.books.read(slug)
-      if (b && (b.data.cover_png === 'pending' || b.data.cover_png === 'requested') && b.data.stage === 'published') await this.requestCover(slug)
+      if (b && b.data.article !== true && (b.data.cover_png === 'pending' || b.data.cover_png === 'requested') && b.data.stage === 'published') await this.requestCover(slug)
     }
   }
 
@@ -517,6 +544,11 @@ export class Pipeline {
     const b = await this.books.read(slug)
     if (!b || b.data.stage !== 'published') return false
     const d = b.data
+    // an article has no cover: its page is written again (a new headline shows)
+    if (d.article === true) {
+      await this.books.buildArticle(slug)
+      return true
+    }
     await writeCoverHtml(this.o.dataDir, slug, {
       title: d.title,
       author: d.author ?? 'Unknown',
@@ -537,7 +569,7 @@ export class Pipeline {
     const b = await this.books.read(slug)
     if (!clean || clean.length > 200 || !b || b.data.stage !== 'published') return false
     if (clean !== b.data.title) {
-      await this.books.update(slug, () => ({ title: clean }))
+      await this.books.update(slug, () => ({ title: clean, ...(b.data.article === true ? { headline: clean } : {}) }))
       this.o.log(`renamed ${slug}: "${b.data.title}" is now "${clean}"`)
     }
     return this.remakeCover(slug)

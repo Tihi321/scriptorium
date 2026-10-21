@@ -170,10 +170,10 @@ export function stageColumn(stage: string): StageColumn {
   if (s === 'rejected') return 'rejected'
   if (s === 'failed') return 'failed'
   if (s.startsWith('publish') || s === 'done' || s === 'complete') return 'published'
-  if (s === 'new' || s.startsWith('idea')) return 'idea'
-  if (s.startsWith('outline') || s.startsWith('plan') || s.startsWith('bible') || s.startsWith('architect')) return 'outline'
+  if (s === 'new' || s.startsWith('idea') || s.startsWith('pitch')) return 'idea'
+  if (s.startsWith('outline') || s.startsWith('plan') || s.startsWith('bible') || s.startsWith('architect') || s.startsWith('research')) return 'outline'
   if (s.startsWith('draft') || s.startsWith('writ')) return 'drafting'
-  if (s.startsWith('edit') || s.startsWith('review') || s.startsWith('revis') || s.startsWith('polish') || s.startsWith('rewrite')) return 'editing'
+  if (s.startsWith('edit') || s.startsWith('humaniz') || s.startsWith('review') || s.startsWith('revis') || s.startsWith('polish') || s.startsWith('rewrit') || s.startsWith('length')) return 'editing'
   return 'other'
 }
 

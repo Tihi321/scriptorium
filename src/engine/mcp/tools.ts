@@ -128,6 +128,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         running: engine.scheduler.runningJobs(),
         booksByStage: byStage,
         maxBooksInProgress: engine.factory.max_books_in_progress,
+        maxArticlesInProgress: engine.factory.max_articles_in_progress,
         openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
         clientTasks: engine.clientQueue.counts(),
         agents: { total: agents.length, busy: busy.length, idle: agents.filter((a) => a.state === 'idle').length, paused: agents.filter((a) => a.paused).length },
@@ -139,19 +140,55 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'list_books',
     {
-      description: 'List the books, one compact row each. Optionally only one stage (e.g. published, failed, drafting).',
-      inputSchema: { stage: z.string().optional().describe('Only books in this stage') },
+      description: 'List the books, one compact row each. Optionally only one stage (e.g. published, failed, drafting) or one medium (book or article: the newspaper articles are in the list too, with medium "article"; list_articles is the newspaper view).',
+      inputSchema: { stage: z.string().optional().describe('Only books in this stage'), medium: z.enum(['book', 'article']).optional().describe('Only books (everything but articles) or only newspaper articles') },
       annotations: READ
     },
-    run(async ({ stage }: { stage?: string }) => {
+    run(async ({ stage, medium }: { stage?: string; medium?: 'book' | 'article' }) => {
       const all = await topics()
       const rows = []
       for (const slug of await engine.books.slugs()) {
         const b = await bookSummary(engine.books, slug, all)
-        if (!b || (stage && b.stage !== stage)) continue
-        rows.push({ slug, title: b.title, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused })
+        if (!b || (stage && b.stage !== stage) || (medium && b.medium !== medium)) continue
+        rows.push({ slug, title: b.title, medium: b.medium, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused, ...(b.sourceBook ? { sourceBook: b.sourceBook.slug } : {}) })
       }
       return rows
+    })
+  )
+
+  server.registerTool(
+    'list_articles',
+    {
+      description:
+        'The newspaper: the published articles, newest first, one compact row each (slug, headline, standfirst, section, byline, date, words, score, and the path of the page: books/<slug>/out/article.html, with out/article.md beside it). Optionally only one section (a topic id like news-technology, or its name) and only articles published on or after a date. stage "all" lists the articles in progress too.',
+      inputSchema: {
+        section: z.string().optional().describe('A newspaper section: the topic id (news-technology) or its name (Technology)'),
+        since: z.string().optional().describe('Only articles published on or after this date (YYYY-MM-DD, or a full ISO time)'),
+        stage: z.string().optional().describe('Default published. A stage such as drafting, or "all"')
+      },
+      annotations: READ
+    },
+    run(async ({ section, since, stage }: { section?: string; since?: string; stage?: string }) => {
+      let from = 0
+      if (since) {
+        from = Date.parse(since)
+        if (Number.isNaN(from)) fail(`"${since}" is not a date: use YYYY-MM-DD`)
+      }
+      const want = section?.trim().toLowerCase()
+      const all = await topics()
+      const rows: { publishedAt: string | null; row: Record<string, unknown> }[] = []
+      for (const slug of await engine.books.slugs()) {
+        const b = await bookSummary(engine.books, slug, all)
+        if (!b || b.medium !== 'article') continue
+        if ((stage ?? 'published') !== 'all' && b.stage !== (stage ?? 'published')) continue
+        if (want && b.topic?.id.toLowerCase() !== want && b.topic?.name.toLowerCase() !== want) continue
+        if (from && (!b.publishedAt || Date.parse(b.publishedAt) < from)) continue
+        rows.push({
+          publishedAt: b.publishedAt,
+          row: { slug, headline: b.headline ?? b.title, standfirst: b.standfirst, section: b.topic?.name ?? null, sectionId: b.topic?.id ?? null, byline: b.author, publishedAt: b.publishedAt, stage: b.stage, words: b.words, score: b.score, page: b.articlePage }
+        })
+      }
+      return rows.sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')).map((r) => r.row)
     })
   )
 
@@ -250,15 +287,16 @@ export function registerTools(server: McpServer, engine: Engine): void {
         setting: z.string().optional(),
         style: z.string().optional().describe('Voice, tone, point of view'),
         sections: z.array(sectionSchema).optional().describe('Any extra headed text (themes, rules of the world, ...)'),
-        format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks'),
-        topic: z.string().optional().describe('A topic id from list_topics'),
+        format: z.string().optional().describe('A format id from config/formats.md. Empty: the editor-in-chief picks. "article" or "feature-article" writes a researched newspaper article (use a topic of kind article, e.g. news-technology; the title is the headline, the premise the subject and angle): it has no cover and no EPUB and appears in list_articles'),
+        topic: z.string().optional().describe('A topic id from list_topics. A newspaper section (kind article) only takes article formats, and article formats only take a newspaper section'),
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
+        humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -276,12 +314,34 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.topic ? { topic: a.topic } : {}),
           ...(a.genre ? { genre: a.genre } : {}),
           ...(a.series ? { series: a.series } : {}),
+          ...(a.humanize === false ? { humanize: false } : {}),
           ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
         return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
       }
     )
+  )
+
+  server.registerTool(
+    'adapt_book',
+    {
+      description:
+        'The script writer: adapt a published book into a visual novel script that VN Studio can import. Creates a story with source_book set; the factory starts the book at once (it is already published), the architect compresses the book into the format chapters and maps each to the source chapters, and the writers turn those chapters into script scenes. The source must exist and be published. Returns the story slug.',
+      inputSchema: {
+        book: z.string().describe('Slug of the published book to adapt (list_books)'),
+        format: z.string().describe('A visual novel format id: "visual-novel" (linear) or "choice-visual-novel" (choices; the source ending stays one canon path)'),
+        title: z.string().optional().describe('Title of the script. Default: the title of the source book'),
+        notes: z.string().optional().describe('Notes for the adapter: what to keep, cut or change'),
+        models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}')
+      }
+    },
+    run(async (a: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }) => {
+      await needBook(a.book)
+      checkRoleModels(a.models)
+      const idea = await engine.adaptBook(a).catch((err: Error) => fail(err.message))
+      return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
+    })
   )
 
   server.registerTool(
@@ -303,6 +363,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         topic: z.string().optional(),
         genre: z.string().optional(),
         series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
+        humanize: z.boolean().optional().describe('false: the humanizer skips this book; true: back to the default'),
         models: modelsSchema.optional().describe('Replaces the models of this story (role -> provider/model); {} clears them')
       }
     },
@@ -321,6 +382,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         topic?: string
         genre?: string
         series?: string
+        humanize?: boolean
         models?: Record<string, string>
       }) => {
         const idea = await needStory(a.story)
@@ -334,6 +396,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
           if (Object.keys(a.models).length) brief.models = a.models
           else delete brief.models
         }
+        if (a.humanize === false) brief.humanize = false
+        else if (a.humanize === true) delete brief.humanize
         if (a.title !== undefined) brief.title = a.title.trim()
         if (a.premise !== undefined) brief.premise = a.premise
         if (a.plot !== undefined) brief.plot = a.plot
@@ -609,7 +673,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'get_client_task',
     {
       description:
-        'Take the oldest waiting model request (optionally of one role, book or task) and hold it for 30 minutes. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
+        'Take the oldest waiting model request (optionally of one role, book or task; `role: "searcher"` takes the web searches the researcher waits for, see docs/mcp.md "Do the web research yourself") and hold it for 30 minutes. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
       inputSchema: { role: z.string().optional(), book: z.string().optional().describe('Book slug'), task: z.string().optional().describe('Job task, e.g. draft_chapter, review, outline') },
       annotations: WRITE
     },
@@ -625,7 +689,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
         ...(t.messages.length > 1 ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
         ...(t.schema ? { schema: t.schema } : {}),
         ...(t.maxTokens ? { maxTokens: t.maxTokens } : {}),
-        output: t.schema ? 'Reply with one JSON object that matches `schema`. No prose, no code fence.' : 'Reply with the text only: no preamble, no notes, no code fence.',
+        output:
+          t.task === 'web_search'
+            ? 'This is a web search: do it yourself with your own web search and fetch tools, read the pages, and prefer primary, official and recent sources. Reply with one JSON object that matches `schema`: {results: [{title, url, content, published?}]}, where content is a verbatim excerpt of the page (at most 1500 characters) and url is a page you really read. Never invent a URL. An empty results list is fine when you find nothing. No prose, no code fence.'
+            : t.schema
+              ? 'Reply with one JSON object that matches `schema`. No prose, no code fence.'
+              : 'Reply with the text only: no preamble, no notes, no code fence.',
         leaseMinutes: DEFAULT_LEASE_MS / 60_000
       }
     })

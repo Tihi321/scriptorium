@@ -1,3 +1,6 @@
+import type { ClientTaskQueue } from '../models/client'
+import { ClientSearchProvider } from './clientSearch'
+
 /**
  * Getting text from the web for the researcher: search providers (Tavily, Wikipedia, stubs for the rest)
  * and page fetching with HTML stripping. Everything that comes back is untrusted data.
@@ -17,6 +20,13 @@ export interface SearchResult {
 export interface SearchOptions {
   signal?: AbortSignal
   limit?: number
+  /** Recent news: a provider that has a news mode asks for it (Tavily: `topic: "news"` and the last `days`). Others ignore it. */
+  news?: boolean
+  /** With `news`: how many days back. Default 7. */
+  days?: number
+  /** Who asks (the client search provider shows them on its task). */
+  book?: string
+  agent?: string
 }
 
 export interface SearchProvider {
@@ -216,6 +226,18 @@ async function getJson(fetchImpl: FetchImpl, url: string, init: RequestInit, ret
   }
 }
 
+/** The JSON body of a Tavily search. A news search (articles) uses `topic: "news"` and only the last `days` days (default 7). */
+export function tavilyRequest(query: string, opts: SearchOptions = {}): Record<string, unknown> {
+  return {
+    query,
+    search_depth: 'basic',
+    max_results: opts.limit ?? 5,
+    include_answer: false,
+    include_raw_content: false,
+    ...(opts.news ? { topic: 'news', days: Math.max(1, Math.floor(opts.days ?? 7)) } : {})
+  }
+}
+
 export interface TavilyOptions {
   id?: string
   apiKey: string
@@ -237,7 +259,7 @@ export class TavilyProvider implements SearchProvider {
     const json = (await getJson(this.o.fetchImpl ?? fetch, `${base}/search`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.o.apiKey}`, 'user-agent': USER_AGENT },
-      body: JSON.stringify({ query, search_depth: 'basic', max_results: opts.limit ?? 5, include_answer: false, include_raw_content: false }),
+      body: JSON.stringify(tavilyRequest(query, opts)),
       signal: opts.signal
     })) as { results?: { title?: string; url?: string; content?: string }[] }
     return (json.results ?? [])
@@ -337,6 +359,9 @@ export interface ProviderSpec {
   baseUrl?: string
   apiKey?: string
   pricePerRequest: number
+  /** `client` engine: the engine's client task queue, and how long a task may wait for a client. */
+  clientQueue?: ClientTaskQueue
+  clientWaitMs?: number
 }
 
 /** The provider object for one `kind: search` entry of providers.md. Null when the engine is unknown. */
@@ -344,6 +369,8 @@ export function makeSearchProvider(spec: ProviderSpec, fetchImpl?: FetchImpl): S
   switch (spec.engine.toLowerCase()) {
     case 'tavily':
       return spec.apiKey ? new TavilyProvider({ id: spec.id, apiKey: spec.apiKey, baseUrl: spec.baseUrl, pricePerRequest: spec.pricePerRequest, fetchImpl }) : null
+    case 'client':
+      return spec.clientQueue ? new ClientSearchProvider({ id: spec.id, queue: spec.clientQueue, waitMs: spec.clientWaitMs }) : null
     case 'wikipedia':
       return new WikipediaProvider({ id: spec.id, baseUrl: spec.baseUrl, fetchImpl })
     default:

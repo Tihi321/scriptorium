@@ -172,6 +172,10 @@ export interface PipelineEnvOptions {
   shortDrafts?: boolean
   /** The first outline comes back one chapter short of the format's minimum. */
   shortOutline?: boolean
+  /** Keep the seed's humanizer agent, so every chapter gets the humanizer pass. Default false: the other tests run without it. */
+  humanizer?: boolean
+  /** What the mock humanizer answers: the chapter text it was given and the request. Default: the same chapter with one tic cut. */
+  humanizeWith?: (chapter: string, request: string) => string
   /** Format the mock editor-in-chief picks. */
   format?: string
   /** Which topics.md edits to make before the engine starts. */
@@ -219,6 +223,8 @@ export interface PipelineCounters {
   calls: Record<string, number>
   /** Queries the fake search provider got, and the URLs the fake page fetch got. */
   searches: string[]
+  /** The options each search got (news, days, ...), in the same order as `searches`. */
+  searchOptions: { news?: boolean; days?: number }[]
   fetches: string[]
 }
 
@@ -258,6 +264,7 @@ export async function makePipelineEnv(o: PipelineEnvOptions = {}, engineOpts: Pa
     )
     await writeMd(file, { ...doc.data, formats }, doc.body)
   }
+  if (!o.humanizer) await rm(path.join(dir, 'agents', 'humanizer-iris-vane.md'), { force: true })
   if (o.extraArchivist) {
     const text = await readFile(path.join(dir, 'agents', 'archivist-milo-grant.md'), 'utf8')
     await writeFile(path.join(dir, 'agents', 'archivist-second-hand.md'), text.replace('name: Milo Grant', 'name: Second Hand'))
@@ -268,7 +275,7 @@ export async function makePipelineEnv(o: PipelineEnvOptions = {}, engineOpts: Pa
   const times: number[] = []
   const logs: string[] = []
   const mock = new MockProvider('mock', { chunkDelayMs: 1, chunks: 3 })
-  const counters: PipelineCounters = { calls: {}, searches: [], fetches: [] }
+  const counters: PipelineCounters = { calls: {}, searches: [], searchOptions: [], fetches: [] }
   scriptMock(mock, o, counters)
   const pages = o.pages ?? [
     { url: 'https://example.test/sea-routes', title: 'Sea routes', content: 'The passage from Lisbon to Goa took about six months in the early 1600s, sailing with the monsoon winds around the Cape of Good Hope. '.repeat(3) },
@@ -278,8 +285,9 @@ export async function makePipelineEnv(o: PipelineEnvOptions = {}, engineOpts: Pa
   const fakeSearch = {
     id: 'fakesearch',
     pricePerRequest: o.searchPrice ?? 0.005,
-    search: async (query: string) => {
+    search: async (query: string, opts: { news?: boolean; days?: number } = {}) => {
       counters.searches.push(query)
+      counters.searchOptions.push({ ...(opts.news ? { news: opts.news } : {}), ...(opts.days ? { days: opts.days } : {}) })
       const list = o.pagesFor ? o.pagesFor(query) : pages
       for (const p of list) known.set(p.url, p)
       return list.map((p) => ({ title: p.title, url: p.url, snippet: p.content.slice(0, 80), content: p.inline ? p.content : (undefined as string | undefined) }))
@@ -385,6 +393,12 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     return prose(words) + cite + marks
   })
   mock.on({ task: 'rewrite_chapter' }, (req) => (bump('rewrite_chapter'), prose(wantWords(req, 100)) + cite))
+  mock.on({ task: 'humanize_chapter' }, (req) => {
+    bump('humanize_chapter')
+    const t = lastUser(req)
+    const chapter = /<chapter>\r?\n([\s\S]*?)\r?\n<\/chapter>/.exec(t)?.[1] ?? ''
+    return o.humanizeWith ? o.humanizeWith(chapter, t) : chapter.replace('yawned', 'gave a huge yawn')
+  })
   mock.on({ task: 'review' }, (req) => {
     const role = req.meta!.role!
     bump(`review:${role}`)
@@ -501,6 +515,7 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     return JSON.stringify({
       title: 'The Sleepy Fox',
       blurb: 'A fox who cannot sleep finds out what the moon sings at night.',
+      standfirst: 'A fox who cannot sleep finds out what the moon sings at night.',
       subjects: ['Bedtime stories'],
       keywords: ['fox', 'moon', 'sleep'],
       cover_brief: 'A round orange fox asleep in hay under a big friendly moon.',

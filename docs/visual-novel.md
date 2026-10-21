@@ -173,9 +173,22 @@ Suggested, so the parser and the image steps agree on one structure:
 
 `SCENE: <place>, <time>`: the text before the last comma is the place, the rest the time. If there is no comma, the whole text is the place.
 
+## Adapting a book
+
+Scriptorium can turn a published prose book into a visual novel script (the script writer). In the library, open a published book's card and press **Adapt to visual novel**; the Script writer panel asks for the kind (linear, or with choices), an optional title and notes for the adapter. The same from MCP: `adapt_book {book, format, title?, notes?, models?}`. The owner picks linear or choices for every book.
+
+- The story gets `source_book: <slug>` in its frontmatter, and the book made from it too. The factory starts it at once, because the source is published; a story whose source is not published waits.
+- It is an authorised adaptation of the owner's own book: the pitch, outline, drafts, rewrites and every review say so, so the originality checker does not fail the likeness to the source.
+- No research of its own: the facts are in the source text.
+- The architect compresses the source into the format's chapter range (4 to 10 chapters) and gives each script chapter `source_chapters` in the frontmatter of `outline.md`, the numbers of the source chapters it is made from. Every source chapter should be in at least one script chapter; the engine logs the ones that are not.
+- The bible is seeded from the source's characters (at most 20) and places (at most 15), with their looks kept: the looks are what an artist draws from.
+- The writer gets the full text of the source chapters of the chapter it writes (cut from the middle when it would not fit the model's window), and writes it as script scenes: the events, order, names and places stay, inner monologue and long description go.
+- With choices, the source's ending stays as one canon path through the map (`prompts/_choices.md`, section `adapt`); the other paths branch off it.
+- The humanizer runs on the script like on any visual novel. The book card and the whiteboard show "Adapted from <title>".
+
 ## In Scriptorium
 
 - Formats: `visual-novel` and `choice-visual-novel` for topics of kind `visual-novel`, `kids-visual-story` and `kids-choice-visual-story` for kind `juvenile-visual-novel`, all with `script: true`; the choice formats also have `choices: true`. The editor-in-chief picks one of the formats of the topic's kind; set `enabled: false` on a format to stop it being picked.
 - Choices: `prompts/_choices.md` holds the extra instructions for planning, writing and reviewing a story with choices.
-- Prompts: `architect/outline_vn.md` (looks of characters and places for the bible), `writer/draft_chapter_vn.md` and `writer/rewrite_chapter_vn.md` (the script grammar), `line-editor/review_vn.md` (dialogue, voices and the script form). Other roles use their usual prompts with the format guidance. Edit them in the data folder's `prompts/` to change the style of the scripts.
+- Prompts: `architect/outline_vn.md` (looks of characters and places for the bible), `writer/draft_chapter_vn.md` and `writer/rewrite_chapter_vn.md` (the script grammar), `line-editor/review_vn.md` (dialogue, voices and the script form), `humanizer/humanize_chapter_vn.md` (livelier lines and narration with the `SCENE:`, `ON SCREEN:` and speaker lines kept one for one; the engine keeps the original chapter if their number or order changes). Other roles use their usual prompts with the format guidance. Edit them in the data folder's `prompts/` to change the style of the scripts.
 - The EPUB and the in-app reader show the script with scene headings, an "On screen" line, bold speaker names and italic narration.

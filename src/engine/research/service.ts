@@ -10,6 +10,7 @@ import type { KeyResolver } from '../models/keys'
 import type { ModelRegistry } from '../models/registry'
 import type { JobStore } from '../queue/jobs'
 import { questionKey, researchJobId, ResearchStore } from './notes'
+import type { ClientTaskQueue } from '../models/client'
 import { fetchPageText, makeSearchProvider } from './web'
 import type { SearchProvider, SearchResult } from './web'
 
@@ -23,6 +24,8 @@ export interface SearchServiceOptions {
   fetchImpl?: typeof fetch
   /** Looks up API keys. Default: environment variable, then the Windows credential store. */
   keys?: KeyResolver
+  /** The engine's client task queue: the `client` search engine puts its web search tasks there. */
+  clientQueue?: ClientTaskQueue
   /** Tests: use these providers instead of the ones in config/providers.md. */
   providers?: SearchProvider[]
   /** Tests: replaces the page download. */
@@ -51,7 +54,7 @@ export class SearchService {
     })
     const out: SearchProvider[] = []
     for (const p of infos) {
-      const provider = makeSearchProvider({ id: p.id, engine: p.searchEngine ?? p.id, baseUrl: p.baseUrl, apiKey: p.apiKeyEnv ? (this.o.keys ?? resolveKey)(p.apiKeyEnv) : undefined, pricePerRequest: p.pricePerRequest }, this.o.fetchImpl)
+      const provider = makeSearchProvider({ id: p.id, engine: p.searchEngine ?? p.id, baseUrl: p.baseUrl, apiKey: p.apiKeyEnv ? (this.o.keys ?? resolveKey)(p.apiKeyEnv) : undefined, pricePerRequest: p.pricePerRequest, clientQueue: this.o.clientQueue, clientWaitMs: p.waitMinutes === undefined ? undefined : p.waitMinutes * 60_000 }, this.o.fetchImpl)
       if (provider) out.push(provider)
       else this.o.log?.(`search provider ${p.id}: unknown engine "${p.searchEngine}" or no key`)
     }
@@ -62,7 +65,7 @@ export class SearchService {
    * Searches with the first provider that gives results. A provider that fails, or has no results, falls through to the next.
    * A paid provider is skipped while a budget cap is reached. Every request that was answered is written to the spend rows.
    */
-  async search(query: string, ctx: { signal?: AbortSignal; book?: string | null; agent?: string; limit?: number } = {}): Promise<SearchOutcome | null> {
+  async search(query: string, ctx: { signal?: AbortSignal; book?: string | null; agent?: string; limit?: number; news?: boolean; days?: number } = {}): Promise<SearchOutcome | null> {
     for (const p of this.providers()) {
       if (ctx.signal?.aborted) throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
       if (p.pricePerRequest > 0 && this.o.budget && !this.o.budget.isExhausted(ctx.book).ok) {
@@ -71,7 +74,7 @@ export class SearchService {
       }
       const started = Date.now()
       try {
-        const results = await p.search(query, { signal: ctx.signal, limit: ctx.limit ?? 5 })
+        const results = await p.search(query, { signal: ctx.signal, limit: ctx.limit ?? 5, book: ctx.book ?? undefined, agent: ctx.agent, ...(ctx.news ? { news: true, days: ctx.days } : {}) })
         await this.recordSpend(p, ctx, Date.now() - started)
         if (results.length > 0) return { provider: p.id, results }
         this.o.log?.(`search provider ${p.id}: no results for "${query}"`)

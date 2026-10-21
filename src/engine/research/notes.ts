@@ -84,16 +84,37 @@ export class ResearchStore {
     return out
   }
 
-  /** The notes a book can use: its own and the shared ones. */
+  private articles = new Set<string>()
+
+  /**
+   * An article's notes belong to it alone: it neither reads the shared library notes nor adds to them (its notes are about this week's
+   * news, which would mislead a book written later). True for a book whose book.md says `article: true`.
+   */
+  async isolated(book: string | null): Promise<boolean> {
+    if (!book) return false
+    if (this.articles.has(book)) return true
+    try {
+      const doc = parseMd(await fs.readFile(path.join(this.dataDir, 'books', book, 'book.md'), 'utf8'))
+      if (doc.data.article === true) {
+        this.articles.add(book)
+        return true
+      }
+    } catch {
+      /* no book file: an ordinary book */
+    }
+    return false
+  }
+
+  /** The notes a book can use: its own and the shared ones (an article: only its own). */
   async available(book: string | null): Promise<NoteFile[]> {
-    return [...(book ? await this.list(book) : []), ...(await this.list(null))]
+    return [...(book ? await this.list(book) : []), ...((await this.isolated(book)) ? [] : await this.list(null))]
   }
 
   /** A note that answers exactly this question (same words), in the book's notes first, then the shared notes. */
   async findExact(question: string, book: string | null): Promise<NoteFile | null> {
     const key = questionKey(question)
     if (!key) return null
-    for (const scope of book ? [book, null] : [null]) {
+    for (const scope of book ? ((await this.isolated(book)) ? [book] : [book, null]) : [null]) {
       const hit = (await this.list(scope)).find((n) => questionKey(n.question) === key)
       if (hit) return hit
     }

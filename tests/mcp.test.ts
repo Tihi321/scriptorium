@@ -74,7 +74,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -464,5 +464,97 @@ describe('MCP book models', () => {
     expect((await call(c, 'set_book_model', { book: 'running-book', role: 'nobody', model: 'loc/m1' })).raw).toMatch(/unknown role/)
     expect((await call(c, 'set_book_model', { book: 'nobody', role: 'writer', model: null })).isError).toBe(true)
     expect((await call(c, 'set_book_model', { book: 'running-book', role: 'writer', model: null })).data.roleModels).toEqual({})
+  })
+
+  it('add_story humanize:false is stored in the story and shown by get_story; update_story can set it back; the humanizer role takes a book model', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['loc/m1'] }, paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const tool = (await c.listTools()).tools.find((t) => t.name === 'add_story')!
+    expect(Object.keys((tool.inputSchema as { properties: Record<string, unknown> }).properties)).toContain('humanize')
+    // not given, or true: the story has no humanize field (the format decides)
+    await call(c, 'add_story', { title: 'Plain', premise: 'A bell.' })
+    await call(c, 'add_story', { title: 'Explicit', premise: 'A bell.', humanize: true })
+    for (const slug of ['plain', 'explicit']) expect(parseMd(await readFile(path.join(env.dir, 'ideas', `${slug}.md`), 'utf8')).data.humanize).toBeUndefined()
+    const added = await call(c, 'add_story', { title: 'The Bell', premise: 'A bell.', humanize: false })
+    expect(added.isError).toBe(false)
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.humanize).toBe(false)
+    expect((await call(c, 'get_story', { story: 'the-bell' })).data.brief.humanize).toBe(false)
+    // an edit of another field keeps it; humanize:true clears it
+    await call(c, 'update_story', { story: 'the-bell', plot: 'She rings it.' })
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.humanize).toBe(false)
+    await call(c, 'update_story', { story: 'the-bell', humanize: true })
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-bell.md'), 'utf8')).data.humanize).toBeUndefined()
+    // a book can have its own humanizer model
+    await makeBook(env, 'running-book', 'drafting')
+    expect((await call(c, 'set_book_model', { book: 'running-book', role: 'humanizer', model: 'client/claude-code' })).data.roleModels).toEqual({ humanizer: 'client/claude-code' })
+    expect((await call(c, 'add_story', { title: 'Y', models: { humanizer: 'client/claude-code' } })).isError).toBe(false)
+  })
+
+  it('adapt_book makes a story from a published book, and refuses what cannot be adapted', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }], roles: { writer: ['loc/m1'] }, paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    await makeBook(env, 'demo-book')
+    await makeBook(env, 'half-done', 'drafting')
+    expect((await call(c, 'adapt_book', { book: 'nope', format: 'visual-novel' })).raw).toMatch(/no book "nope"/)
+    expect((await call(c, 'adapt_book', { book: 'half-done', format: 'visual-novel' })).raw).toMatch(/not published yet/)
+    expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'novel' })).raw).toMatch(/not a visual novel format/)
+    const ok = await call(c, 'adapt_book', { book: 'demo-book', format: 'choice-visual-novel', notes: 'Keep the bell.' })
+    expect(ok.isError).toBe(false)
+    expect(ok.data.story).toMatchObject({ format: 'choice-visual-novel', sourceBook: 'demo-book', titleFixed: true })
+    const file = parseMd(await readFile(path.join(env.dir, 'ideas', `${ok.data.slug}.md`), 'utf8'))
+    expect(file.data).toMatchObject({ source_book: 'demo-book', format: 'choice-visual-novel', title: 'Demo Book' })
+    expect(file.body).toContain('Keep the bell.')
+    expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'choice-visual-novel' })).raw).toMatch(/already waiting/)
+    expect((await call(c, 'adapt_book', { book: 'demo-book', format: 'visual-novel', models: { writer: 'no/such' } })).isError).toBe(true)
+  })
+})
+
+describe('MCP newspaper', () => {
+  const article = (e: TestEnv, slug: string, o: Record<string, unknown> = {}) =>
+    e.engine.books.create(slug, { title: slug, stage: 'published', format: 'article', article: true, nonfiction: true, target_words: 900, topic: 'news-technology', topic_name: 'Technology', author: 'Mara Quill', headline: `Headline of ${slug}`, standfirst: `Standfirst of ${slug}`, published: '2026-10-19T09:00:00.000Z', ...o }, '')
+
+  it('lists list_articles, and add_story takes the article formats with a newspaper section only', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    expect((await c.listTools()).tools.map((t) => t.name)).toContain('list_articles')
+    const ok = await call(c, 'add_story', { premise: 'The new EU rules on AI.', format: 'article', topic: 'news-technology' })
+    expect(ok.isError).toBe(false)
+    expect(ok.data.story).toMatchObject({ format: 'article', topic: 'news-technology' })
+    expect((await call(c, 'add_story', { premise: 'A feature with no section.', format: 'feature-article' })).isError).toBe(false)
+    expect((await call(c, 'add_story', { premise: 'x', format: 'article', topic: 'fic-mystery-cozy' })).raw).toMatch(/article format.*not a newspaper section|articles go in a newspaper section/)
+    expect((await call(c, 'add_story', { premise: 'x', format: 'short-story', topic: 'news-science' })).raw).toMatch(/newspaper section.*must be an article format/)
+    expect((await call(c, 'add_topic', { name: 'Gardening news', kind: 'article' })).isError).toBe(false)
+    expect((await call(c, 'list_topics')).data.find((t: { id: string }) => t.id === 'my-gardening-news')).toMatchObject({ kind: 'article' })
+    // a story can be changed into an unfitting pair neither
+    expect((await call(c, 'update_story', { story: ok.data.slug, topic: 'fic-mystery-cozy' })).isError).toBe(true)
+  })
+
+  it('shows the published articles newest first, by section and date, and the books list has a medium filter', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await article(env!, 'chips', { published: '2026-10-19T09:00:00.000Z' })
+    await article(env!, 'quake', { topic: 'news-science', topic_name: 'Science', published: '2026-10-20T08:00:00.000Z' })
+    await article(env!, 'old-one', { published: '2026-10-10T08:00:00.000Z' })
+    await article(env!, 'in-progress', { stage: 'drafting', published: undefined })
+    await makeBook(env!, 'a-book', 'published')
+    const all = await call(c, 'list_articles')
+    expect(all.data.map((a: { slug: string }) => a.slug)).toEqual(['quake', 'chips', 'old-one'])
+    expect(all.data[0]).toMatchObject({ headline: 'Headline of quake', standfirst: 'Standfirst of quake', section: 'Science', sectionId: 'news-science', byline: 'Mara Quill', stage: 'published' })
+    expect((await call(c, 'list_articles', { section: 'news-technology' })).data.map((a: { slug: string }) => a.slug)).toEqual(['chips', 'old-one'])
+    expect((await call(c, 'list_articles', { section: 'science' })).data.map((a: { slug: string }) => a.slug)).toEqual(['quake'])
+    expect((await call(c, 'list_articles', { since: '2026-10-19' })).data.map((a: { slug: string }) => a.slug)).toEqual(['quake', 'chips'])
+    expect((await call(c, 'list_articles', { section: 'World' })).data).toEqual([])
+    expect((await call(c, 'list_articles', { stage: 'all' })).data.map((a: { slug: string }) => a.slug)).toContain('in-progress')
+    expect((await call(c, 'list_articles', { since: 'yesterday-ish' })).raw).toMatch(/not a date/)
+    const books = await call(c, 'list_books', { medium: 'book' })
+    expect(books.data.map((b: { slug: string }) => b.slug)).toEqual(['a-book'])
+    expect(books.data[0].medium).toBe('book')
+    expect((await call(c, 'list_books', { medium: 'article' })).data.map((b: { slug: string }) => b.slug).sort()).toEqual(['chips', 'in-progress', 'old-one', 'quake'])
+    expect((await call(c, 'list_books')).data).toHaveLength(5)
+    // an article is not a book that can be adapted, and the factory status shows the article limit
+    expect((await call(c, 'adapt_book', { book: 'chips', format: 'visual-novel' })).raw).toMatch(/newspaper article/)
+    expect((await call(c, 'factory_status')).data.maxArticlesInProgress).toBe(3)
   })
 })

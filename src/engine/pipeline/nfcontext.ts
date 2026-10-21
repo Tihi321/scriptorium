@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { numberedNoteText } from '../memory/factbase'
 import type { FactBase, KeyFact, SourceEntry } from '../memory/factbase'
 import { pack } from '../memory/context'
@@ -32,6 +34,43 @@ export async function chapterNotes(d: ResearchContextDeps, slug: string, query: 
   const byFile = new Map((await d.research.store.available(slug)).map((n) => [n.file, n]))
   const notes = items.map((i) => byFile.get(i.file)).filter((n): n is NoteFile => !!n)
   return [...notes.filter((n) => !n.unverified), ...notes.filter((n) => n.unverified)]
+}
+
+/** The verified notes of this book itself (not the shared ones) that the fact base has not taken in yet: late research. Newest first. */
+export async function unmergedNotes(d: Pick<NfDeps, 'research' | 'factbase'>, slug: string): Promise<NoteFile[]> {
+  const merged = await d.factbase.merged(slug)
+  const own = (await d.research.store.list(slug)).filter((n) => !n.unverified && n.sources.length > 0 && !merged.has(n.file))
+  return own.sort((a, b) => b.created.localeCompare(a.created))
+}
+
+/**
+ * The book's own notes the writer of chapter `n` must see: the ones the fact base has not merged, and the ones written after the
+ * chapter's file was last written. Newest first, at most `max`.
+ */
+export async function freshNotes(d: NfDeps, slug: string, n: number, max = 6): Promise<NoteFile[]> {
+  const unmerged = new Set((await unmergedNotes(d, slug)).map((x) => x.file))
+  // notes a refresh merged in a round after this chapter was last written are new to its writer too
+  const rounds = await d.factbase.mergedRounds(slug)
+  const chapterRound = (await d.books.chapters(slug)).find((c) => c.n === n)?.round ?? -1
+  const lateRound = (file: string) => (rounds.get(file) ?? -1) > chapterRound
+  let since = 0
+  try {
+    since = (await fs.stat(d.books.chapterFile(slug, n))).mtimeMs
+  } catch {
+    /* the chapter is not written yet: every note counts as new */
+  }
+  const stamped: { note: NoteFile; at: number }[] = []
+  for (const note of await d.research.store.list(slug)) {
+    if (note.unverified) continue
+    let at = 0
+    try {
+      at = (await fs.stat(path.join(d.research.store.dirFor(note.book), path.basename(note.file)))).mtimeMs
+    } catch {
+      /* gone */
+    }
+    if (unmerged.has(note.file) || lateRound(note.file) || (since > 0 && at > since)) stamped.push({ note, at })
+  }
+  return stamped.sort((a, b) => (rounds.get(b.note.file) ?? -1) - (rounds.get(a.note.file) ?? -1) || b.at - a.at).slice(0, max).map((x) => x.note)
 }
 
 /** The facts of the verified notes as key-fact candidates (one per note line, with the numbers of their sources). */
@@ -74,8 +113,12 @@ export async function nonfictionContext(d: NfDeps, slug: string, n: number, o: N
   const outline = (await d.books.outline(slug))!
   const entry = outline.chapters.find((c) => c.n === n)
   const query = `${entry?.title ?? ''}. ${entry?.summary ?? ''} ${o.extraQuery ?? ''}`.trim().slice(0, 1500)
-  const notes = await chapterNotes(d, slug, query, 6)
-  const sources = await d.factbase.syncSources(slug, notes)
+  // the book's late research first (newest first), then the notes that fit the chapter best
+  const fresh = await freshNotes(d, slug, n, 12)
+  const relevant = await chapterNotes(d, slug, query, 6)
+  // the text of the newest 6 fresh notes; the sources of every fresh note are listed, even when a note's text is not shown
+  const notes = [...fresh.slice(0, 6), ...relevant.filter((x) => !fresh.slice(0, 6).some((f) => f.file === x.file))]
+  const sources = await d.factbase.syncSources(slug, [...notes, ...fresh])
   const facts = await d.factbase.facts(slug)
   const terms = await d.factbase.terms(slug)
   const items: ContextItem[] = []
@@ -84,7 +127,7 @@ export async function nonfictionContext(d: NfDeps, slug: string, n: number, o: N
   if (terms.length) items.push({ name: 'terms', text: terms.map((t) => `- ${t.term}: ${t.definition}`).join('\n'), priority: 1, order: 3 })
   const own = facts.get(n) ?? []
   const cite = new Set<number>(own.flatMap((f) => f.sources))
-  for (const note of notes) for (const s of note.sources) {
+  for (const note of [...notes, ...fresh]) for (const s of note.sources) {
     const src = sources.find((x) => x.url === s.url)
     if (src) cite.add(src.n)
   }

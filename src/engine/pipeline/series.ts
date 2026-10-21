@@ -17,10 +17,10 @@ const TOTAL_CHARS = 28000
 const ENTRY_HEAD = 400
 const ENTRY_TAIL = 900
 
-const clip = (text: string, max: number): string => (text.length <= max ? text : text.slice(0, Math.max(0, max - 3)).trimEnd() + '...')
+export const clip = (text: string, max: number): string => (text.length <= max ? text : text.slice(0, Math.max(0, max - 3)).trimEnd() + '...')
 
 /** The start and the end of a long text: the end holds the latest state. */
-const headTail = (text: string, head: number, tail: number): string => {
+export const headTail = (text: string, head: number, tail: number): string => {
   const t = text.trim()
   return t.length <= head + tail ? t : `${t.slice(0, head).trimEnd()} [...] ${t.slice(-tail).trimStart()}`
 }
@@ -61,13 +61,22 @@ export async function earlierSeriesBooks(d: Deps, slug: string): Promise<string[
 }
 
 /** The characters and places of a book's bible, long bible or light. */
-async function bibleEntriesOf(d: { books: BookStore; bible: Bible }, slug: string): Promise<BibleEntry[]> {
+export async function bibleEntriesOf(d: { books: BookStore; bible: Bible }, slug: string): Promise<BibleEntry[]> {
   const long = await d.bible.entries(slug)
   if (long.length) return long
-  // a light bible is one file: "- **Name**: description" lines under Characters
+  // a light bible is one file: "- **Name**: description" lines under Characters (and Places, for a visual novel)
   const text = await d.books.bible(slug)
   const out: BibleEntry[] = []
-  for (const m of text.matchAll(/^- \*\*(.+?)\*\*: (.*)$/gm)) out.push({ group: 'characters', slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', text: m[2]!.trim() })
+  let group: 'characters' | 'places' = 'characters'
+  for (const line of text.split('\n')) {
+    const heading = /^##\s+(.+?)\s*$/.exec(line)
+    if (heading) {
+      group = /^places?$/i.test(heading[1]!) ? 'places' : 'characters'
+      continue
+    }
+    const m = /^- \*\*(.+?)\*\*: (.*)$/.exec(line)
+    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', text: m[2]!.trim() })
+  }
   return out
 }
 
@@ -82,7 +91,7 @@ async function endStates(d: { books: BookStore; bible: Bible }, slug: string, ca
 }
 
 /** The summaries of one earlier book: its act summaries, then as many chapter summaries as fit, in reading order. */
-async function summariesOf(d: Deps, slug: string, budget: number): Promise<string> {
+export async function summariesOf(d: { books: BookStore }, slug: string, budget: number): Promise<string> {
   const read = async (...parts: string[]) => {
     const t = await d.books.readText(slug, ...parts)
     return t ? parseMd(t).body.trim() : ''

@@ -513,7 +513,8 @@ export class OfficeScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true })
       .setDepth(1)
-      .on('pointerdown', () => officeStore.getState().setView('library'))
+      // only while the office shows: the canvas stays under the Library and Newspaper tabs, and a click on a dialog there must not switch the tab
+      .on('pointerdown', () => officeStore.getState().view === 'office' && officeStore.getState().setView('library'))
   }
 
   update(time: number, delta: number): void {
