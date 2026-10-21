@@ -563,7 +563,7 @@ describe('web text can not steer the researcher', () => {
       const id = researchJobId(null, question)
       await waitFor(() => existsSync(path.join(env.dir, 'jobs', 'done', `${id}.md`)), 20000, 'the research job')
       const job = await readFile(path.join(env.dir, 'jobs', 'done', `${id}.md`), 'utf8')
-      const urls = [...job.matchAll(/<<<WEB_PAGE \d+ \| (\S+) \|/g)].map((m) => m[1])
+      const urls = [...new Set([...job.matchAll(/<<<WEB_PAGE \d+ \| (\S+) \|/g)].map((m) => m[1]))] // a follow-up for missing figures repeats the pages
       expect(urls).toHaveLength(3)
       expect(urls.slice(0, 2).sort()).toEqual(['https://example.test/on-1', 'https://example.test/on-2'])
       expect(env.counters.fetches).toEqual([]) // the results carried their text

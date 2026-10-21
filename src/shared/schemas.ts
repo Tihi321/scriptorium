@@ -364,6 +364,8 @@ export const jobSchema = z.looseObject({
   label: z.string().optional(),
   /** The story (idea) slug a job of no book yet is about: a `start_book` job names the story it starts, so the story's `role_models` apply to it. */
   idea: z.string().optional(),
+  /** A research job of an article: `true` searches the news of the last 7 days, `false` does not (see `isNewsQuestion`). */
+  news: z.boolean().optional(),
   /** Locks that must be free to run, for example `bible:silver-inn`. */
   locks: z.array(z.string()).default([]),
   /** Reviewers prefer a model family different from this one. */

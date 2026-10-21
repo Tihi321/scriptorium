@@ -152,8 +152,8 @@ describe('humanizer: the guards and the report', () => {
     expect(humanizeProblem(original, original.replace('hurry', 'rush'))).toBeNull()
     expect(humanizeProblem(original, original.replace(/\[RESEARCH:[^\]]*\]/, ''))).toMatch(/marker/)
     expect(humanizeProblem(original, original.replace('when was the harbour built?', 'who built the harbour?'))).toMatch(/marker/)
-    const nf = `${words(60)} Ships took six months [1]. Crews fell ill [2]. ${words(40)}`
-    expect(humanizeProblem(nf, nf.replace('fell ill', 'sickened'), { nonfiction: true })).toBeNull()
+    const nf = `${words(60)} Ships took six months [1]. Crews fell badly ill on the long voyage [2]. ${words(40)}`
+    expect(humanizeProblem(nf, nf.replace('fell badly ill', 'were taken ill'), { nonfiction: true })).toBeNull()
     expect(humanizeProblem(nf, nf.replace('[2]', ''), { nonfiction: true })).toMatch(/source numbers/)
   })
 

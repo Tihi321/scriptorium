@@ -70,7 +70,7 @@ describe('a story brief in the pipeline', () => {
 
     const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
     expect(book).toMatchObject({ title: story.title, format: 'chapter-book', genre: 'Sea adventure', idea: idea.slug })
-    expect(slug).toBe('the-lighthouse-keeper-s-daughter')
+    expect(slug).toBe('the-lighthouse-keepers-daughter')
 
     // the idea is used, and the book has its own copy of the brief
     const used = (await e.engine.ideas.list()).find((i) => i.slug === idea.slug)!

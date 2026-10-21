@@ -660,7 +660,9 @@ describe('a server that is down is not a job failure', () => {
     await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
     const queued = await waitFor(async () => {
       const f = path.join(env!.dir, 'jobs', 'queued', 'b1--t--u1--r0.md')
-      return calls === 1 && existsSync(f) ? parseMd(await readFile(f, 'utf8')).data : null
+      if (calls !== 1 || !existsSync(f)) return null
+      const data = parseMd(await readFile(f, 'utf8')).data
+      return data.not_before ? data : null
     }, 5000, 'the job back in the queue')
     expect(queued.attempts).toBe(0)
     expect(Date.parse(queued.not_before as string) - Date.now()).toBeGreaterThan(20_000)

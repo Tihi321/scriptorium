@@ -6,7 +6,8 @@ import { researchNotesFor } from '../research/context'
 import type { ResearchItem } from '../research/context'
 import { applyMarkerFixes, findMarkers, markerSentence } from '../research/markers'
 import { formatNote, questionKey } from '../research/notes'
-import type { NoteFact } from '../research/notes'
+import type { NoteExcerpt, NoteFact } from '../research/notes'
+import type { ChatMessage } from '../models/types'
 import { capText, excerptFor, searchTerms } from '../research/web'
 import type { SearchResult } from '../research/web'
 import type { Scheduler } from '../queue/scheduler'
@@ -40,6 +41,53 @@ export function copiesPage(fact: string, page: string, run = 12): boolean {
   return false
 }
 
+/** The most facts one note keeps. */
+export const MAX_NOTE_FACTS = 16
+
+/** A figure on a page that the notes do not have: the page, the figure and the sentence it stands in. */
+export interface MissingFigure {
+  page: number
+  figure: string
+  sentence: string
+}
+
+/**
+ * Years (1800 to 2100) and numbers of two or more digits that stand in a sentence of a page about the question (the sentence or the one
+ * next to it shares a word with the question) and in none of the facts. At most 10, each figure once.
+ */
+export function missingFigures(pages: { n: number; text: string }[], facts: string[], question: string): MissingFigure[] {
+  const terms = searchTerms(question, 8).map((t) => t.toLowerCase())
+  const plain = (s: string) => s.replace(/(?<=\d)[,\s](?=\d{3}\b)/g, '')
+  const have = new Set(plain(facts.join(' ')).match(/\d+(?:\.\d+)?/g) ?? [])
+  const out: MissingFigure[] = []
+  const seen = new Set<string>()
+  for (const p of pages) {
+    const sentences = p.text.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/)
+    sentences.forEach((s, i) => {
+      const near = [sentences[i - 1], s, sentences[i + 1]].filter(Boolean).join(' ').toLowerCase()
+      if (terms.length && !terms.some((t) => near.includes(t))) return
+      for (const m of plain(s).matchAll(/\b\d+(?:\.\d+)?\b/g)) {
+        const figure = m[0]
+        if (figure.replace(/\D/g, '').length < 2 || have.has(figure) || seen.has(figure)) continue
+        seen.add(figure)
+        if (out.length < 10) out.push({ page: p.n, figure, sentence: s.slice(0, 240) })
+      }
+    })
+  }
+  return out
+}
+
+/** The words of a question that say it is about what happened in the last days or weeks (an article's search then asks for news). */
+export function isNewsQuestion(question: string): boolean {
+  const year = new Date().getFullYear()
+  return new RegExp(`\\b(?:latest|this week|this month|today|yesterday|tonight|announc(?:e|ed|es|ement|ements)|new|recent|recently|now|currently|current year|last (?:week|few days)|breaking|${year})\\b`, 'i').test(question)
+}
+
+/** A question of the architect's or the writer's: a string, or an object with `news` (an article's questions are asked as objects). */
+const questionSchema = z.union([z.string(), z.object({ question: z.string(), news: z.boolean().optional() })])
+type AskedQuestion = { question: string; news?: boolean }
+const asQuestion = (x: z.infer<typeof questionSchema>): AskedQuestion => (typeof x === 'string' ? { question: x.trim() } : { question: x.question.trim(), ...(x.news !== undefined ? { news: x.news } : {}) })
+
 /** Handlers of the research steps: the researcher, the architect's plan, the writer's prep and the marker fix-up. */
 export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): void {
   const made = async (slug: string | null, run: Run) => {
@@ -59,7 +107,8 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     const askedBy = ctx.job.requested_by
     const purpose = String(ctx.job.purpose ?? '')
     const idea = typeof ctx.job.idea === 'string' ? ctx.job.idea : undefined
-    const news = await isArticle(book)
+    // an article's search asks for the news of the last days only for a question about what just happened (the question says so, or its words do)
+    const news = (await isArticle(book)) && (typeof ctx.job.news === 'boolean' ? ctx.job.news : isNewsQuestion(question))
     const context = [purpose ? `Why it is asked: ${purpose}` : '', book ? `It is for the book "${(await d.books.read(book))?.data.title ?? book}".` : ''].filter(Boolean).join('\n')
 
     // 1. what the library already knows (the shared notes and this book's notes)
@@ -87,6 +136,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     // When the pages answer nothing, the model suggests short search words and the search is tried again (once, with at most two new queries).
     let provider = ''
     let facts: NoteFact[] = []
+    let excerpts: NoteExcerpt[] = []
     let unverified = false
     const seenUrls = new Set<string>()
     const triedQueries = new Set<string>()
@@ -102,7 +152,9 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
         }
         provider = pages.provider
         ctx.log(`search (${pages.provider}) "${query}": ${pages.list.map((p) => p.url).join(', ')}`)
-        facts = await factsFrom(question, context, pages.list)
+        const got = await factsFrom(question, context, pages.list)
+        facts = got.facts
+        excerpts = got.excerpts
         if (facts.length === 0) ctx.log(`the pages for "${query}" did not answer the question`)
       }
       if (facts.length > 0 || round === 1) break
@@ -140,25 +192,61 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
       return list.length ? { provider: found.provider, list } : null
     }
 
-    async function factsFrom(forQuestion: string, ctxText: string, pages: { n: number; url: string; title: string; text: string }[]): Promise<NoteFact[]> {
+    async function factsFrom(forQuestion: string, ctxText: string, pages: { n: number; url: string; title: string; text: string }[]): Promise<{ facts: NoteFact[]; excerpts: NoteExcerpt[] }> {
       const { messages, version } = await buildMessages(d.dataDir, ctx, 'researcher', 'write_notes', { question: forQuestion, context: ctxText, pages: wrapUntrusted(pages) })
       run.version = version
       ctx.context(pages.map((p) => ({ name: `page ${p.n}: ${p.url}`, tokens: Math.round(p.text.length / 4) })))
       const schema = z.object({ facts: z.array(z.object({ fact: z.string(), source: z.number().optional() })).default([]) })
+      const keep = (list: { fact: string; source?: number }[]): NoteFact[] => {
+        const kept: NoteFact[] = []
+        for (const f of list) {
+          const page = pages.find((p) => p.n === Math.round(Number(f.source)))
+          const text = f.fact.replace(/\s+/g, ' ').trim()
+          if (!page || text.length < 10 || text.length > 600) continue
+          if (copiesPage(text, page.text)) {
+            ctx.log(`dropped a fact that copies page ${page.n}: "${text.slice(0, 60)}..."`)
+            continue
+          }
+          kept.push({ fact: text, source: { url: page.url, title: page.title } })
+        }
+        return kept
+      }
       const r = await chatJson(ctx, messages, schema, { maxTokens: 8000, temperature: 0.1 })
       run.addJson(r.cost, r.chat.model)
-      const out: NoteFact[] = []
-      for (const f of r.value.facts) {
-        const page = pages.find((p) => p.n === Math.round(Number(f.source)))
-        const text = f.fact.replace(/\s+/g, ' ').trim()
-        if (!page || text.length < 10 || text.length > 600) continue
-        if (copiesPage(text, page.text)) {
-          ctx.log(`dropped a fact that copies page ${page.n}: "${text.slice(0, 60)}..."`)
-          continue
+      let out = keep(r.value.facts)
+      if (out.length === 0) return { facts: out, excerpts: [] }
+      // the figures and dates of the pages that bear on the question must reach the note: ask once for the ones the facts lack
+      let missing = missingFigures(pages, out.map((f) => f.fact), forQuestion)
+      if (missing.length > 0) {
+        ctx.log(`the pages have figures the notes lack (${missing.map((m) => m.figure).join(', ')}): asking for them`)
+        const follow: ChatMessage[] = [
+          ...messages,
+          { role: 'assistant', content: JSON.stringify({ facts: r.value.facts }).slice(0, 6000) },
+          {
+            role: 'user',
+            content: `The pages also give these figures and dates you did not note: ${missing.map((m) => `page ${m.page}, "${m.figure}": ${m.sentence}`).join(' | ')}. Add a fact for each one that bears on the question, in your own words, with its source. Reply with one JSON object like {"facts": [{"fact": "...", "source": 1}]} that holds only the new facts.`
+          }
+        ]
+        try {
+          const more = await chatJson(ctx, follow, schema, { maxTokens: 8000, temperature: 0.1 })
+          run.addJson(more.cost, more.chat.model)
+          const norm = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(' ')
+          const have = new Set(out.map((f) => norm(f.fact)))
+          for (const f of keep(more.value.facts)) if (!have.has(norm(f.fact))) out.push(f)
+        } catch (err) {
+          if (isAbort(err)) throw err
+          ctx.log(`the follow-up for the missing figures failed (${(err as Error).message})`)
         }
-        out.push({ fact: text, source: { url: page.url, title: page.title } })
+        out = out.slice(0, MAX_NOTE_FACTS)
+        missing = missingFigures(pages, out.map((f) => f.fact), forQuestion)
       }
-      return out.slice(0, 12)
+      // what the model still left out is kept word for word (at most four sentences), so the figure is in front of the writer anyway
+      const excerpts: NoteExcerpt[] = []
+      for (const m of missing) {
+        const page = pages.find((p) => p.n === m.page)
+        if (page && excerpts.length < 4 && !excerpts.some((x) => x.text === m.sentence.slice(0, 300))) excerpts.push({ text: m.sentence.slice(0, 300), url: page.url })
+      }
+      return { facts: out.slice(0, MAX_NOTE_FACTS), excerpts }
     }
 
     // 4. last resort: the model's own knowledge, marked unverified
@@ -182,7 +270,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     }
 
     // 5. write the note and index it
-    const note = await d.research.store.write({ question, book, facts, unverified, askedBy, purpose, provider: provider || undefined, idea })
+    const note = await d.research.store.write({ question, book, facts, unverified, askedBy, purpose, provider: provider || undefined, idea, excerpts })
     await indexNote(note.file, note.book, note.slug)
     await made(book, run)
     return {
@@ -223,7 +311,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     const art = book.article === true
     const max = Math.max(0, Math.min(4, nf ? d.getFactory().research_limit_nonfiction : d.getFactory().research_limit_per_book))
     let needs = false
-    let questions: string[] = []
+    let questions: AskedQuestion[] = []
     if (max > 0) {
       try {
         const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', art ? 'research_plan_article' : nf ? 'research_plan_nf' : 'research_plan', {
@@ -234,10 +322,10 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
           max_questions: max
         })
         run.version = version
-        const r = await chatJson(ctx, messages, z.object({ needs_research: z.boolean().default(false), questions: z.array(z.string()).default([]) }), { maxTokens: 5000, temperature: 0.2 })
+        const r = await chatJson(ctx, messages, z.object({ needs_research: z.boolean().default(false), questions: z.array(questionSchema).default([]) }), { maxTokens: 5000, temperature: 0.2 })
         run.addJson(r.cost, r.chat.model)
         needs = r.value.needs_research || nf // a non-fiction book is always built on research
-        questions = needs ? r.value.questions.map((q) => q.trim()).filter((q) => questionKey(q).length >= 3).slice(0, max) : []
+        questions = needs ? r.value.questions.map(asQuestion).filter((q) => questionKey(q.question).length >= 3).slice(0, max) : []
       } catch (err) {
         if (isAbort(err)) throw err
         ctx.log(`the research check failed (${(err as Error).message}): going on without research`)
@@ -245,12 +333,16 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     }
     // non-fiction: even when the model gave nothing, the book's own subject is researched before the outline
     if (nf && questions.length === 0 && max > 0) {
-      questions = (art ? [`${book.title}: the latest news`, `${book.topic_name ?? book.genre} news this week`] : [`${book.title}: an overview`, `${book.topic_name ?? book.genre} history and background`]).filter((q) => questionKey(q).length >= 3).slice(0, max)
+      const fallback: AskedQuestion[] = art
+        ? [{ question: `${book.title}: the latest news`, news: true }, { question: `${book.topic_name ?? book.genre} news this week`, news: true }]
+        : [{ question: `${book.title}: an overview` }, { question: `${book.topic_name ?? book.genre} history and background`, news: false }]
+      questions = fallback.filter((q) => questionKey(q.question).length >= 3).slice(0, max)
     }
     const asked: { question: string; job: string | null; status: string }[] = []
     for (const q of questions) {
-      const a = await d.research.ask({ question: q, book: slug, askedBy: ctx.agent.id, purpose: 'the outline of this book' })
-      asked.push({ question: q, job: a.id, status: a.status })
+      // an article's question is a news search only when it is about what just happened (the architect says so, or its words do)
+      const a = await d.research.ask({ question: q.question, book: slug, askedBy: ctx.agent.id, purpose: 'the outline of this book', ...(art ? { news: q.news ?? isNewsQuestion(q.question) } : {}) })
+      asked.push({ question: q.question, job: a.id, status: a.status })
     }
     await writeMd(
       d.books.file(slug, 'research-plan.md'),
@@ -273,7 +365,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     const art = book.article === true
     const max = Math.max(0, Math.min(3, nf ? d.getFactory().research_limit_nonfiction : d.getFactory().research_limit_per_book))
     const file = d.books.file(slug, 'reports', `prep-ch-${pad2(n)}.md`)
-    let questions: string[] = []
+    let questions: AskedQuestion[] = []
     if (entry && max > 0) {
       try {
         const have = await known(slug)
@@ -289,20 +381,20 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
           max_questions: max
         })
         run.version = version
-        const r = await chatJson(ctx, messages, z.object({ questions: z.array(z.string()).default([]) }), { maxTokens: 4000, temperature: 0.2 })
+        const r = await chatJson(ctx, messages, z.object({ questions: z.array(questionSchema).default([]) }), { maxTokens: 4000, temperature: 0.2 })
         run.addJson(r.cost, r.chat.model)
-        questions = r.value.questions.map((q) => q.trim()).filter((q) => questionKey(q).length >= 3).slice(0, max)
+        questions = r.value.questions.map(asQuestion).filter((q) => questionKey(q.question).length >= 3).slice(0, max)
       } catch (err) {
         if (isAbort(err)) throw err
         ctx.log(`the research prep failed (${(err as Error).message}): writing without it`)
       }
     }
     // non-fiction: research is required for every chapter, so a chapter with no question of its own is researched under its title
-    if (nf && questions.length === 0 && entry && max > 0) questions = [`${entry.title}: ${book.title}`]
+    if (nf && questions.length === 0 && entry && max > 0) questions = [{ question: `${entry.title}: ${book.title}` }]
     const asked: { question: string; job: string | null; status: string }[] = []
     for (const q of questions) {
-      const a = await d.research.ask({ question: q, book: slug, askedBy: ctx.agent.id, purpose: `before writing chapter ${n}` })
-      asked.push({ question: q, job: a.id, status: a.status })
+      const a = await d.research.ask({ question: q.question, book: slug, askedBy: ctx.agent.id, purpose: `before writing chapter ${n}`, ...(art ? { news: q.news ?? isNewsQuestion(q.question) } : {}) })
+      asked.push({ question: q.question, job: a.id, status: a.status })
     }
     await writeMd(file, { kind: 'research-prep', n, questions: asked }, `\n# Research before chapter ${n}\n\n${asked.length ? asked.map((a) => `- ${a.question} (${a.status})`).join('\n') : 'No research needed.'}\n`)
     await made(slug, run)

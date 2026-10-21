@@ -77,12 +77,13 @@ export async function buildMessages(
   role: string,
   task: string,
   vars: Record<string, string | number | undefined | null>
-): Promise<{ messages: ChatMessage[]; version: string }> {
+): Promise<{ messages: ChatMessage[]; version: string; /** The template body before the variables are filled in (for `instructionLines`). */ template: string }> {
   const [prompt, rules] = await Promise.all([loadPrompt(dataDir, role, task), loadRules(dataDir)])
   const version = ctx.usedTemplate(rules.raw + '\n' + prompt.raw)
   const system = `${rules.body}\n\n## Your persona\n${ctx.agent.persona.trim()}`
   return {
     version,
+    template: prompt.body,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: render(prompt.body, vars) }
