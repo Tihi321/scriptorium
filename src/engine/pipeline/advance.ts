@@ -99,6 +99,10 @@ export interface BookState {
   nonfiction?: boolean
   /** Non-fiction: chapters whose fact step (the archivist's key facts from the chapter's research) is done. */
   factbase?: Set<number>
+  /** Non-fiction: how many verified notes of the book itself the fact base has not merged yet (late research). */
+  unmergedNotes?: number
+  /** Non-fiction: state (`queued`, `running`, `done`) of this book's fact-base refresh jobs, by job id. */
+  refreshJobs?: Map<string, string>
   /**
    * The humanizer pass applies to this book: the format and the book allow it (`humanize`) and a humanizer agent is hired.
    * Missing or false: the pass is skipped, so `advance` never queues a job nobody can take.
@@ -215,6 +219,17 @@ function factStep(s: BookState, n: number): Plan | null {
   const unit = `ch${pad2(n)}`
   const stage = s.stage === 'drafting' ? {} : { stage: 'drafting' }
   return { patch: stage, jobs: [{ id: jobId(s.slug, 'factbase', unit, 0), task: 'factbase_update', role: 'archivist', book: s.slug, unit, locks: [`bible:${s.slug}`], requested_by: 'engine' }] }
+}
+
+/**
+ * Non-fiction, before a rewrite or a new review round: late research (notes the fact base has not merged) is merged first, so the
+ * writer and the fact-checker work from the same numbered sources and facts. Null when there is nothing to merge or the round's refresh is done.
+ */
+function refreshStep(s: BookState, round: number): PlanJob[] | null {
+  if (!s.nonfiction || (s.unmergedNotes ?? 0) === 0) return null
+  const id = jobId(s.slug, 'factbase', 'refresh', round)
+  if (s.refreshJobs?.get(id) === 'done') return null
+  return [{ id, task: 'factbase_update', role: 'archivist', book: s.slug, unit: 'refresh', round, locks: [`bible:${s.slug}`], requested_by: 'engine' }]
 }
 
 /** The humanizer's pass over one chapter. `round` is the book's round, the chapter keeps its own. */
@@ -347,11 +362,17 @@ export function advance(s: BookState): Plan {
   // rewriting: the affected chapters, one after the other, then the humanizer over the rewritten ones before they are reviewed again
   if (s.stage === 'rewriting') {
     const todo = s.rewriteChapters.filter((n) => (s.chapters.get(n) ?? 0) < r)
-    if (todo.length > 0) return { patch: {}, jobs: rewriteJobs(s, todo, r) }
+    if (todo.length > 0) return { patch: {}, jobs: refreshStep(s, r) ?? rewriteJobs(s, todo, r) }
     if (s.humanize) {
       const again = s.rewriteChapters.filter((n) => s.chapters.has(n) && !s.humanized?.has(n))
       if (again.length > 0) return { patch: {}, jobs: again.map((n) => humanizeJob(s, n, r)) }
     }
+  }
+
+  // a book reopened for a review round only: the late research is merged before the reviewers (the fact-checker) read it
+  if (r > 0 && s.stage === 'reviewing') {
+    const refresh = refreshStep(s, r)
+    if (refresh) return { patch: {}, jobs: refresh }
   }
 
   // reviewing
@@ -399,7 +420,7 @@ export function advance(s: BookState): Plan {
     if (pendingAny(s, s.reviewResearch.get(r) ?? [])) return { patch: stageOf('reviewing'), jobs: [] }
     const { chapters: list, flat } = chaptersToRewrite(s, revise, total)
     const next = r + 1
-    return { patch: { stage: 'rewriting', round: next, rewrite_chapters: list, tension_rewrite: flat }, jobs: rewriteJobs(s, list, next) }
+    return { patch: { stage: 'rewriting', round: next, rewrite_chapters: list, tension_rewrite: flat }, jobs: refreshStep(s, next) ?? rewriteJobs(s, list, next) }
   }
 
   // done reviewing: the publisher decides (publish or reject)

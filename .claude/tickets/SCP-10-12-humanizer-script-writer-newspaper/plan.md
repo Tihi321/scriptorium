@@ -208,6 +208,7 @@ Branches:
 - [ ] D BTT-10 client-only
 - [ ] E1 Croatian translation · [ ] E2 humanizer test book · [ ] E3 test article · [ ] E4 VN adaptation
 - [x] F SCP-13 client search + humanizer hardening (implemented on `SCP-13_client-search`, not committed). New `src/engine/research/clientSearch.ts` (`ClientSearchProvider`, `engine: client`: `searcher`/`web_search` tasks on the engine's `ClientTaskQueue`, JSON schema `{results:[{title,url,content,published?}]}`, `wait_minutes` timeout then the next provider), `ClientTaskQueue.state()` and a `pattern` check in the submit validator, `SearchOptions.book/agent`, `SearchServiceOptions.clientQueue` (the engine passes its queue), `wait_minutes` in the providers schema, `migrateClientSearch` (idempotent, CRLF kept), the seed entry, the MCP `get_client_task` output rule for web searches, `docs/mcp.md` "Do the web research yourself", design Decisions row and History. Humanizer: the three prompts forbid em dashes and keep facts and register; `humanizeProblem` has three new guards (more em dashes, a number or year lost or added, a new capitalised name not in the chapter or the bible; the handler passes the bible); seed chain `[strata, paid]`. Verified: `yarn typecheck`, `yarn lint` clean; `yarn test` 384/384 (25 files; 13 new in `tests/clientsearch.test.ts`; one seed assertion in `tests/humanizer.test.ts` changed to the new chain); `yarn test:ui` 5/5; `yarn build` ok. Not run: the Electron specs and the live run (needs a restart and a Claude session answering the tasks). Deviations: (1) the provider id is `client-search` because `client` is already the model provider; (2) a task nobody takes ends with a logged error ("no client took the web search task ...") that `SearchService` treats as a failed provider, instead of an empty result; (3) the humanizer chain change is in the seed only, existing data folders keep theirs; (4) the name guard skips sentence-initial words, so a new name that opens a sentence is only caught when followed by another capitalised word.
+- [x] G late research → fact base (implemented on `SCP-13_client-search`, not committed). `factbase/merged.md` (`FactBase.merged`/`markMerged`) tracks merged notes; `unmergedNotes`/`freshNotes` in `nfcontext.ts`; `BookState.unmergedNotes`/`refreshJobs`; `advance` queues `<slug>--factbase--refresh--rN` (`factbase_update`, unit `refresh`) before a rewrite round and before the reviewers of a reopened review round (round above 0); handler `refreshFactBase` in `nonfiction.ts`; the writer's context puts fresh notes first; the fact-check notes are newest first; design Decisions row and History. New `tests/latefacts.test.ts` (4 tests: pure plan, merged list, article rejected then `ask_researcher` + `reopen_book` end to end). Verified: `yarn typecheck`, `yarn lint` clean; `yarn test` 387/388 on the first run (26 files; 4 new in `tests/latefacts.test.ts`), the one failure a known timing flake (`features.test.ts` setModel null) that passed alone 16/16; `yarn test:ui` 5/5; `yarn build` ok. Not run: the Electron specs and the live run. Deviations: (1) the refresh takes note lines as key facts without a model call (the fact step's own fallback); (2) only the book's own notes count as late, not shared ones; (3) the first review round never waits for a refresh.
 ## F. SCP-13 Client web search + humanizer hardening (added 2026-10-21, from the live runs)
 
 Why:
@@ -241,3 +242,22 @@ Live, after the build and a restart:
 - `ask_researcher` (or a research rerun) for the article, with Claude answering the search tasks with real sources;
 - then `reopen_book {mode: rewrite}`, and check that it publishes with references;
 - record the result in `runs/france-als162-article.md`.
+## G. SCP-13 (cont.) Late research reaches the fact base (added 2026-10-21, from the live article)
+
+Why: the article was reopened after 4 new client web searches (`ask_researcher`). The new notes landed in `research/`, but:
+- (a) the rewrite prompt's sources and notes were still the round-1 Wikipedia ones (`nfcontext.chapterNotes` picks 6 notes by relevance, and the new notes were not among them);
+- (b) `factbase/sources.md` and `facts.md` never got the new sources, so the writer had no [n] numbers for them;
+- (c) the fact-checker checks against the fact base only.
+
+It was rejected again (6.91; accuracy 9; enjoyment 6; genre fit 5).
+
+Scriptorium, branch `SCP-13_client-search` (a new commit):
+1. **Refresh the fact base after late research.** A non-fiction or article book that gets new research notes after its fact step must update its fact base before the next draft or rewrite. The new notes come in through `ask_researcher` for that book, or through research done after `factbase_update`.
+   - Track the notes already merged: a `factbase` frontmatter list, or note dates compared with the last update.
+   - When `reopen_book` (and `advance` before a rewrite round) finds unmerged notes, it queues a `factbase_update` (archivist, `factbase_refresh` unit) that merges them. New sources get the next [n] numbers, and the facts carry their source numbers.
+   - Reuse the existing `factbase_update` handler (`pipeline/nonfiction.ts:46`) and the FactBase store (`memory/factbase.ts`).
+2. **Newest research first in context.** `nonfictionContext` (`pipeline/nfcontext.ts:71`) always includes the book's notes added since the chapter's last draft (newest first, within budget), not only the 6 most relevant. Their sources appear in the numbered source list the writer cites from.
+3. **The fact-checker reads what the writer had.** The fact-check context includes the same numbered sources and key facts the writer saw, including facts added by the refresh. A claim with a valid [n] from the fact base is not flagged as unsourced.
+4. **Tests:**
+   - an article published, then given `ask_researcher` + `reopen_book`, gets a fact-base refresh, the new [n] sources appear in the rewrite prompt and in the references, and the fact-checker gets them;
+   - books without late notes are unchanged.

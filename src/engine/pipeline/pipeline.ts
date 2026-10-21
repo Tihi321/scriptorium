@@ -11,6 +11,7 @@ import { bookRefs } from '../store/series'
 import { eligibleTopics, pickNext, registerHandlers } from './handlers'
 import { registerLongHandlers } from './longHandlers'
 import { registerNonfictionHandlers } from './nonfiction'
+import { unmergedNotes as unmergedNotesOf } from './nfcontext'
 import { registerHumanizerHandlers } from './humanizerHandlers'
 import { FactBase } from '../memory/factbase'
 import { registerResearchHandlers } from './researchHandlers'
@@ -288,6 +289,12 @@ export class Pipeline {
     }
     const researchPending = new Set<string>()
     for (const state of ['queued', 'running'] as const) for (const id of await this.jobs.ids(state)) if (id.startsWith('research--')) researchPending.add(id)
+    // non-fiction: late research the fact base has not merged, and the refresh jobs of this book
+    const unmergedNotes = format.nonfiction ? (await unmergedNotesOf(this.deps, slug)).length : 0
+    const refreshJobs = new Map<string, string>()
+    if (format.nonfiction) {
+      for (const state of ['queued', 'running', 'done'] as const) for (const id of await this.jobs.ids(state)) if (id.startsWith(`${slug}--factbase--refresh--`)) refreshJobs.set(id, state)
+    }
     const factory = this.o.getFactory()
     const genreText = `${d.genre ?? ''} ${d.topic_name ?? ''}`.toLowerCase()
     const adaptation = typeof d.source_book === 'string' && d.source_book !== ''
@@ -343,6 +350,8 @@ export class Pipeline {
       checkResearch,
       failedJobs: failedByBook.get(slug) ?? [],
       nonfiction: format.nonfiction,
+      unmergedNotes,
+      refreshJobs,
       factbase: format.nonfiction ? await this.deps.factbase.doneChapters(slug) : new Set<number>(),
       adaptation,
       humanize: wantsHumanize && hired,
