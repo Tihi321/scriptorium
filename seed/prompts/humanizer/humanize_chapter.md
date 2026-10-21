@@ -20,6 +20,9 @@ What a script found in this chapter (fix every one of these; it is only what a c
 
 What to do
 
+- Never use an em dash (the long dash). Not one. Use a full stop, a comma, a colon or brackets, or rewrite the sentence. A script counts them and refuses a version that has more than the original.
+- Keep every concrete fact exactly as it is: each object, where it is, who holds it, every number, date and year, every name. Do not move a thing to another place ("under the third flowerpot" stays under the third flowerpot), do not change a count, do not invent a name or a figure. A script compares the numbers and the names with the original and refuses a version that differs.
+- Keep each speaker's register. A formal speaker stays formal: no contractions, no slang, no softening added. A rough speaker stays rough. Change the rhythm and the words around the speech, not who talks how.
 - Keep the plot, the events and their order, the facts, every name (people, places, things), the point of view, the tense, and what each character knows. Add no new plot facts, no new characters, no new places, and do not remove a scene or a beat the story needs.
 - Keep each character's voice from the bible. Dialogue stays in the speaker's own way of talking: do not make everyone sound alike or polish rough speech into neat speech. People interrupt, trail off, answer a different question than the one asked, and say less than they mean.
 - Vary the rhythm. Mix short and long sentences, and break any run of sentences built the same way or starting the same way. Sometimes a sentence is one word. Sometimes it runs on because the narrator is carried along.

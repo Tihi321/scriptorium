@@ -124,6 +124,15 @@ Claude Code can be the model. A provider of `kind: client` (`client/claude-code`
 
 Long prompts: a review of a whole book sends the whole book. That is fine for a short story, but a long novel can be 150,000 words, so keep `client` runs to short formats unless you need it.
 
+## Do the web research yourself
+
+The researcher needs web search. Without a Tavily key it only had Wikipedia, and a newspaper article could not be sourced. The `client-search` entry of `config/providers.md` (`kind: search`, `engine: client`, enabled in the seed, after `tavily` and before `wikipedia` in `search_order`) hands each web search to you. Nothing is spent and no key is needed.
+
+1. **The tasks.** A search is a client task with role `searcher` and task `web_search`; the unit is the query and the book is the one the research is for. `list_client_tasks` shows them, `factory_status.clientTasks` counts them with the other tasks, and `get_client_task {role: "searcher"}` takes only those.
+2. **What you do.** Search the web yourself with your own web search and fetch tools, read the pages, prefer primary, official and recent sources (a news search says how many days back). Answer with `{"results": [{"title": "...", "url": "https://...", "content": "...", "published": "2026-10-14"}]}`: `content` is a verbatim excerpt of the page (at most 1500 characters, with numbers and names exactly as the page has them), `url` is a page you really read, up to `limit` results (the task says how many). Never invent a URL. An empty list is fine when nothing is found. `submit_client_task` checks the shape (title, an http(s) url and content on every result) and refuses a bad answer without costing anything: fix it and submit again.
+3. **Nobody answering.** A task that no session has taken within `wait_minutes` (default 10, set on the provider) is dropped and the search finds nothing (the log says so); the researcher then falls to the next provider (Wikipedia). So books never stall for want of a session, but they research thinly: keep a session answering `searcher` tasks while a newspaper article or a non-fiction book is being researched. Once you have taken a task, the engine waits for the answer; a lease that runs out puts it back to waiting and the wait starts again.
+4. **Switching it off.** `enabled: false` on `client-search`, or take it out of `search_order`.
+
 ## The story brief file
 
 A story is `ideas/<slug>.md` in the data folder. You can write one by hand; the engine picks it up. `add_story` and the **Describe a story** form write the same format.

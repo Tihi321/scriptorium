@@ -673,7 +673,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'get_client_task',
     {
       description:
-        'Take the oldest waiting model request (optionally of one role, book or task) and hold it for 30 minutes. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
+        'Take the oldest waiting model request (optionally of one role, book or task; `role: "searcher"` takes the web searches the researcher waits for, see docs/mcp.md "Do the web research yourself") and hold it for 30 minutes. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
       inputSchema: { role: z.string().optional(), book: z.string().optional().describe('Book slug'), task: z.string().optional().describe('Job task, e.g. draft_chapter, review, outline') },
       annotations: WRITE
     },
@@ -689,7 +689,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
         ...(t.messages.length > 1 ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
         ...(t.schema ? { schema: t.schema } : {}),
         ...(t.maxTokens ? { maxTokens: t.maxTokens } : {}),
-        output: t.schema ? 'Reply with one JSON object that matches `schema`. No prose, no code fence.' : 'Reply with the text only: no preamble, no notes, no code fence.',
+        output:
+          t.task === 'web_search'
+            ? 'This is a web search: do it yourself with your own web search and fetch tools, read the pages, and prefer primary, official and recent sources. Reply with one JSON object that matches `schema`: {results: [{title, url, content, published?}]}, where content is a verbatim excerpt of the page (at most 1500 characters) and url is a page you really read. Never invent a URL. An empty results list is fine when you find nothing. No prose, no code fence.'
+            : t.schema
+              ? 'Reply with one JSON object that matches `schema`. No prose, no code fence.'
+              : 'Reply with the text only: no preamble, no notes, no code fence.',
         leaseMinutes: DEFAULT_LEASE_MS / 60_000
       }
     })

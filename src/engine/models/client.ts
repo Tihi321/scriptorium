@@ -194,6 +194,13 @@ export class ClientTaskQueue {
     return true
   }
 
+  /** Where a task is: waiting for a client, held by one, or gone (answered, cancelled, or never there). */
+  state(id: string): 'waiting' | 'leased' | 'gone' {
+    this.expire()
+    const entry = this.entries.get(id)
+    return !entry ? 'gone' : entry.task.leaseUntil === undefined ? 'waiting' : 'leased'
+  }
+
   /** A lease that ran out puts the task back to waiting (checked when the queue is read, no timer). */
   private expire(): void {
     const t = this.now()
@@ -220,7 +227,7 @@ const typeOf = (v: unknown): string => (v === null ? 'null' : Array.isArray(v) ?
 
 /**
  * A small JSON-schema check, not a full validator (no ajv dependency): `type`, `enum`, `const`, `required`, `properties`, `items`,
- * `anyOf`/`oneOf`, `minItems` and `minLength`. Anything else in the schema is ignored, so it never refuses what the job's own zod schema accepts
+ * `anyOf`/`oneOf`, `minItems`, `minLength` and `pattern`. Anything else in the schema is ignored, so it never refuses what the job's own zod schema accepts
  * for a reason it can't see. Note that `z.toJSONSchema` lists fields with a default as required.
  */
 function validate(v: unknown, schema: Record<string, unknown>, at: string, out: string[]): void {
@@ -243,6 +250,7 @@ function validate(v: unknown, schema: Record<string, unknown>, at: string, out: 
   }
   if ('const' in schema && JSON.stringify(schema.const) !== JSON.stringify(v)) out.push(`${at}: must be ${JSON.stringify(schema.const)}`)
   if (typeof v === 'string' && typeof schema.minLength === 'number' && v.length < schema.minLength) out.push(`${at}: must be at least ${schema.minLength} characters`)
+  if (typeof v === 'string' && typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(v)) out.push(`${at}: must match ${schema.pattern}`)
   if (Array.isArray(v)) {
     if (typeof schema.minItems === 'number' && v.length < schema.minItems) out.push(`${at}: needs at least ${schema.minItems} items`)
     if (schema.items && typeof schema.items === 'object') v.forEach((item, i) => validate(item, schema.items as Record<string, unknown>, `${at}[${i}]`, out))

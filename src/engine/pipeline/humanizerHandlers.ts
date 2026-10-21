@@ -89,11 +89,43 @@ export function scriptStructure(text: string): { scenes: number; cast: number; s
 
 const citations = (text: string) => (text.match(/\[\d+\]/g) ?? []).sort().join('')
 
+/** The numbers and years of a text (digits, with a decimal or thousands part), without the source numbers [n]. */
+export function numberTokens(text: string): Set<string> {
+  return new Set(text.replace(/\[\d+\]/g, ' ').match(/\d+(?:[.,]\d+)*/g) ?? [])
+}
+
+const NAME_WORD = /\p{Lu}[\p{L}\p{M}'’-]*/gu
+
+const nameKey = (w: string) => w.toLowerCase().replace(/['’]s$/, '').replace(/^['’-]+|['’-]+$/g, '')
+
+/**
+ * Capitalised words of `text` that are new: not at the start of a sentence (or a line, or a quotation), and, in lower case without
+ * a possessive 's, not a word of `known` (the original chapter and the bible). A sentence's first word is skipped because every
+ * word is capitalised there, so a new name that opens a sentence is only found when it is followed by another capitalised word
+ * ("Captain Rourke": Rourke is checked).
+ */
+export function newNames(text: string, known: string): string[] {
+  const have = new Set((known.match(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu) ?? []).map(nameKey))
+  const out: string[] = []
+  for (const m of text.matchAll(NAME_WORD)) {
+    const at = m.index ?? 0
+    const before = text.slice(0, at).replace(/[ \t]+$/, '')
+    const lead = before === '' || /[\n.!?…:;"“”‘'’([—-]$/.test(before)
+    if (lead) continue
+    const w = m[0]
+    if (w.length < 2) continue // "I"
+    const key = nameKey(w)
+    if (key && !have.has(key) && !out.includes(w)) out.push(w)
+  }
+  return out
+}
+
 /**
  * Why a humanized chapter can't replace the original, or null when it can: a different length (over the tolerance), a lost
- * `[RESEARCH: ...]` marker, a script whose scene, on-screen or speaker lines changed, or non-fiction whose source numbers changed.
+ * `[RESEARCH: ...]` marker, a script whose scene, on-screen or speaker lines changed, or non-fiction whose source numbers changed. 
+ * Also (SCP-13): more em dashes than the original, a number or year lost or added, a capitalised name that is neither in the original nor in the bible.
  */
-export function humanizeProblem(original: string, revised: string, opts: { script?: boolean; nonfiction?: boolean } = {}): string | null {
+export function humanizeProblem(original: string, revised: string, opts: { script?: boolean; nonfiction?: boolean; /** The bible's text: the names in it are known too. */ bible?: string } = {}): string | null {
   const before = countWords(original)
   const after = countWords(revised)
   if (after < 20) return `the answer is only ${after} words`
@@ -102,6 +134,15 @@ export function humanizeProblem(original: string, revised: string, opts: { scrip
   }
   const marks = (t: string) => findMarkers(t).map((m) => m.question).sort().join('|')
   if (marks(original) !== marks(revised)) return 'a [RESEARCH: ...] marker was changed or lost'
+  const dashes = (t: string) => (t.match(/—/g) ?? []).length
+  if (dashes(revised) > dashes(original)) return `it added em dashes (${dashes(original)} before, ${dashes(revised)} after)`
+  const nums = numberTokens(original)
+  const nums2 = numberTokens(revised)
+  const lost = [...nums].filter((x) => !nums2.has(x))
+  const added = [...nums2].filter((x) => !nums.has(x))
+  if (lost.length || added.length) return `the numbers changed (${[...lost.map((x) => `lost ${x}`), ...added.map((x) => `added ${x}`)].slice(0, 6).join(', ')})`
+  const fresh = newNames(revised, `${original}\n${opts.bible ?? ''}`)
+  if (fresh.length) return `it brought in a name that is not in the chapter or the bible (${fresh.slice(0, 5).join(', ')})`
   if (opts.script) {
     const a = scriptStructure(original)
     const b = scriptStructure(revised)
@@ -154,7 +195,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     if (owner) messages[messages.length - 1]!.content += `\n\n${owner}`
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6), temperature: 0.8 })
     const revised = stripLeadingHeading(cleanProse(r.text))
-    const problem = humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction })
+    const problem = humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
     if (problem) ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
     const body = problem ? current.body : revised
     // the round is the chapter's own (it stays), `humanized` says in which book round the pass ran: a pass that was refused counts too, so it is not asked again

@@ -59,6 +59,8 @@ export const providerEntrySchema = z.looseObject({
   engine: z.string().optional(),
   /** `kind: search` only: USD per request, logged to the spend files. */
   price_per_request: z.number().nonnegative().default(0),
+  /** `kind: search`, `engine: client`: minutes a web search task waits for an MCP client before the search gives up and the next provider is tried. Default 10. */
+  wait_minutes: z.number().positive().optional(),
   rpm: z.number().int().positive().optional(),
   tpm: z.number().int().positive().optional(),
   /**

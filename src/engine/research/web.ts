@@ -1,3 +1,6 @@
+import type { ClientTaskQueue } from '../models/client'
+import { ClientSearchProvider } from './clientSearch'
+
 /**
  * Getting text from the web for the researcher: search providers (Tavily, Wikipedia, stubs for the rest)
  * and page fetching with HTML stripping. Everything that comes back is untrusted data.
@@ -21,6 +24,9 @@ export interface SearchOptions {
   news?: boolean
   /** With `news`: how many days back. Default 7. */
   days?: number
+  /** Who asks (the client search provider shows them on its task). */
+  book?: string
+  agent?: string
 }
 
 export interface SearchProvider {
@@ -353,6 +359,9 @@ export interface ProviderSpec {
   baseUrl?: string
   apiKey?: string
   pricePerRequest: number
+  /** `client` engine: the engine's client task queue, and how long a task may wait for a client. */
+  clientQueue?: ClientTaskQueue
+  clientWaitMs?: number
 }
 
 /** The provider object for one `kind: search` entry of providers.md. Null when the engine is unknown. */
@@ -360,6 +369,8 @@ export function makeSearchProvider(spec: ProviderSpec, fetchImpl?: FetchImpl): S
   switch (spec.engine.toLowerCase()) {
     case 'tavily':
       return spec.apiKey ? new TavilyProvider({ id: spec.id, apiKey: spec.apiKey, baseUrl: spec.baseUrl, pricePerRequest: spec.pricePerRequest, fetchImpl }) : null
+    case 'client':
+      return spec.clientQueue ? new ClientSearchProvider({ id: spec.id, queue: spec.clientQueue, waitMs: spec.clientWaitMs }) : null
     case 'wikipedia':
       return new WikipediaProvider({ id: spec.id, baseUrl: spec.baseUrl, fetchImpl })
     default:

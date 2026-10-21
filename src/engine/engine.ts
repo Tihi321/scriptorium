@@ -158,7 +158,7 @@ export class Engine {
     this.series = new SeriesStore(dir)
     this.bible = new Bible(this.books)
     this.memory = new MemoryService(dir, this.registry)
-    this.search = new SearchService({ registry: this.registry, budget: this.budget, emit: this.emit, log: this.log, keys: opts.registry?.keys, ...opts.search })
+    this.search = new SearchService({ registry: this.registry, budget: this.budget, emit: this.emit, log: this.log, keys: opts.registry?.keys, clientQueue: this.clientQueue, ...opts.search })
     this.research = new ResearchService({
       dataDir: dir,
       jobs: this.jobs,

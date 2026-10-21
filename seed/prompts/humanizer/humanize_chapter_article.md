@@ -18,6 +18,9 @@ What a script found in this article (fix every one of these; it is only what a c
 
 What to do
 
+- Never use an em dash (the long dash). Not one. Use a full stop, a comma, a colon or brackets, or rewrite the sentence. A script counts them and refuses a version that has more than the original.
+- Keep every concrete fact exactly as it is: each object, where it is, who holds it, every number, date and year, every name. Do not move a thing to another place ("under the third flowerpot" stays under the third flowerpot), do not change a count, do not invent a name or a figure. A script compares the numbers and the names with the original and refuses a version that differs.
+- Keep each speaker's register. A formal speaker stays formal: no contractions, no slang, no softening added. A rough speaker stays rough. Change the rhythm and the words around the speech, not who talks how.
 - Keep the facts, the figures, every name (people, organisations, places), the order of the argument, and who said what. Add no new facts, no new sources, no new quotes, and do not remove a claim the article needs. Quoted words stay word for word.
 - Keep the numbers in square brackets, such as [1] or [2][3]: each stays next to the claim it supports, and none is added, dropped or moved to another claim.
 - Write like a person with a voice: a lede that makes the reader want the second sentence, short paragraphs, a mix of short and long sentences, and the occasional dry or surprising turn where the material allows it. Not chatty, not breathless, and no opinion the sources do not give.

@@ -131,3 +131,60 @@ export async function migrateNewspaper(dataDir: string, seedDir: string | undefi
   }
   return { changes }
 }
+
+/** The id of the client search provider (not `client`: that is the model provider of providers.md). */
+export const CLIENT_SEARCH_ID = 'client-search'
+
+const CLIENT_SEARCH_BLOCK = [
+  '  # Web search done by Claude Code (or any MCP client): each query is a `searcher` task in the client queue (see docs/mcp.md). It costs nothing',
+  '  # and waits for a client: a task nobody takes within wait_minutes gives no results, and the next provider is tried.',
+  `  - id: ${CLIENT_SEARCH_ID}`,
+  '    kind: search',
+  '    engine: client',
+  '    enabled: true',
+  '    wait_minutes: 10',
+  '    price_per_request: 0',
+  '    concurrency: 2'
+]
+
+/**
+ * The client web search arrived after data folders existed. At every start, when config/providers.md has no `engine: client` search
+ * entry (and no entry with the id `client-search`): the entry is added at the end of the providers, and `client-search` goes into
+ * `search_order` after `tavily` (first when there is none) and before `wikipedia`. Everything else in the file stays as it is, including
+ * the line endings. Running it again changes nothing. A search_order that is not written as `[a, b, c]` is left alone (the provider
+ * is tried after the listed ones then). A folder without the file is not touched.
+ */
+export async function migrateClientSearch(dataDir: string): Promise<MigrationResult> {
+  const changes: string[] = []
+  const file = path.join(dataDir, 'config', 'providers.md')
+  if (!existsSync(file)) return { changes }
+  const text = await fs.readFile(file, 'utf8')
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (lines[0]?.trim() !== '---' || end < 0) return { changes }
+  const front = lines.slice(1, end).join('\n')
+  if (new RegExp(String.raw`^\s*-\s*id:\s*${CLIENT_SEARCH_ID}\b`, 'm').test(front) || /^\s+engine:\s*client\b/m.test(front)) return { changes }
+  const orderAt = lines.findIndex((l, i) => i > 0 && i < end && /^search_order:/.test(l))
+  // the providers end where search_order starts (or where the frontmatter ends)
+  const insertAt = orderAt >= 0 ? orderAt : end
+  lines.splice(insertAt, 0, ...CLIENT_SEARCH_BLOCK)
+  let ordered = false
+  const at = orderAt >= 0 ? orderAt + CLIENT_SEARCH_BLOCK.length : -1
+  const m = at >= 0 ? /^search_order:\s*\[([^\]]*)\]\s*(#.*)?$/.exec(lines[at]!) : null
+  if (m) {
+    const ids = m[1]!.split(',').map((x) => x.trim()).filter(Boolean)
+    if (!ids.includes(CLIENT_SEARCH_ID)) {
+      const tavily = ids.indexOf('tavily')
+      const wiki = ids.indexOf('wikipedia')
+      let pos = tavily >= 0 ? tavily + 1 : 0
+      if (wiki >= 0 && wiki < pos) pos = wiki
+      ids.splice(pos, 0, CLIENT_SEARCH_ID)
+      lines[at] = `search_order: [${ids.join(', ')}]${m[2] ? ' ' + m[2] : ''}`
+      ordered = true
+    }
+  }
+  await atomicWrite(file, lines.join(eol))
+  changes.push(`config/providers.md: added the client web search provider (${CLIENT_SEARCH_ID}, wait_minutes 10)${ordered ? ' and put it into search_order after tavily' : ''}`)
+  return { changes }
+}

@@ -142,6 +142,15 @@ providers:
     api_key_env: TAVILY_API_KEY
     price_per_request: 0.008
     concurrency: 2
+  # Web search done by Claude Code (or any MCP client): each query is a `searcher` task in the client queue (see docs/mcp.md). It costs nothing
+  # and waits for a client: a task nobody takes within wait_minutes gives no results, and the next provider is tried.
+  - id: client-search
+    kind: search
+    engine: client
+    enabled: true
+    wait_minutes: 10
+    price_per_request: 0
+    concurrency: 2
   - id: wikipedia
     kind: search
     engine: wikipedia
@@ -176,7 +185,7 @@ providers:
     price_per_request: 0
     concurrency: 1
 # The researcher tries these search providers in this order: the first one that gives results wins. One without a key is skipped.
-search_order: [tavily, wikipedia, brave, serpapi, serphouse, duckduckgo]
+search_order: [tavily, client-search, wikipedia, brave, serpapi, serphouse, duckduckgo]
 ---
 # Providers
 
@@ -229,9 +238,10 @@ Claude Code (or another MCP client) does the model work. A request to `client/cl
 
 ## Search providers (`kind: search`)
 
-Used only by the researcher. A search provider has no models. `engine` is `tavily`, `wikipedia`, `brave`, `serpapi`, `serphouse` or `duckduckgo` (it defaults to the id). `search_order` (the last line of the frontmatter) is the order they are tried in. Each answered request is written to the spend files with `price_per_request`, and a paid provider is skipped while a budget cap is reached.
+Used only by the researcher. A search provider has no models. `engine` is `tavily`, `client`, `wikipedia`, `brave`, `serpapi`, `serphouse` or `duckduckgo` (it defaults to the id). `search_order` (the last line of the frontmatter) is the order they are tried in. Each answered request is written to the spend files with `price_per_request`, and a paid provider is skipped while a budget cap is reached.
 
 - **Tavily** (`TAVILY_API_KEY`): returns cleaned page text with the results. Written, but not yet checked against the real service (no key was available).
+- **Client search** (`engine: client`, id `client-search`: the id `client` is the model provider above): the web research is done by Claude Code, or any MCP client. Each query becomes a client task (role `searcher`, task `web_search`) that the client takes with `get_client_task {role: "searcher"}`, answers by searching the web itself, and submits as `{results: [{title, url, content, published?}]}`. Free, no key. `wait_minutes` (default 10): a task nobody has taken by then gives no results (logged) and the next provider is tried, so books never stall without a session. Once a client has taken it, the answer is waited for. It sits after Tavily and before Wikipedia in `search_order`.
 - **Wikipedia**: the MediaWiki API, no key, free. Sends a descriptive User-Agent. Good for basics, weak for specialist facts.
 - **Brave, SerpApi, SERPHouse, DuckDuckGo**: stubs. They sit behind the same interface and are switched off. Switching one on today only makes it fail and fall through to the next provider.
 

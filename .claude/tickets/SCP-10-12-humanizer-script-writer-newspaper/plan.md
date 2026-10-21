@@ -207,3 +207,37 @@ Branches:
 - [x] C SCP-12 newspaper (implemented on `SCP-12_newspaper`; WIP commit 902564d, final work after it is NOT committed). Items 1-9 done (formats+migration, article topics, `_article` prompts, news research, article.html/article.md publish, `max_articles_in_progress`, summary/protocol `medium`, Newspaper tab, MCP `list_articles`/`medium`/article add_story). Finish: the two stale seed assertions fixed (`tests/nonfiction.test.ts` now expects the 2 article formats; `tests/pipeline.test.ts` expects the `article` kind and 8 rows; the 482 vs 483 failure was a real duplicate topic name, `Europe`, so the news row is now `European news`); docs written (`docs/design.md` Newspaper row, UI row, Articles paragraph, folder layout, Later, History; `docs/mcp.md` list_articles, list_books medium, article add_story, factory_status maxArticlesInProgress). Verified: full `yarn test` 370/371 first run (1 timing flake in features.test.ts reader rebuild, passes alone 16/16), adapt/humanizer/series/nonfiction/pipeline/newspaper pass, `yarn typecheck`, `yarn lint`, `yarn test:ui` 5/5 and `yarn build` clean. Deviations: references from fact base `sources()` + cited numbers (not `buildReferences` text); article pitch skips the similarity check and pitch index; `office/scene.ts` library-door click only acts in the office view; old data folders keep their `generate_ideas.md` (handler appends headlines and rule), new `_article` prompts are copied by the seed. Demo/office.spec expectations changed (5 topic sections, 6 of 12 on). Left: commit as `SCP-12: ...`.
 - [ ] D BTT-10 client-only
 - [ ] E1 Croatian translation · [ ] E2 humanizer test book · [ ] E3 test article · [ ] E4 VN adaptation
+- [x] F SCP-13 client search + humanizer hardening (implemented on `SCP-13_client-search`, not committed). New `src/engine/research/clientSearch.ts` (`ClientSearchProvider`, `engine: client`: `searcher`/`web_search` tasks on the engine's `ClientTaskQueue`, JSON schema `{results:[{title,url,content,published?}]}`, `wait_minutes` timeout then the next provider), `ClientTaskQueue.state()` and a `pattern` check in the submit validator, `SearchOptions.book/agent`, `SearchServiceOptions.clientQueue` (the engine passes its queue), `wait_minutes` in the providers schema, `migrateClientSearch` (idempotent, CRLF kept), the seed entry, the MCP `get_client_task` output rule for web searches, `docs/mcp.md` "Do the web research yourself", design Decisions row and History. Humanizer: the three prompts forbid em dashes and keep facts and register; `humanizeProblem` has three new guards (more em dashes, a number or year lost or added, a new capitalised name not in the chapter or the bible; the handler passes the bible); seed chain `[strata, paid]`. Verified: `yarn typecheck`, `yarn lint` clean; `yarn test` 384/384 (25 files; 13 new in `tests/clientsearch.test.ts`; one seed assertion in `tests/humanizer.test.ts` changed to the new chain); `yarn test:ui` 5/5; `yarn build` ok. Not run: the Electron specs and the live run (needs a restart and a Claude session answering the tasks). Deviations: (1) the provider id is `client-search` because `client` is already the model provider; (2) a task nobody takes ends with a logged error ("no client took the web search task ...") that `SearchService` treats as a failed provider, instead of an empty result; (3) the humanizer chain change is in the seed only, existing data folders keep theirs; (4) the name guard skips sentence-initial words, so a new name that opens a sentence is only caught when followed by another capitalised word.
+## F. SCP-13 Client web search + humanizer hardening (added 2026-10-21, from the live runs)
+
+Why:
+- The test article was rejected (6.27). With no Tavily key, every web search failed, the researcher only had Wikipedia, and the fact-checker would not pass the uncited "not on record" claims.
+- The user chose: **Claude Code does the web research**, with no key and nothing spent.
+- The humanizer, running on the line-editor chain (it fell back to a free model), cut too much and was refused by the guard on the article. On the test story it added em dashes, moved a fact (the key "under the third flowerpot") and loosened a formal speaker.
+
+Scriptorium, branch `SCP-13_client-search` from SCP-12:
+1. **Client search provider.** A search provider of `kind: search` with `engine: client`.
+   - Each query becomes a client task on the existing `ClientTaskQueue`: role `searcher`, task `web_search`, with the query, `news`/`days` and the limit in the prompt.
+   - Claude answers with JSON `{results: [{title, url, content, published?}]}`. `content` is the relevant excerpt, quoted from the page.
+   - `SearchService` treats it like any other provider. If nobody takes a search task within `wait_minutes` (default 10, set in providers.md), it resolves to no results and the next provider is tried, so books never stall without a session.
+   - Seed and migration: a `client` search entry, enabled, inserted in `search_order` after `tavily` and before `wikipedia`.
+   - The existing MCP client tools serve the tasks, filterable by `role: searcher`; `factory_status.clientTasks` counts them. The `get_client_task` output rule tells the client to search the web itself and cite real URLs.
+   - docs/mcp.md: "Do the web research yourself".
+2. **Humanizer hardening.**
+   - The prompt forbids em dashes outright, keeps every concrete fact (objects, positions, numbers, dates, names) and keeps each speaker's register (formal stays formal, no added contractions).
+   - New guards keep the original (and log why) when:
+     - the output adds em dashes that the input does not have;
+     - the output drops or changes a number or year;
+     - a capitalised name in the output is not in the input or the bible.
+   - The ±10% length guard stays.
+   - The humanizer's seed chain prefers a capable model (the line editor's first model), not a free fallback, and the docs say so.
+3. **Tests:**
+   - a client search task end to end (taken and answered → notes; untaken → timeout → next provider);
+   - the migration for the providers;
+   - each new humanizer guard.
+   - Plus typecheck, lint, test, test:ui and build.
+
+Live, after the build and a restart:
+- `ask_researcher` (or a research rerun) for the article, with Claude answering the search tasks with real sources;
+- then `reopen_book {mode: rewrite}`, and check that it publishes with references;
+- record the result in `runs/france-als162-article.md`.

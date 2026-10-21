@@ -350,7 +350,7 @@ describe('humanizer: the role, the seed and the migration', () => {
   it('the role is known everywhere the roles are listed, and the seed has a humanizer agent and prompts', async () => {
     expect(ROLES).toContain('humanizer')
     const roles = parseMd(await readFile(path.join(seedDir, 'config', 'roles.md'), 'utf8')).data.roles as Record<string, { models: string[] }>
-    expect(roles.humanizer!.models).toEqual(roles['line-editor']!.models)
+    expect(roles.humanizer!.models).toEqual(['strata', 'paid']) // SCP-13: the line editor's first model, then the paid default, no LM Studio step
     const agent = parseMd(await readFile(path.join(seedDir, 'agents', 'humanizer-iris-vane.md'), 'utf8'))
     expect(agent.data).toMatchObject({ kind: 'agent', role: 'humanizer', name: 'Iris Vane' })
     for (const f of ['humanize_chapter.md', 'humanize_chapter_vn.md']) expect(existsSync(path.join(seedDir, 'prompts', 'humanizer', f))).toBe(true)

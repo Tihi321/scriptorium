@@ -19,7 +19,7 @@ roles:
   copy-editor:
     models: [strata, lmstudio, paid]
   humanizer:
-    models: [strata, lmstudio, paid]
+    models: [strata, paid]
   beta-reader:
     models: [strata, lmstudio, paid]
   child-safety-reviewer:
@@ -45,7 +45,8 @@ The aliases `paid`, `strata` and `lmstudio` stand for the default models in `con
 
 Starting choices, all of them first guesses to be tuned in the model picker:
 - Writers, architect, editor-in-chief, idea generator, publisher: the paid default, with Strata and then LM Studio as fallbacks.
-- Editors, reviewers and the humanizer (the same chain as the line editor; per book it can be set to another model, for example the client): Strata (local Qwen3.8-Flash-Next with thinking off: a different model family from the DeepSeek writer, and free), then LM Studio, then the paid default.
+- The humanizer (SCP-13): Strata first (the line editor's first, capable model), then the paid default. It has no LM Studio step: a small local model cut too much and added em dashes, so a refused pass (the guards keep the original) is better than a bad one. Per book it can be set to another model, for example the client. Existing data folders keep their own chain.
+- Editors and reviewers (per book a model can be set, for example the client): Strata (local Qwen3.8-Flash-Next with thinking off: a different model family from the DeepSeek writer, and free), then LM Studio, then the paid default.
 - Archivist, researcher and the checks (continuity, originality, fact): Strata with thinking on `low` (named directly, it is not the Strata default), then LM Studio, then the paid default.
 - Embeddings: the local nomic model in LM Studio. Strata has no embeddings, so LM Studio keeps nomic loaded while Strata runs.
 
