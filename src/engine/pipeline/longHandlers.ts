@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { parseMd } from '../../shared/md'
 import { memoryUpdateSchema } from '../memory/bible'
 import { reindex } from '../memory/index'
+import { ServerDownError } from '../models/types'
 import { analyzeRepetition } from '../memory/repetition'
 import type { Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
@@ -141,6 +142,8 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     const file = d.books.file(slug, 'summaries', `ch-${pad2(n)}.md`)
     const doc = parseMd(await fs.readFile(file, 'utf8'))
     let note: string
+    // never mark a chapter indexed without indexing it: with the embeddings server down the job waits (see ServerDownError)
+    if (d.memory.available() && !d.memory.ready()) throw new ServerDownError('the embeddings server is not running: the chapter is indexed when it is', 'embeddings')
     if (d.memory.available()) {
       const r = await reindex(d.dataDir, d.memory.getIndex())
       note = `indexed (${r.indexed} file(s) new or changed)`

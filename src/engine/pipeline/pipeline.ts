@@ -505,6 +505,8 @@ export class Pipeline {
       task: 'start_book',
       role: 'editor-in-chief',
       locks: ['factory:start'],
+      // the story's own models (add_story {models}) apply to this job: the book it makes does not exist yet
+      ...(pick.idea ? { idea: pick.idea.slug, label: `start "${pick.idea.title}"` } : {}),
       requested_by: pick.idea?.data.source === 'user' ? 'you' : 'engine'
     })
   }

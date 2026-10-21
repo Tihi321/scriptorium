@@ -720,3 +720,38 @@ describe('MCP: the prompt once, waiting for a book, absolute paths, book models 
 async function engineBook(slug: string) {
   return parseMd(await readFile(path.join(env!.dir, 'books', slug, 'book.md'), 'utf8'))
 }
+
+describe('MCP: exclusive pins and what blocks the factory', () => {
+  it('assign_agent {exclusive: true} shows pinExclusive, and freeing the agent clears it', async () => {
+    env = await makeEnv({ paused: true, roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    await makeBook(env, 'b1', 'drafting')
+    const plain = await call(c, 'assign_agent', { agent: 'writer-ann', book: 'b1' })
+    expect(plain.data).toMatchObject({ pin: 'b1', pinExclusive: false })
+    const exclusive = await call(c, 'assign_agent', { agent: 'writer-ann', book: 'b1', exclusive: true })
+    expect(exclusive.data).toMatchObject({ pin: 'b1', pinExclusive: true })
+    expect((await call(c, 'list_agents')).data[0]).toMatchObject({ pinExclusive: true })
+    const freed = await call(c, 'assign_agent', { agent: 'writer-ann', book: null })
+    expect(freed.data).toMatchObject({ pin: null, pinExclusive: false })
+  })
+
+  it('factory_status lists the providers, the embeddings server, and the jobs no model can take', async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const idle = (await call(c, 'factory_status')).data
+    expect(idle.blocked).toEqual([])
+    expect(idle.providers).toEqual([{ id: 'loc', dayFull: false, resetsAt: null, down: false }])
+    expect(idle.embeddings).toBeNull() // the test config has no embedding model
+    env.engine.scheduler.register('t', async () => ({ result: 'ok' }))
+    env.engine.router.limiter.markDayFull(env.engine.registry.providers.get('loc')!)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const status = await waitFor(async () => {
+      const s = (await call(c, 'factory_status')).data
+      return s.blocked.length ? s : null
+    }, 5000, 'a blocked job')
+    expect(status.blocked).toEqual([{ job: 'b1--t--u1--r0', role: 'writer', agent: 'writer-ann', reason: expect.stringContaining('loc/m1: used up its requests for today') }])
+    expect(status.providers[0]).toMatchObject({ id: 'loc', dayFull: true, down: false, resetsAt: expect.stringMatching(/T00:00:00\.000Z$/) })
+  })
+})

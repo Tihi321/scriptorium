@@ -103,6 +103,18 @@ test('the office renders, an agent opens its terminal, and the controls send com
   await page.getByTestId('agent-pause').click()
   expect(await commands(page)).toContainEqual({ type: 'pause', agent: id })
 
+  // assign the agent to a book: the exclusive box appears only then, and sends the command with `exclusive`
+  await expect(page.getByTestId('agent-book-exclusive')).toHaveCount(0)
+  await page.getByTestId('agent-book').selectOption({ index: 1 })
+  const assigned = (await commands(page)).find((c) => c.type === 'assignBook' && c.agent === id)!
+  expect(assigned).toMatchObject({ book: expect.any(String), exclusive: false })
+  await expect(page.getByTestId('agent-book-exclusive')).not.toBeChecked()
+  await page.getByTestId('agent-book-exclusive').click()
+  expect(await commands(page)).toContainEqual({ type: 'assignBook', agent: id, book: assigned.book, exclusive: true })
+  await expect(page.getByTestId('agent-book-exclusive')).toBeChecked() // the fake engine answered with pinExclusive, and the store shows it
+  await page.getByTestId('agent-book').selectOption('')
+  await expect(page.getByTestId('agent-book-exclusive')).toHaveCount(0)
+
   // whiteboard highlight
   await page.getByTestId('book-moon-bakery-bedtime').click()
   await expect(page.getByTestId('book-moon-bakery-bedtime')).toHaveClass(/active/)

@@ -118,8 +118,9 @@ export interface NextPick {
 /**
  * Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic.
  * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
+ * `prefer` is the slug of the story a start job was queued for (its models were chosen for that story): it is picked when it can still start.
  */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }): NextPick | null {
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
   const waiting = waitingStories(ideas, books)
   const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug))
@@ -128,6 +129,11 @@ export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatE
   const ok = (topic?: TopicRow, idea?: IdeaFile) => {
     const article = isArticleStory(idea, topic, formats)
     return slot(article) && (formatsForKind(formats, topic?.kind ?? null).length > 0 || (!topic && article))
+  }
+  const wanted = prefer ? open.find((x) => x.slug === prefer) : undefined
+  if (wanted) {
+    const topic = wanted.data.topic ? byId.get(wanted.data.topic) : undefined
+    if (wanted.data.source === 'user' ? ok(topic, wanted) : !!topic && topic.active && hasRoom(topic) && ok(topic, wanted)) return { idea: wanted, topic }
   }
   for (const i of open.filter((x) => x.data.source === 'user')) {
     const topic = i.data.topic ? byId.get(i.data.topic) : undefined
@@ -189,7 +195,9 @@ export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 's
   const window = d.contextTokens(role)
   if (window) budgetTokens = Math.max(2500, Math.min(budgetTokens, Math.floor(window * 0.45)))
   let index = null
-  if (d.memory.available()) {
+  if (!d.memory.ready() && d.memory.available()) {
+    d.log('search skipped: the embeddings server is down; the chapter is written from the bible and the summaries')
+  } else if (d.memory.available()) {
     try {
       index = d.memory.getIndex()
     } catch (err) {
@@ -200,7 +208,7 @@ export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 's
   const entry = (await d.books.outline(slug))?.chapters.find((c) => c.n === n)
   const research = entry ? await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4) : []
   const seriesBooks = await earlierSeriesBooks(d, slug)
-  return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research, seriesBooks })
+  return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research, seriesBooks, log: d.log })
 }
 
 /** Writes the book's record of this job (books/<slug>/made.md and the summary in book.md). */
@@ -281,7 +289,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const open = await countInProgress(d.books)
     const room: SlotRoom = { books: open.books < d.getFactory().max_books_in_progress, articles: open.articles < d.getFactory().max_articles_in_progress }
     if (!room.books && !room.articles) return { result: 'enough books in progress already' }
-    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books), room)
+    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books), room, ctx.job.idea)
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it
@@ -378,7 +386,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const brief = await d.books.brief(slug)
     const ideaText = brief ? briefPromptText(brief) : typeof book.idea === 'string' ? ((await d.ideas.list()).find((i) => i.slug === book.idea)?.body ?? '') : ''
     // the library's pitch index is for books: an article is not checked against it and is not added to it
-    const mem = d.memory.available() && !fmt.article ? d.memory : null
+    const mem = d.memory.ready() && !fmt.article ? d.memory : null
     // the source of an adaptation (and other adaptations of it) is meant to be close: the similarity check leaves them out
     const family = await adaptationFamily(d, slug)
     let similarityNote = ''
@@ -963,7 +971,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     }))
     await writeCoverHtml(d.dataDir, slug, { title, author: book.author ?? 'Unknown', genre: book.topic_name ?? book.genre, year, genreClass: cls })
     await made(slug, run)
-    if (d.memory.available()) {
+    if (d.memory.ready()) {
       try {
         await d.memory.getIndex().upsert({ file: `books/${slug}/book.md#blurb`, book: slug, kind: 'blurb', ref: 'blurb', text: r.value.blurb.trim() })
       } catch (err) {

@@ -205,7 +205,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
   }
 
   async function indexNote(file: string, book: string | null, slug: string): Promise<void> {
-    if (!d.memory.available()) return
+    if (!d.memory.ready()) return
     try {
       const text = parseMd(await fs.readFile(path.join(d.dataDir, ...file.split('/')), 'utf8')).body.trim()
       await d.memory.getIndex().upsert({ file, book: book ?? '', kind: 'research', ref: slug, text })

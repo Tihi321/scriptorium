@@ -150,7 +150,8 @@ export class Engine {
       pollMs: opts.pollMs,
       onAgentsChanged: () => this.syncAgents(),
       isBookPaused: (book) => this.pipeline.pausedBooks.has(book),
-      getBookModel: (book, role) => this.bookModel(book, role)
+      getBookModel: (book, role) => this.bookModel(book, role),
+      getIdeaModel: (idea, role) => this.ideaModel(idea, role)
     })
     this.books = new BookStore(dir)
     this.topics = new TopicsFile(dir, () => void this.emitTopics())
@@ -479,7 +480,7 @@ export class Engine {
    * Assigns an agent to one book in progress, or frees it (`book: null`). The agent then only takes that book's jobs.
    * A writer also becomes the book's writer: the book's next writer jobs go to it, and reviewers avoid its model family.
    */
-  async assignBook(agentId: string, book: string | null): Promise<void> {
+  async assignBook(agentId: string, book: string | null, exclusive = false): Promise<void> {
     const def = this.agents.get(agentId)
     if (!def) return this.log(`assignBook: no agent "${agentId}"`)
     if (book !== null) {
@@ -498,13 +499,25 @@ export class Engine {
         await this.emitBookUpdated(book)
       }
     }
-    await this.agents.patch(agentId, { pin: book })
+    await this.agents.patch(agentId, { pin: book, pin_exclusive: book !== null && exclusive })
     this.emitAgentUpdated(agentId)
     this.scheduler.kick()
   }
 
   /** Book slug -> its `role_models`, read from book.md and kept for a few seconds (the scheduler asks for every queued job on every tick). */
   private bookModels = new Map<string, { at: number; models: Record<string, string> }>()
+
+  /** Story slug -> its `role_models`, for the `start_book` job that makes the story's book (the book does not exist yet). */
+  private ideaModels = new Map<string, { at: number; models: Record<string, string> }>()
+
+  private async ideaModel(idea: string, role: string): Promise<string | undefined> {
+    let hit = this.ideaModels.get(idea)
+    if (!hit || Date.now() - hit.at > 3000) {
+      hit = { at: Date.now(), models: (await this.ideas.list()).find((i) => i.slug === idea)?.data.role_models ?? {} }
+      this.ideaModels.set(idea, hit)
+    }
+    return hit.models[role] || undefined
+  }
 
   private async bookModel(book: string, role: string): Promise<string | undefined> {
     let hit = this.bookModels.get(book)
@@ -515,7 +528,6 @@ export class Engine {
     return hit.models[role] || undefined
   }
 
-  /** Sets or removes the model a book uses for a role. Its running jobs of that role switch at once. */
   /** Gives a rejected or published book one more round (see `Pipeline.reopenBook`). Returns the reason when it can't be reopened, else null. */
   async reopenBook(book: string, mode: 'rewrite' | 'review', chapters?: number[]): Promise<string | null> {
     const res = await this.pipeline.reopenBook(book, mode, chapters)
@@ -532,6 +544,7 @@ export class Engine {
     return this.pipeline.refreshFactbase(slug)
   }
 
+  /** Sets or removes the model a book uses for a role. Its running jobs of that role switch at once. */
   private async setBookModel(book: string, role: string, model: string | null): Promise<void> {
     const b = await this.books.read(book)
     if (!b) return this.log(`setBookModel: no book "${book}"`)
@@ -550,7 +563,7 @@ export class Engine {
   private async releasePins(book: string): Promise<void> {
     for (const def of this.agents.list()) {
       if (def.data.pin !== book) continue
-      await this.agents.patch(def.id, { pin: null })
+      await this.agents.patch(def.id, { pin: null, pin_exclusive: false })
       this.emitAgentUpdated(def.id)
     }
     this.scheduler.kick()
@@ -899,7 +912,7 @@ export class Engine {
         this.scheduler.stopAgent(cmd.agent)
         return
       case 'assignBook':
-        await this.assignBook(cmd.agent, cmd.book)
+        await this.assignBook(cmd.agent, cmd.book, cmd.exclusive)
         return
       case 'pauseAll':
         await this.setPaused(true)

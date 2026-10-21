@@ -255,6 +255,8 @@ export const agentSchema = z.looseObject({
   focus: z.array(z.string()).default([]),
   /** Only take jobs for this book. */
   pin: z.string().nullable().default(null),
+  /** With `pin`: only the agents assigned to the book this way take its jobs (the job waits for them, even while they are paused). */
+  pin_exclusive: z.boolean().default(false),
   max_parallel: z.number().int().positive().default(1),
   paused: z.boolean().default(false)
 })
@@ -358,6 +360,8 @@ export const jobSchema = z.looseObject({
   waiting_on: z.string().nullable().default(null),
   /** Short text for the office (the handover line and the agent's bubble) instead of `task unit`. Research jobs use the question. */
   label: z.string().optional(),
+  /** The story (idea) slug a job of no book yet is about: a `start_book` job names the story it starts, so the story's `role_models` apply to it. */
+  idea: z.string().optional(),
   /** Locks that must be free to run, for example `bible:silver-inn`. */
   locks: z.array(z.string()).default([]),
   /** Reviewers prefer a model family different from this one. */

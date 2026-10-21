@@ -126,7 +126,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
+      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -149,6 +149,18 @@ export function registerTools(server: McpServer, engine: Engine): void {
         maxArticlesInProgress: engine.factory.max_articles_in_progress,
         openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
         clientTasks: engine.clientQueue.counts(),
+        // queued jobs that no model can take now (a server down, a day used up, a rate limit, every slot busy), and the providers behind it
+        blocked: engine.scheduler.blockedJobs(),
+        providers: [...engine.registry.providers.values()]
+          .filter((p) => p.kind !== 'search' && p.kind !== 'client' && p.available)
+          .map((p) => {
+            const dayFull = engine.router.limiter.dayFull(p)
+            return { id: p.id, dayFull, resetsAt: dayFull ? new Date(engine.router.limiter.dayResetsAt()).toISOString() : null, down: p.down }
+          }),
+        embeddings: (() => {
+          const m = engine.registry.embeddingModel()
+          return m ? { model: m.ref, provider: m.provider.id, down: m.provider.down } : null
+        })(),
         agents: { total: agents.length, busy: busy.length, idle: agents.filter((a) => a.state === 'idle').length, paused: agents.filter((a) => a.paused).length },
         busyAgents: busy.map((a) => ({ id: a.id, state: a.state, task: a.task, book: a.book }))
       }
@@ -954,17 +966,18 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'assign_agent',
     {
-      description: 'Assign an agent to one book in progress (it then only takes that book\'s jobs; a writer becomes the book\'s writer), or free it with book null.',
-      inputSchema: { agent: z.string(), book: z.string().nullable() },
+      description:
+        'Assign an agent to one book in progress (it then only takes that book\'s jobs; a writer becomes the book\'s writer), or free it with book null. exclusive: only the agents assigned to this book (exclusively) take its jobs, and a job waits for them even while they are busy or paused; without it the assigned agent prefers the book and the other agents of the role still help.',
+      inputSchema: { agent: z.string(), book: z.string().nullable(), exclusive: z.boolean().optional().describe('Only the agents assigned this way work on the book') },
       annotations: WRITE
     },
-    run(async ({ agent: id, book: slug }: { agent: string; book: string | null }) => {
+    run(async ({ agent: id, book: slug, exclusive }: { agent: string; book: string | null; exclusive?: boolean }) => {
       needAgent(id)
       if (slug !== null) {
         const b = await engine.books.read(await needBook(slug))
         if (!b || TERMINAL_BOOK_STAGES.has(b.data.stage)) fail(`"${slug}" is not a book in progress (stage: ${b?.data.stage})`)
       }
-      await engine.handleCommand({ type: 'assignBook', agent: id, book: slug })
+      await engine.handleCommand({ type: 'assignBook', agent: id, book: slug, exclusive })
       return agent(id)
     })
   )

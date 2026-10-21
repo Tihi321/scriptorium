@@ -3,7 +3,7 @@ import { formatNote, questionKey } from './notes'
 import type { NoteFile, ResearchStore } from './notes'
 
 export interface ResearchContextDeps {
-  memory: Pick<MemoryService, 'available' | 'getIndex'>
+  memory: Pick<MemoryService, 'ready' | 'getIndex'>
   research: { store: ResearchStore }
   log: (message: string) => void
 }
@@ -28,7 +28,7 @@ export async function researchNotesFor(d: ResearchContextDeps, book: string | nu
   if (notes.length === 0) return []
   const byFile = new Map(notes.map((n) => [n.file, n]))
   const chosen: NoteFile[] = []
-  if (d.memory.available()) {
+  if (d.memory.ready()) {
     try {
       const hits = await d.memory.getIndex().search(query, { kinds: ['research'], books: (await d.research.store.isolated(book)) ? [book!] : [book ?? '', ''], k: max * 3 })
       for (const h of hits) {

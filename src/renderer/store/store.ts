@@ -185,6 +185,7 @@ function agentFromSummary(a: AgentSummary, prev: AgentView | undefined, now: num
     model: a.resolvedModel ?? a.model ?? prev?.model ?? null,
     override: a.model,
     pin: a.pin ?? null,
+    pinExclusive: a.pinExclusive === true,
     state,
     paused: a.paused,
     task: a.task,
@@ -273,7 +274,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       const prev = s.agents[e.agent]
       const state = e.state
       const task = state === 'idle' || state === 'paused' ? undefined : (e.task ?? (prev?.state === state ? prev.task : undefined))
-      const base: AgentView = prev ?? { id: e.agent, name: e.agent, role: e.role, model: null, override: null, pin: null, state, paused: false, since: now }
+      const base: AgentView = prev ?? { id: e.agent, name: e.agent, role: e.role, model: null, override: null, pin: null, pinExclusive: false, state, paused: false, since: now }
       const changed = prev?.state !== state || prev?.task !== task
       const agent: AgentView = {
         ...base,

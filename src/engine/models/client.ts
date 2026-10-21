@@ -1,3 +1,4 @@
+import { findLeaks } from '../pipeline/leak'
 import { extractJson } from '../pipeline/llm'
 import { estimateTokens } from './types'
 import type { ChatEvent, ChatMessage, ChatRequest, ProviderClient, RequestMeta } from './types'
@@ -30,6 +31,8 @@ export interface ClientTask {
   schema?: Record<string, unknown>
   maxTokens?: number
   images?: ClientImage[]
+  /** Instruction lines the answer must not repeat (not shown by `get_client_task`). Only checked for a task without a schema. */
+  forbid?: string[]
   /** Epoch ms. */
   createdAt: number
   /** Epoch ms: set while a client holds the task. */
@@ -113,6 +116,7 @@ export class ClientTaskQueue {
       ...(req.schema ? { schema: req.schema } : {}),
       ...(req.maxTokens ? { maxTokens: req.maxTokens } : {}),
       ...(req.images?.length ? { images: req.images } : {}),
+      ...(meta.forbid?.length && !req.schema ? { forbid: meta.forbid } : {}),
       createdAt: this.now()
     }
     const done = new Promise<string>((resolve, reject) => this.entries.set(task.id, { task, resolve, reject }))
@@ -171,6 +175,9 @@ export class ClientTaskQueue {
     if (entry.task.schema) {
       const problems = checkAgainstSchema(text, entry.task.schema)
       if (problems.length > 0) return { accepted: false, problems }
+    } else if (entry.task.forbid) {
+      const leak = findLeaks(text, entry.task.forbid)[0]
+      if (leak) return { accepted: false, problems: [`the answer repeats the task's instructions ("${leak.slice(0, 80)}"): send only the chapter text, without the task text`] }
     }
     this.entries.delete(id)
     entry.resolve(text)

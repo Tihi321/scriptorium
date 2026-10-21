@@ -310,6 +310,29 @@ describe('the long-book draft context', () => {
     await buildDraftContext({ books: d.books, bible: d.bible, index, slug: 'case-two', n: 1, budgetTokens: 20000 })
     expect(searches).toHaveLength(1)
   })
+
+  it('a search that fails (the embeddings server is down) leaves the passages out, says so once, and still builds the context', async () => {
+    const dir = await tempDir()
+    const d = stores(dir)
+    await d.series.create(seriesBrief)
+    await writeBookOne(dir)
+    await writeBookTwo(dir)
+    await writeMd(path.join(dir, 'books', 'case-two', 'outline.md'), { kind: 'outline', chapters: [{ n: 1, title: 'The Return', summary: 'Dec returns to the bell.' }] }, '\n')
+    let calls = 0
+    const index = {
+      search: async () => {
+        calls++
+        throw new Error('the embeddings server lmstudio is not running (http://localhost:1234/v1)')
+      }
+    } as unknown as MemoryIndex
+    const logs: string[] = []
+    const packed = await buildDraftContext({ books: d.books, bible: d.bible, index, slug: 'case-two', n: 1, budgetTokens: 20000, seriesBooks: ['case-one'], log: (m) => logs.push(m) })
+    expect(packed.text).toContain('The Return') // the outline and the bible still come
+    expect(packed.text).not.toContain('Passages from')
+    expect(calls).toBe(1) // the series search is not tried after the first one failed
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatch(/search skipped: the embeddings server lmstudio is not running.*written from the bible and the summaries/)
+  })
 })
 
 describe('a series in the pipeline', () => {

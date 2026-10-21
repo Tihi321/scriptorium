@@ -124,7 +124,7 @@ export function AgentPanel() {
         </label>
         <label className="stack">
           <span className="dim">Works on{agent.role === 'writer' ? ' (a writer takes the book over from its current writer)' : ''}</span>
-          <select data-testid="agent-book" value={agent.pin ?? ''} onChange={(e) => sendCommand({ type: 'assignBook', agent: agent.id, book: e.target.value || null })}>
+          <select data-testid="agent-book" value={agent.pin ?? ''} onChange={(e) => sendCommand({ type: 'assignBook', agent: agent.id, book: e.target.value || null, exclusive: agent.pinExclusive })}>
             <option value="">Any book</option>
             {agent.pin && !books[agent.pin] && <option value={agent.pin}>{agent.pin}</option>}
             {assignable.map((b) => (
@@ -134,6 +134,18 @@ export function AgentPanel() {
             ))}
           </select>
         </label>
+        {agent.pin && (
+          <label className="row" style={{ gap: 6 }}>
+            <input
+              type="checkbox"
+              style={{ width: 'auto' }}
+              data-testid="agent-book-exclusive"
+              checked={agent.pinExclusive}
+              onChange={(e) => sendCommand({ type: 'assignBook', agent: agent.id, book: agent.pin, exclusive: e.target.checked })}
+            />
+            <span>Only assigned agents work on this book</span>
+          </label>
+        )}
         <button onClick={() => officeStore.getState().setTerminal(true, 'agent')}>Open terminal</button>
       </div>
     </div>

@@ -30,6 +30,7 @@ interface FakeAgent {
   phase: 'main' | 'wait-provider' | 'wait-research'
   /** The book it is assigned to, or undefined. */
   pin?: string
+  pinExclusive?: boolean
 }
 
 const DS = 'deepseek/deepseek-flash'
@@ -193,6 +194,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     model: a.override,
     resolvedModel: a.model,
     pin: a.pin ?? null,
+    pinExclusive: a.pinExclusive === true,
     paused: a.paused,
     state: a.paused ? 'paused' : a.state,
     task: a.task,
@@ -405,6 +407,7 @@ export function installFakeEngine(params: URLSearchParams): void {
           const a = agents.find((x) => x.id === command.agent)
           if (a) {
             a.pin = command.book ?? undefined
+            a.pinExclusive = !!command.book && command.exclusive === true
             emit({ type: 'agent.updated', agent: summaryOf(a) })
           }
           break

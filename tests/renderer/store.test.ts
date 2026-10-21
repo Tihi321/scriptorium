@@ -17,7 +17,7 @@ import { ROOMS, breakCapacity, breakSpot, placeDesks, roomForRole } from '../../
 const T0 = 1_000_000
 
 function agentSummary(id: string, name: string, role: string, o: Partial<AgentSummary> = {}): AgentSummary {
-  return { id, name, role, model: null, resolvedModel: null, pin: null, paused: false, state: 'idle', ...o }
+  return { id, name, role, model: null, resolvedModel: null, pin: null, pinExclusive: false, paused: false, state: 'idle', ...o }
 }
 
 export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSummary {

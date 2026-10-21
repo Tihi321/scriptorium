@@ -8,7 +8,7 @@ import type { LogWriter } from '../logs/logs'
 import { isPaidModel } from '../models/registry'
 import type { ModelInfo } from '../models/registry'
 import type { ModelRouter } from '../models/router'
-import { BudgetError, emptyUsage, isAbortError } from '../models/types'
+import { BudgetError, emptyUsage, isAbortError, ServerDownError } from '../models/types'
 import type { ChatMessage, Usage } from '../models/types'
 import type { JobFile, JobStore, NewJob } from './jobs'
 
@@ -17,6 +17,8 @@ export interface ChatOptions {
   schema?: Record<string, unknown>
   maxTokens?: number
   temperature?: number
+  /** Instruction lines of the prompt that the answer must not repeat (`instructionLines`): a client answer that does is refused up front. */
+  forbid?: string[]
 }
 
 export interface ChatResult {
@@ -85,6 +87,9 @@ interface AgentRuntime {
   jobId?: string
   book?: string
   errorUntil: number
+  /** A server its job needs is down: until then the agent shows as waiting for the provider (see `ServerDownError`). */
+  waitUntil?: number
+  waitNote?: string
   /** Its last failed request, until a request of it is answered again. */
   problem?: AgentProblem
 }
@@ -105,6 +110,16 @@ export interface SchedulerDeps {
   isBookPaused?: (book: string) => boolean
   /** The model a book sets for a role (`role_models` in book.md), if any. */
   getBookModel?: (book: string, role: string) => Promise<string | undefined>
+  /** The model a story sets for a role (`role_models` in ideas/<story>.md): for a job of no book yet, such as `start_book`. */
+  getIdeaModel?: (idea: string, role: string) => Promise<string | undefined>
+}
+
+/** A queued job that no model can take now, and why (`factory_status` shows them). */
+export interface BlockedJob {
+  job: string
+  role: string
+  agent: string
+  reason: string
 }
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex').slice(0, 8)
@@ -118,6 +133,7 @@ export class Scheduler {
   private again = false
   private timer: NodeJS.Timeout | undefined
   private stopped = false
+  private blocked: BlockedJob[] = []
   private readonly now: () => number
 
   constructor(private readonly d: SchedulerDeps) {
@@ -238,6 +254,11 @@ export class Scheduler {
     await this.drain()
   }
 
+  /** The queued jobs that no model could take at the last tick, with the reason (a server down, a day used up, a rate limit, all slots busy). */
+  blockedJobs(): BlockedJob[] {
+    return [...this.blocked]
+  }
+
   runningJobs(): { jobId: string; agent: string }[] {
     return [...this.running.values()].map((r) => ({ jobId: r.job.id, agent: r.agentId }))
   }
@@ -285,7 +306,8 @@ export class Scheduler {
       }
     }
 
-    const blocked = new Set<string>()
+    const blocked = new Map<string, string>()
+    const blockedJobs: BlockedJob[] = []
     const factory = this.d.getFactory()
     if (!factory.paused) {
       const queued = await jobs.list('queued')
@@ -305,7 +327,7 @@ export class Scheduler {
         const agent = this.pickAgent(j, defs)
         if (!agent) continue
         const rt = this.runtimeFor(agent.id)
-        const bookModel = j.book ? await this.d.getBookModel?.(j.book, j.role) : undefined
+        const bookModel = j.book ? await this.d.getBookModel?.(j.book, j.role) : j.idea ? await this.d.getIdeaModel?.(j.idea, j.role) : undefined
         const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family, bookModel })
         if (models.length === 0) {
           rt.errorUntil = t + 3000
@@ -313,11 +335,17 @@ export class Scheduler {
           continue
         }
         let chosen: ModelInfo | undefined
-        let busy = false
+        const reasons: string[] = []
         for (const m of models) {
           if (isPaidModel(m) && !budget.isExhausted(j.book).ok) continue // paid and over a cap: try the next (local) model
+          if (!router.usable(m.provider)) {
+            // down or used up for the day: never wait on it, try the next model. When every model is like that the job waits (below)
+            // instead of starting on a server that does not answer, which would fail it three times and fail the book.
+            reasons.push(`${m.ref}: ${router.blockReason(m.provider)}`)
+            continue
+          }
           if (!router.limiter.hasCapacity(m.provider)) {
-            busy = true
+            reasons.push(`${m.ref}: ${router.blockReason(m.provider)}`)
             break // wait for the preferred provider instead of silently using a paid fallback
           }
           router.limiter.tryAcquire(m.provider)
@@ -325,7 +353,11 @@ export class Scheduler {
           break
         }
         if (!chosen) {
-          if (busy) blocked.add(agent.id)
+          if (reasons.length) {
+            const reason = reasons.join('; ')
+            if (!blocked.has(agent.id)) blocked.set(agent.id, reason)
+            blockedJobs.push({ job: job.id, role: j.role, agent: agent.id, reason })
+          }
           continue
         }
         const claimed = await jobs.claim(job.id)
@@ -337,35 +369,46 @@ export class Scheduler {
         this.launch(claimed, agent, models.slice(models.indexOf(chosen)), chosen, bookModel)
       }
     }
+    this.blocked = blockedJobs
     for (const rt of this.runtimes.values()) {
       const def = defs.get(rt.id)
       if (!def) continue
       if (rt.running.size === 0) {
         if (def.data.paused) this.setState(rt, def, 'paused')
         else if (rt.errorUntil > this.now()) this.setState(rt, def, 'error', rt.state?.split('|')[1])
-        else if (blocked.has(rt.id)) this.setState(rt, def, 'waiting-provider')
+        else if (rt.waitUntil && rt.waitUntil > this.now()) this.setState(rt, def, 'waiting-provider', rt.waitNote)
+        else if (blocked.has(rt.id)) this.setState(rt, def, 'waiting-provider', blocked.get(rt.id))
         else this.setState(rt, def, 'idle')
       }
     }
   }
 
   private pickAgent(j: JobFrontmatter, defs: Map<string, AgentDef>): AgentDef | undefined {
-    const options: { def: AgentDef; focus: boolean; hint: boolean; load: number }[] = []
+    // agents assigned exclusively to the book (`pin_exclusive`) are the only ones that may take its jobs: the job waits for them
+    const owners = new Set<string>()
+    if (j.book) {
+      for (const def of defs.values()) {
+        if (def.data.role === j.role && def.data.pin === j.book && def.data.pin_exclusive && this.runtimes.get(def.id)?.retiring === false) owners.add(def.id)
+      }
+    }
+    const options: { def: AgentDef; focus: boolean; hint: boolean; pinned: boolean; load: number }[] = []
     for (const def of defs.values()) {
       const rt = this.runtimes.get(def.id)
       if (!rt || rt.retiring || def.data.paused) continue
       if (def.data.role !== j.role) continue
       if (rt.running.size >= def.data.max_parallel) continue
       if (def.data.pin && def.data.pin !== j.book) continue
-      options.push({ def, focus: !!j.book && def.data.focus.includes(j.book), hint: j.agent_hint === def.id, load: rt.running.size })
+      if (owners.size && !owners.has(def.id)) continue
+      options.push({ def, focus: !!j.book && def.data.focus.includes(j.book), hint: j.agent_hint === def.id, pinned: !!j.book && def.data.pin === j.book, load: rt.running.size })
     }
+    if (owners.size) return options.sort((a, b) => Number(b.hint) - Number(a.hint) || a.load - b.load || a.def.id.localeCompare(b.def.id))[0]?.def
     // the hinted agent (same writer for a book) is busy finishing the job before this one: wait a little for it
     if (j.agent_hint && !options.some((o) => o.hint)) {
       const hinted = defs.get(j.agent_hint)
       const age = this.now() - (j.created ? Date.parse(j.created) : 0)
       if (hinted && !hinted.data.paused && this.runtimes.get(hinted.id)?.retiring === false && age < 20_000) return undefined
     }
-    options.sort((a, b) => Number(b.hint) - Number(a.hint) || Number(b.focus) - Number(a.focus) || a.load - b.load || a.def.id.localeCompare(b.def.id))
+    options.sort((a, b) => Number(b.hint) - Number(a.hint) || Number(b.pinned) - Number(a.pinned) || Number(b.focus) - Number(a.focus) || a.load - b.load || a.def.id.localeCompare(b.def.id))
     return options[0]?.def
   }
 
@@ -413,7 +456,10 @@ export class Scheduler {
         return
       }
       const def = this.d.agents.get(agent.id) ?? agent
-      this.setState(rt, def, def.data.paused ? 'paused' : this.now() < rt.errorUntil ? 'error' : 'idle')
+      if (def.data.paused) this.setState(rt, def, 'paused')
+      else if (this.now() < rt.errorUntil) this.setState(rt, def, 'error')
+      else if (rt.waitUntil && rt.waitUntil > this.now()) this.setState(rt, def, 'waiting-provider', rt.waitNote)
+      else this.setState(rt, def, 'idle')
     }
   }
 
@@ -482,7 +528,7 @@ export class Scheduler {
                 maxTokens: o.maxTokens,
                 temperature: o.temperature,
                 signal: request.signal,
-                meta: { job: j.id, role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined }
+                meta: { job: j.id, role: j.role, task: j.task, book: j.book ?? undefined, agent: agent.id, unit: j.unit ?? undefined, ...(o.forbid?.length ? { forbid: o.forbid } : {}) }
               },
               rj.held
             )) {
@@ -572,6 +618,14 @@ export class Scheduler {
         await jobs.requeue(j.id)
         logAll(`### Result\nStopped (${rj.reason ?? 'stop'}), job goes back to the queue. ${numbers()}\n`)
         emit({ type: 'job.done', jobId: j.id, agent: agent.id, ok: false, error: `stopped (${rj.reason ?? 'stop'})` })
+      } else if (err instanceof ServerDownError) {
+        // a server the job needs is not running: not the job's fault. It waits a little and goes on without an attempt counted.
+        await jobs.requeue(j.id, { not_before: new Date(this.now() + 30_000).toISOString() })
+        logAll(`### Result\nWaiting: ${err.message}. Job goes back to the queue for 30 seconds, no attempt counted.\n`)
+        rt.waitUntil = this.now() + 30_000
+        rt.waitNote = err.message.slice(0, 120)
+        this.setState(rt, agent, 'waiting-provider', rt.waitNote, j)
+        emit({ type: 'job.done', jobId: j.id, agent: agent.id, ok: false, error: err.message })
       } else if (err instanceof BudgetError) {
         await jobs.requeue(j.id, { not_before: new Date(this.now() + 15_000).toISOString() })
         logAll(`### Result\nBlocked by the budget: ${err.message}. Job goes back to the queue.\n`)

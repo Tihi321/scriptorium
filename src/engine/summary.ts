@@ -127,6 +127,7 @@ export function agentSummary(def: AgentDef, sched: Scheduler, router: ModelRoute
     model: def.data.model,
     resolvedModel: resolved,
     pin: def.data.pin,
+    pinExclusive: def.data.pin_exclusive,
     paused: def.data.paused,
     state: def.data.paused && info.state === 'idle' ? 'paused' : info.state,
     task: info.task,

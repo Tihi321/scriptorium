@@ -102,6 +102,8 @@ export interface AgentSummary {
   resolvedModel: string | null
   /** The book the agent is assigned to (`pin` in its file): it only takes that book's jobs. Null when it takes any job. */
   pin: string | null
+  /** Only the agents assigned to the book exclusively take its jobs (`pin_exclusive`). */
+  pinExclusive: boolean
   paused: boolean
   state: AgentState
   /** What it is doing now, when it has a job. */
@@ -360,7 +362,7 @@ export type Command =
   | { type: 'resume'; agent: string }
   | { type: 'stop'; agent: string }
   /** Assigns an agent to one book in progress (`pin` in its file), or frees it with `book: null`. A writer also becomes the book's writer. */
-  | { type: 'assignBook'; agent: string; book: string | null }
+  | { type: 'assignBook'; agent: string; book: string | null; exclusive?: boolean }
   | { type: 'pauseAll' }
   | { type: 'resumeAll' }
   | { type: 'stopNow' }

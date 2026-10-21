@@ -218,7 +218,7 @@ describe('a chapter already at the cap before the refresh', () => {
     await fb.syncSources('b', late)
     await fb.markMerged('b', [old.file], 0)
     await fb.markMerged('b', late.map((n) => n.file), 3) // merged in round 3; the chapter on disk is round 2
-    const deps = { books, factbase: fb, research: { store }, memory: { available: () => false, getIndex: () => undefined as never }, log: () => undefined, contextTokens: () => undefined }
+    const deps = { books, factbase: fb, research: { store }, memory: { ready: () => false, getIndex: () => undefined as never }, log: () => undefined, contextTokens: () => undefined }
     const ctx = await nonfictionContext(deps, 'b', 1, { budgetTokens: 20000, chapters: 'others', role: 'writer' })
     const sourcesPart = ctx.text.slice(ctx.text.indexOf('Numbered sources you may cite'))
     for (let i = 0; i < 8; i++) expect(sourcesPart, `late source ${i}`).toContain(`https://example.test/late-${i}`)
