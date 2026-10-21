@@ -60,6 +60,10 @@ export interface BookState {
   /** Chapter number -> fixes already applied (`len` = length rewrite, `chk` = continuity fix). */
   fixes: Map<number, string[]>
   totalWords: number
+  /** book.md `target_words`: the length the book is meant to have. The length gates use it next to the format's range. */
+  targetWords?: number
+  /** Chapter number -> words, for the length gate of a long book (which chapters are far from their share of the target). */
+  chapterWords?: Map<number, number>
   /** book.md `length_gate`: null until the gate has run. */
   lengthGate: { status: string; words?: number } | null
   /** `${role}:${round}` -> review. For long books this is only set once every act has been reviewed. */
@@ -242,17 +246,33 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 /** Rewrite rounds a book may have: the format's (or quality's) `max_rounds`, plus one for every time `reopen_book` gave a rejected book another round. */
 export const maxRoundsOf = (s: Pick<BookState, 'format' | 'quality'> & { extraRounds?: number }) => (s.format.max_rounds ?? s.quality.max_rounds) + (s.extraRounds ?? 0)
 
-function lengthNote(words: number, min: number, max: number, total: number): string {
-  const per = Math.max(1, Math.round(clamp(words < min ? min * 1.1 : max * 0.9, min, max) / total))
+/** A short book is outside its length when the draft is this far (as a share) from its target words, or outside the format's range by 15%. */
+export const TARGET_BAND = 0.2
+/** A long book's gate: over the format's ceiling, or this far over / under the target, as a share. */
+export const LONG_OVER = 1.15
+export const LONG_UNDER = 0.85
+/** A chapter of a long book is rewritten by the gate when it is over / under its share of the target by this much. */
+export const CHAPTER_OVER = 1.1
+export const CHAPTER_UNDER = 0.9
+
+/**
+ * The note of a length rewrite. With the book's target the chapter is told its share of it (clamped so that every chapter at that length
+ * stays inside the format's range); without one, the old rule: the middle of the range's near edge.
+ */
+function lengthNote(words: number, min: number, max: number, total: number, target?: number): string {
+  const per = target
+    ? Math.max(1, clamp(Math.round(target / total), Math.ceil(min / total), Math.max(Math.ceil(min / total), Math.floor(max / total))))
+    : Math.max(1, Math.round(clamp(words < min ? min * 1.1 : max * 0.9, min, max) / total))
+  const low = target ? words < target : words < min
   return (
-    `The whole draft is ${words} words, but the format wants ${min} to ${max} words. Rewrite this chapter to about ${per} words. ` +
-    (words < min
+    `The whole draft is ${words} words, but the format wants ${min} to ${max} words${target ? ` and this book should have about ${target}` : ''}. Rewrite this chapter to about ${per} words. ` +
+    (low
       ? 'It is too short: develop the scenes, add concrete detail, repetition and sensory description, without changing the story.'
       : 'It is too long: tighten it and cut repetition, without changing the story.')
   )
 }
 
-function lengthJobs(s: BookState, total: number, note: string, only?: number[]): PlanJob[] {
+function lengthJobs(s: BookState, total: number, note: string | ((n: number) => string), only?: number[]): PlanJob[] {
   const list = only ?? [...Array(total).keys()].map((i) => i + 1)
   return list.map((n, i) => ({
     id: `${s.slug}--rewrite--ch${pad2(n)}--len`,
@@ -264,7 +284,7 @@ function lengthJobs(s: BookState, total: number, note: string, only?: number[]):
     depends_on: i > 0 ? [`${s.slug}--rewrite--ch${pad2(list[i - 1]!)}--len`] : [],
     agent_hint: s.writerAgent,
     requested_by: 'editors',
-    body: note
+    body: typeof note === 'string' ? note : note(n)
   }))
 }
 
@@ -339,17 +359,52 @@ export function advance(s: BookState): Plan {
     const [min, max] = s.format.words
     const gate = s.lengthGate
     if (!gate) {
-      const out = s.totalWords < min * 0.85 || s.totalWords > max * 1.15
+      // outside the format's range (by 15%), or far from the length the book was meant to have (by 20% of its target)
+      const out = s.totalWords < min * 0.85 || s.totalWords > max * 1.15 || (!!s.targetWords && (s.totalWords < s.targetWords * (1 - TARGET_BAND) || s.totalWords > s.targetWords * (1 + TARGET_BAND)))
       if (!out) return { patch: { length_gate: { status: 'ok', words: s.totalWords } }, jobs: [] }
       return {
         patch: { stage: 'length-fix', length_gate: { status: 'rewriting', words: s.totalWords, min, max } },
-        jobs: lengthJobs(s, total, lengthNote(s.totalWords, min, max, total))
+        jobs: lengthJobs(s, total, lengthNote(s.totalWords, min, max, total, s.targetWords))
       }
     }
     if (gate.status === 'rewriting') {
       const todo = [...Array(total).keys()].map((i) => i + 1).filter((n) => !(s.fixes.get(n) ?? []).includes('len'))
       if (todo.length === 0) return { patch: { stage: 'drafting', length_gate: { status: 'done', words_before: gate.words, words: s.totalWords } }, jobs: [] }
-      return { patch: {}, jobs: lengthJobs(s, total, lengthNote(gate.words!, min, max, total), todo) }
+      return { patch: {}, jobs: lengthJobs(s, total, lengthNote(gate.words!, min, max, total, s.targetWords), todo) }
+    }
+  }
+
+  // length gate (long books, once, after drafting and before the reviews): a book over the format's ceiling or far from its target is
+  // brought back by rewriting only the chapters far from their share of the target. Settled chapters keep their summaries (the cuts change no event).
+  if (s.format.long && r === 0 && s.chapterWords && !['reviewing', 'rewriting', 'publishing'].includes(s.stage)) {
+    const [min, max] = s.format.words
+    const share = Math.round((s.targetWords ?? (min + max) / 2) / total)
+    const off = (n: number) => {
+      const w = s.chapterWords!.get(n) ?? 0
+      return w > share * CHAPTER_OVER || w < share * CHAPTER_UNDER
+    }
+    const every = [...Array(total).keys()].map((i) => i + 1)
+    const gate = s.lengthGate
+    const note = (words: number) => (n: number) => {
+      const w = s.chapterWords!.get(n) ?? 0
+      return (
+        `The whole book is ${words} words, but ${s.targetWords ? `it should have about ${s.targetWords} words` : 'it is outside its length'} (the format allows ${min} to ${max}). Rewrite this chapter to about ${share} words. ` +
+        (w > share
+          ? 'It is too long: tighten it and cut repetition and description, without changing the events, names or facts.'
+          : 'It is too short: develop the scenes, add concrete detail and sensory description, without changing the events, names or facts.')
+      )
+    }
+    if (!gate) {
+      const t = s.targetWords
+      const out = s.totalWords > max || s.totalWords < min || (!!t && (s.totalWords > t * LONG_OVER || s.totalWords < t * LONG_UNDER))
+      const todo = every.filter(off)
+      if (!out || todo.length === 0) return { patch: { length_gate: { status: 'ok', words: s.totalWords } }, jobs: [] }
+      return { patch: { stage: 'length-fix', length_gate: { status: 'rewriting', words: s.totalWords, min, max } }, jobs: lengthJobs(s, total, note(s.totalWords), todo) }
+    }
+    if (gate.status === 'rewriting') {
+      const todo = every.filter((n) => off(n) && !(s.fixes.get(n) ?? []).includes('len'))
+      if (todo.length === 0) return { patch: { stage: 'drafting', length_gate: { status: 'done', words_before: gate.words, words: s.totalWords } }, jobs: [] }
+      return { patch: {}, jobs: lengthJobs(s, total, note(gate.words ?? s.totalWords), todo) }
     }
   }
 

@@ -31,5 +31,6 @@ Rules:
 - Use a line with only --- between scenes if you need a scene break. Start the next scene with SCENE:.
 - Write only the script. Do not write a title, chapter heading, notes or a summary, and no markdown other than the lines above.
 - Keep names, places and facts the same as in the earlier text.
+- In every SCENE: line name the place exactly as one of the places of the story bible (see "Places" in the bible). A new place is allowed only when the story moves somewhere the bible does not have: then name it plainly, and the engine adds it to the bible.
 
 If you are not sure of a real-world fact and the research notes above do not give it, write your best line anyway and put [RESEARCH: a short, specific question] right after it, then keep writing. Do this at most three times, only for real-world facts, never for things you invent in the story.

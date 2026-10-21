@@ -187,6 +187,7 @@ Scriptorium can turn a published prose book into a visual novel script (the scri
 - The writer gets the full text of the source chapters of the chapter it writes (cut from the middle when it would not fit the model's window), and writes it as script scenes: the events, order, names and places stay, inner monologue and long description go.
 - With choices, the source's ending stays as one canon path through the map (`prompts/_choices.md`, section `adapt`); the other paths branch off it.
 - The humanizer runs on the script like on any visual novel. The book card and the whiteboard show "Adapted from <title>".
+- `SCENE:` places use the bible's names: the writer is given the bible's places, a place written differently is renamed to the bible's name after the answer, and a new place is added to the bible's `## Places` (with the first narration line of its scene), so every scene maps to a place at import.
 
 ## In Scriptorium
 

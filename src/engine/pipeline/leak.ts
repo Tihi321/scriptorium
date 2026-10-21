@@ -27,20 +27,21 @@ function sentencesOf(text: string): string[] {
 }
 
 /**
- * The lines of a prompt template that the engine fixed (no `{{variable}}` in them), and the first two instruction paragraphs of every
- * section it appended, as normalised sentences. At most 80, without duplicates.
+ * The lines of a prompt template that the engine fixed (no `{{variable}}` in them), and the instruction paragraphs of every section it
+ * appended (at most four each), as normalised sentences. At most 80, without duplicates.
  */
 export function instructionLines(templateBody: string, appended: string[] = []): string[] {
   const rendered = templateBody.replace(/\{\{\s*[\w.-]+\s*\}\}/g, '\u0000')
   const lines = [...sentencesOf(rendered)]
   for (const section of appended) {
-    // the first two paragraphs that hold an instruction (a paragraph of only variables, like {{ways_in}}, is not one)
+    // the paragraphs that hold an instruction, at most four (a paragraph of only variables, like {{ways_in}}, is not one). The caller cuts a
+    // section that holds the story's own text (a brief, a series) down to its heading and instruction first.
     let taken = 0
     for (const paragraph of section.replace(/\r\n/g, '\n').trim().split(/\n{2,}/)) {
       const found = sentencesOf(paragraph)
       if (found.length === 0) continue
       lines.push(...found)
-      if (++taken >= 2) break
+      if (++taken >= 4) break
     }
   }
   return [...new Set(lines)].slice(0, MAX_LINES)

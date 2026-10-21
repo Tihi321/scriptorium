@@ -167,6 +167,10 @@ export interface BookSummary {
   /** The reader's pages in reading order (cover, title page, chapters ...); its `index.html` is the contents. */
   readerPages: { file: string; title: string }[]
   publishedAt: string | null
+  /** The length gate (`length_gate` in book.md): the draft was far from the format's range or the target and chapters were rewritten to fit. Missing or null: it did not run (yet). */
+  lengthGate?: { status: string; words?: number; min?: number; max?: number; wordsBefore?: number } | null
+  /** The book was published over the format's ceiling (`length_over` in book.md). */
+  lengthOver?: boolean
 }
 
 export interface TopicSummary {

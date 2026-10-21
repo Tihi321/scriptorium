@@ -14,7 +14,7 @@ Format guidance:
 
 {{research}}
 
-The editors' notes on the whole book (take what applies to this chapter and ignore what doesn't). The fact-checker's flagged claims for this chapter come first. Fix each flagged claim by giving it the number of a source from the list whose note really says it, or by correcting it so that it agrees with the notes, or by removing it or softening it into a general statement. Do not add any new claim that has no source number, and do not change the rest of the chapter more than the other notes ask:
+The editors' notes that concern this chapter. The fact-checker's flagged claims for this chapter come first. Fix each flagged claim by giving it the number of a source from the list whose note really says it, or by correcting it so that it agrees with the notes, or by removing it or softening it into a general statement. Do not add any new claim that has no source number, and do not change the rest of the chapter more than the other notes ask:
 {{notes}}
 
 The current text of chapter {{chapter_n}}, "{{chapter_title}}":

@@ -13,12 +13,12 @@ Format guidance:
 Story bible:
 {{bible}}
 
-The editors' notes on the whole book (take what applies to this chapter and ignore what doesn't):
+The editors' notes that concern this chapter:
 {{notes}}
 
 {{research}}
 
-The other chapters:
+The chapters before and after this one in full, the others as summaries:
 {{other_chapters}}
 
 The current text of chapter {{chapter_n}}, "{{chapter_title}}":

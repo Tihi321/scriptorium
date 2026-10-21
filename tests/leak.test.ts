@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { findLeaks, instructionLines, stripTrailingLeak } from '../src/engine/pipeline/leak'
 import { parseMd } from '../src/shared/md'
-import { seedDir } from './helpers'
+import { makeEnv, seedDir, waitFor } from './helpers'
 
 const template = async (rel: string) => parseMd(await readFile(path.join(seedDir, 'prompts', ...rel.split('/')), 'utf8')).body
 const rewriteSection = async () => {
@@ -53,5 +53,28 @@ describe('findLeaks and stripTrailingLeak', () => {
     expect(stripTrailingLeak(`${CHAPTER}\n${sentence}\nEnd.`, lines)).toEqual({ text: CHAPTER, cut: true })
     const middle = `${CHAPTER}\n${sentence}\nThe stairs creak again, louder this time, and Mara turns toward the door.`
     expect(stripTrailingLeak(middle, lines)).toBeNull()
+  })
+})
+
+describe('the client queue refuses a leaky answer (through the scheduler)', () => {
+  let env: Awaited<ReturnType<typeof makeEnv>> | undefined
+  afterEach(async () => {
+    await env?.cleanup()
+    env = undefined
+  })
+
+  it('a chat with forbid lines makes a task that refuses an answer repeating them, then takes the clean one', async () => {
+    env = await makeEnv({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    const e = env
+    const forbid = ['write only the script, with no title, heading or notes.']
+    e.engine.scheduler.register('t', async (ctx) => ({ result: (await ctx.chat({ messages: [{ role: 'user', content: 'Write the chapter.' }], forbid })).text }))
+    await e.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const task = await waitFor(() => e.engine.clientQueue.lease({ role: 'writer' }), 8000, 'the client task')
+    const refused = e.engine.clientQueue.submit(task.id, 'The fox slept.\n\nWrite only the script, with no title, heading or notes.') as { accepted: false; problems: string[] }
+    expect(refused.accepted).toBe(false)
+    expect(refused.problems[0]).toContain("the answer repeats the task's instructions")
+    expect(e.engine.clientQueue.counts()).toEqual({ waiting: 0, leased: 1 })
+    expect(e.engine.clientQueue.submit(task.id, 'The fox slept.')).toEqual({ accepted: true })
+    await waitFor(async () => (await readdir(path.join(e.dir, 'jobs', 'done'))).includes('b1--t--u1--r0.md'), 8000, 'the job to finish')
   })
 })

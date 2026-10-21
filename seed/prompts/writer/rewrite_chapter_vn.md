@@ -13,12 +13,12 @@ Format guidance:
 Story bible:
 {{bible}}
 
-The editors' notes on the whole book (take what applies to this chapter and ignore what doesn't):
+The editors' notes that concern this chapter:
 {{notes}}
 
 {{research}}
 
-The other chapters:
+The chapters before and after this one in full, the others as summaries:
 {{other_chapters}}
 
 The current text of chapter {{chapter_n}}, "{{chapter_title}}":
@@ -27,3 +27,5 @@ The current text of chapter {{chapter_n}}, "{{chapter_title}}":
 Write the improved chapter. Fix what the notes point out, keep what already works, and keep the story, names and facts consistent with the other chapters.
 
 Keep it a visual novel script, one element per line: SCENE: place and time; short narration lines for what the reader sees; ON SCREEN: who is shown and how they look; NAME (expression): spoken line. Speaker names in capitals, the same every time. Write only the script, with no title, heading or notes.
+
+In every SCENE: line name the place exactly as one of the places of the story bible (see "Places" in the bible). A new place is allowed only when the story moves somewhere the bible does not have: then name it plainly, and the engine adds it to the bible.

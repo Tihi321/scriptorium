@@ -344,7 +344,7 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
   const prose = (n: number) => Array.from({ length: n }, (_, i) => ['The', 'little', 'fox', 'yawned', 'and', 'curled', 'up', 'in', 'the', 'warm', 'hay.'][i % 11]).join(' ')
   const wantWords = (req: { messages: { role: string; content: string }[] }, fallback: number) => {
     const t = lastUser(req)
-    const m = /Rewrite this chapter to about (\d+) words/.exec(t) ?? /Expand this chapter to about (\d+) words/.exec(t) ?? /chapter should be about (\d+) words/.exec(t) ?? /Keep the chapter at about (\d+) words/.exec(t)
+    const m = /Rewrite this chapter to about (\d+) words/.exec(t) ?? /Expand this chapter to about (\d+) words/.exec(t) ?? /chapter should be about (\d+) words/.exec(t) ?? /Keep the chapter at about (\d+) words/.exec(t) ?? /Cut it to about (\d+) words/.exec(t)
     return m ? Number(m[1]) : fallback
   }
   mock.on({ task: 'generate_ideas' }, (req) => {
@@ -388,8 +388,8 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
   const cite = o.citations ? ' The facts above come from the notes [1].' : ''
   mock.on({ task: 'draft_chapter' }, (req) => {
     bump('draft_chapter')
-    // the expand retry is a second request in the same job: its last message asks for the full length
-    const expand = /Expand this chapter to about/.test(lastUser(req))
+    // the expand and tighten retries are a second request in the same job: their last message asks for the full length
+    const expand = /Expand this chapter to about|Cut it to about/.test(lastUser(req))
     const n = Number(/Now write chapter (\d+):/.exec(req.messages[1]?.content ?? '')?.[1] ?? 0)
     const words = o.shortDrafts ? 60 : Math.round(wantWords(req, 100) * (expand ? 1 : (o.draftRatio ?? 1)))
     const marks = expand ? '' : (o.markers?.[n] ?? []).map((q) => ` [RESEARCH: ${q}]`).join('')

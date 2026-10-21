@@ -356,6 +356,8 @@ export class Pipeline {
       chapters,
       fixes: new Map(chapterFiles.map((c) => [c.n, c.fixes])),
       totalWords: chapterFiles.reduce((n, c) => n + c.words, 0),
+      targetWords: typeof d.target_words === 'number' ? d.target_words : undefined,
+      chapterWords: new Map(chapterFiles.map((c) => [c.n, c.words])),
       lengthGate: (d.length_gate as { status: string; words?: number } | undefined) ?? null,
       reviews,
       actReviewFiles,

@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto'
 
 export const SEED_HISTORY: Record<string, string[]> = {
-  "prompts/_choices.md": ['5ae7db97f21e1570', '77010e07d778bde9'],
+  "prompts/_choices.md": ['51ca9c46182d065e', '5ae7db97f21e1570', '77010e07d778bde9'],
   "prompts/_rules.md": ['91823dcc63208d30'],
   "prompts/architect/outline.md": ['8cd5287e94667030', 'b18d2610611331ec'],
   "prompts/architect/outline_article.md": ['eb5de5e691b05e8a'],
@@ -53,15 +53,15 @@ export const SEED_HISTORY: Record<string, string[]> = {
   "prompts/writer/draft_chapter.md": ['b71042510067e1d6'],
   "prompts/writer/draft_chapter_article.md": ['89e982ee3b4fbf66'],
   "prompts/writer/draft_chapter_nf.md": ['4efcbeaa0b3c1b9f', 'a5122c7f336af1a3'],
-  "prompts/writer/draft_chapter_vn.md": ['a0f50c77aa3094b1'],
+  "prompts/writer/draft_chapter_vn.md": ['8fb932dcc97aaa84', 'a0f50c77aa3094b1'],
   "prompts/writer/research_fix.md": ['3bbcf6d22c0df20f'],
   "prompts/writer/research_prep.md": ['db0f2cfcee795c54'],
   "prompts/writer/research_prep_article.md": ['124527831d0c2602', 'ef8fe77ce25fdca6'],
   "prompts/writer/research_prep_nf.md": ['d94b74687ec85285'],
-  "prompts/writer/rewrite_chapter.md": ['1689cc9e586d3430'],
+  "prompts/writer/rewrite_chapter.md": ['145414dcdca6e07e', '1689cc9e586d3430'],
   "prompts/writer/rewrite_chapter_article.md": ['d2f206a20a31b5dd'],
-  "prompts/writer/rewrite_chapter_nf.md": ['05a7f59c6000b7ec', '688dcf435e7fd562'],
-  "prompts/writer/rewrite_chapter_vn.md": ['e72499da78511c1e'],
+  "prompts/writer/rewrite_chapter_nf.md": ['05a7f59c6000b7ec', '0c334afa0e396670', '688dcf435e7fd562'],
+  "prompts/writer/rewrite_chapter_vn.md": ['298e9120551c9952', 'e72499da78511c1e'],
   "templates/cover.html": ['55b8b0916adda292', 'dac08f12e88f73a2', 'f4c0720a46349fa9']
 }
 
