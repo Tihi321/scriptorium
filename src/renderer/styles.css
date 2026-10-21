@@ -889,8 +889,24 @@ button.small {
 }
 .newspaper .library-side {
   background: #2a2119;
+  color: var(--text);
   padding: 8px;
   border-radius: 4px;
+}
+/* the side panel is dark: its controls use the app's light text, not the newspaper's ink */
+.newspaper .library-side input,
+.newspaper .library-side select,
+.newspaper .library-side textarea,
+.newspaper .library-side button {
+  color: var(--text);
+}
+.newspaper .library-side option {
+  background: var(--panel);
+  color: var(--text);
+}
+.newspaper .library-side input::placeholder,
+.newspaper .library-side textarea::placeholder {
+  color: var(--dim);
 }
 .newspaper .library-side .panel-title,
 .newspaper .library-side .dim {
