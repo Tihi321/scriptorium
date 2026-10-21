@@ -32,7 +32,35 @@ export interface Claim {
 }
 
 /** At most this many key facts a chapter keeps when a refresh adds late research to it. */
-export const MAX_KEY_FACTS_AFTER_REFRESH = MAX_KEY_FACTS + 6
+export const MAX_KEY_FACTS_AFTER_REFRESH = MAX_KEY_FACTS + 16
+
+/** At most this many new facts a refresh adds to one chapter (the rest of the cap keeps the newest old facts). */
+export const MAX_NEW_FACTS_PER_REFRESH = 20
+
+/** A note line that only says the pages had nothing: not a key fact. */
+const NOT_A_FACT = /^(?:the |these |those )?(?:pages?|sources?|notes?|results?)\b[^.]{0,40}\b(?:do(?:es)? not|did not|don't|doesn't|no )\b/i
+
+/**
+ * The key facts of a chapter after a refresh. `lists` are the usable facts of each late note. New facts win the cap: notes with a source the
+ * chapter has not cited yet go first, then one fact per note in turn (so every note is heard before the new-fact limit), at most
+ * MAX_NEW_FACTS_PER_REFRESH; the oldest old facts are the ones dropped from MAX_KEY_FACTS_AFTER_REFRESH.
+ */
+export function mergeRefreshFacts(old: KeyFact[], lists: KeyFact[][]): { kept: KeyFact[]; added: number } {
+  const oldSources = new Set(old.flatMap((f) => f.sources))
+  const isNew = (l: KeyFact[]) => Number(l.some((f) => f.sources.some((x) => !oldSources.has(x))))
+  const order = [...lists].sort((a, b) => isNew(b) - isNew(a))
+  const fresh: KeyFact[] = []
+  const seen = new Set<string>()
+  for (let i = 0; fresh.length < MAX_NEW_FACTS_PER_REFRESH && order.some((l) => i < l.length); i++) {
+    for (const l of order) {
+      const f = l[i]
+      if (!f || fresh.length >= MAX_NEW_FACTS_PER_REFRESH || seen.has(f.fact.toLowerCase())) continue
+      seen.add(f.fact.toLowerCase())
+      fresh.push(f)
+    }
+  }
+  return { kept: [...fresh, ...old].slice(0, MAX_KEY_FACTS_AFTER_REFRESH), added: fresh.length }
+}
 
 const words = (t: string) => new Set((t.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []))
 
@@ -103,28 +131,33 @@ export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): v
   })
 
   // ---- late research: the book's new notes get source numbers and their facts join the chapters' key facts ----
-  async function refreshFactBase(ctx: { log(m: string): void }, slug: string): Promise<{ result: string; resultPath: string }> {
+  async function refreshFactBase(ctx: { log(m: string): void; job: { round?: number } }, slug: string): Promise<{ result: string; resultPath: string }> {
     const resultPath = `books/${slug}/factbase/facts.md`
     const notes = await unmergedNotes(d, slug)
     if (notes.length === 0) return { result: 'refresh: no unmerged notes', resultPath }
     const sources = await d.factbase.syncSources(slug, notes)
     const chapters = (await d.books.outline(slug))?.chapters ?? []
     const facts = await d.factbase.facts(slug)
-    const added = new Map<number, KeyFact[]>()
+    // each note's usable facts, grouped by the chapter the note is most about (the only one, for an article)
+    const perChapter = new Map<number, KeyFact[][]>()
     for (const note of notes) {
-      // the fact goes to the chapter the note is most about (the only one, for an article)
       const noteWords = words(`${note.question} ${note.body}`)
       const score = (c: { title: string; summary: string }) => [...words(`${c.title} ${c.summary}`)].filter((w) => noteWords.has(w)).length
       const best = chapters.length ? chapters.reduce((a, c) => (score(c) > score(a) ? c : a)) : null
       if (!best) continue
       const key = (f: KeyFact) => `${f.fact.toLowerCase()}|${f.sources.join(',')}`
-      const have = new Set([...(facts.get(best.n) ?? []), ...(added.get(best.n) ?? [])].map(key))
-      const fresh = candidateFacts([note], sources).filter((f) => !have.has(key(f)))
-      if (fresh.length) added.set(best.n, [...(added.get(best.n) ?? []), ...fresh])
+      const have = new Set((facts.get(best.n) ?? []).map(key))
+      const mine = candidateFacts([note], sources).filter((f) => !have.has(key(f)) && !NOT_A_FACT.test(f.fact))
+      if (mine.length) perChapter.set(best.n, [...(perChapter.get(best.n) ?? []), mine])
     }
-    for (const [n, more] of added) await d.factbase.setChapterFacts(slug, n, [...more, ...(facts.get(n) ?? [])].slice(0, MAX_KEY_FACTS_AFTER_REFRESH))
-    await d.factbase.markMerged(slug, notes.map((x) => x.file))
-    const count = [...added.values()].reduce((s, l) => s + l.length, 0)
+    let count = 0
+    for (const [n, lists] of perChapter) {
+      const old = facts.get(n) ?? []
+      const { kept, added } = mergeRefreshFacts(old, lists)
+      await d.factbase.setChapterFacts(slug, n, kept)
+      count += added
+    }
+    await d.factbase.markMerged(slug, notes.map((x) => x.file), ctx.job.round ?? 0)
     ctx.log(`fact base refreshed from ${notes.length} late note(s): ${count} new key fact(s), ${sources.length} source(s) in all`)
     return { result: `refresh: ${count} new key fact(s) from ${notes.length} note(s)`, resultPath }
   }

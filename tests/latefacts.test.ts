@@ -176,3 +176,56 @@ describe('an article that gets research after it was rejected', () => {
     expect(await readFile(dirOf('out', 'article.md'), 'utf8')).toContain(`[${late.n}] Late statement. ${LATE.url}`)
   }, 240000)
 })
+
+describe('a chapter already at the cap before the refresh', () => {
+  it('keeps the new facts of every late note and drops the oldest old ones', async () => {
+    const { mergeRefreshFacts, MAX_KEY_FACTS_AFTER_REFRESH, MAX_NEW_FACTS_PER_REFRESH } = await import('../src/engine/pipeline/nonfiction')
+    const old = Array.from({ length: MAX_KEY_FACTS_AFTER_REFRESH }, (_, i) => ({ fact: `Old fact number ${i}`, sources: [1 + (i % 2)] }))
+    // 13 late notes: the first two (alphabetical, like the real run) cite the old sources and have many facts, the rest cite sources 7 to 17
+    const lists = Array.from({ length: 13 }, (_, k) => Array.from({ length: k < 2 ? 12 : 4 }, (_, i) => ({ fact: `Note ${k} fact ${i}`, sources: [k < 2 ? 1 : k + 5] })))
+    const { kept, added } = mergeRefreshFacts(old, lists)
+    expect(kept).toHaveLength(MAX_KEY_FACTS_AFTER_REFRESH)
+    expect(added).toBe(MAX_NEW_FACTS_PER_REFRESH)
+    // new facts first, and the new sources (7 to 17) all reach the chapter
+    expect(kept.slice(0, added).every((f) => f.fact.startsWith('Note'))).toBe(true)
+    const cited = new Set(kept.flatMap((f) => f.sources))
+    for (let n = 7; n <= 17; n++) expect(cited.has(n), `source ${n}`).toBe(true)
+    // the oldest old facts are the ones dropped
+    expect(kept.some((f) => f.fact === 'Old fact number 0')).toBe(true)
+    expect(kept.some((f) => f.fact === `Old fact number ${MAX_KEY_FACTS_AFTER_REFRESH - 1}`)).toBe(false)
+    // nothing new: the chapter is unchanged
+    expect(mergeRefreshFacts(old, []).kept).toEqual(old)
+  })
+
+  it('the writer of a chapter written before a refresh is given every source of the notes merged since, even when no fact of one was kept', async () => {
+    const dir = path.join(process.cwd(), '.claude', 'temp', 'late-ctx')
+    const { rm, mkdir, writeFile } = await import('node:fs/promises')
+    const { ResearchStore } = await import('../src/engine/research/notes')
+    const { nonfictionContext } = await import('../src/engine/pipeline/nfcontext')
+    await rm(dir, { recursive: true, force: true })
+    await mkdir(dir, { recursive: true })
+    const books = new BookStore(dir)
+    await books.create('b', { title: 'B', format: 'nf', target_words: 900, nonfiction: true })
+    await writeFile(path.join(dir, 'books', 'b', 'outline.md'), ['---', 'kind: outline', 'chapters:', '  - n: 1', '    title: The signal', '    summary: The longwave time signal.', '---', ''].join(String.fromCharCode(10)))
+    await books.writeChapter('b', { n: 1, title: 'The signal', round: 2, body: 'The signal runs on longwave [1].' })
+    const store = new ResearchStore(dir)
+    const mk = (q: string, url: string) => store.write({ question: q, book: 'b', facts: [{ fact: `${q} is answered here in detail.`, source: { url, title: q } }], unverified: false, askedBy: 'test' })
+    const old = await mk('Old longwave question', 'https://example.test/old')
+    const late = await Promise.all(Array.from({ length: 8 }, (_, i) => mk(`Late question ${i}`, `https://example.test/late-${i}`)))
+    const fb = new FactBase(books)
+    await fb.syncSources('b', [old])
+    await fb.setChapterFacts('b', 1, [{ fact: 'The signal runs on longwave.', sources: [1] }]) // the late notes' facts were capped away
+    await fb.syncSources('b', late)
+    await fb.markMerged('b', [old.file], 0)
+    await fb.markMerged('b', late.map((n) => n.file), 3) // merged in round 3; the chapter on disk is round 2
+    const deps = { books, factbase: fb, research: { store }, memory: { available: () => false, getIndex: () => undefined as never }, log: () => undefined, contextTokens: () => undefined }
+    const ctx = await nonfictionContext(deps, 'b', 1, { budgetTokens: 20000, chapters: 'others', role: 'writer' })
+    const sourcesPart = ctx.text.slice(ctx.text.indexOf('Numbered sources you may cite'))
+    for (let i = 0; i < 8; i++) expect(sourcesPart, `late source ${i}`).toContain(`https://example.test/late-${i}`)
+    // once the chapter is written again in round 3 the notes are no longer new to it
+    await books.writeChapter('b', { n: 1, title: 'The signal', round: 3, body: 'The signal runs on longwave [1].' })
+    const after = await nonfictionContext(deps, 'b', 1, { budgetTokens: 20000, chapters: 'others', role: 'writer' })
+    expect(after.text.slice(after.text.indexOf('Numbered sources you may cite'))).not.toContain('late-7')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
