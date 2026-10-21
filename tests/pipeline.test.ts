@@ -805,7 +805,8 @@ b-one | Beta | nonfiction | yes |  |  |
     expect(rows.every((r) => !r.active)).toBe(true)
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length)
     expect(new Set(rows.map((r) => r.topic.toLowerCase())).size).toBe(rows.length) // names are unique too, they show in the UI
-    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(['fiction', 'juvenile-fiction', 'juvenile-nonfiction', 'nonfiction', 'visual-novel', 'juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction']))
+    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(['fiction', 'juvenile-fiction', 'juvenile-nonfiction', 'nonfiction', 'visual-novel', 'juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction', 'article']))
+    expect(rows.filter((r) => r.kind === 'article').length).toBe(8)
     for (const id of ['jfic-bedtime-and-dreams', 'jfic-chapter-books-everyday-adventures', 'jfic-bedtime-moon-and-stars']) expect(rows.some((r) => r.id === id), id).toBe(true)
   })
 })

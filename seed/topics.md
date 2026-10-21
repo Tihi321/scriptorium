@@ -637,7 +637,7 @@ The sections of the newspaper. A topic of kind `article` is written as a researc
 | id                | topic                | kind    | active | target | done | in progress |
 | ----------------- | -------------------- | ------- | ------ | ------ | ---- | ----------- |
 | news-world        | World                | article | no     |        |      |             |
-| news-europe       | Europe               | article | no     |        |      |             |
+| news-europe       | European news        | article | no     |        |      |             |
 | news-science      | Science              | article | no     |        |      |             |
 | news-technology   | Technology           | article | no     |        |      |             |
 | news-culture      | Culture              | article | no     |        |      |             |
