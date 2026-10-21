@@ -33,6 +33,8 @@ import { chatJson, cleanProse } from './llm'
 import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
 import { earlierSeriesBooks, seriesSection, withSeriesBible } from './series'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
+import { calendarFor } from './calendar'
+import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
 import { ARTICLE_IDEAS_RULE, newsHeadlines } from './newspaper'
 import { ancestors, chapterPlace, checkBranches, endLine } from './branches'
 import type { BranchChapter } from './branches'
@@ -486,6 +488,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       threads: z.array(z.string()).default([]),
       setting: z.string().default(''),
       style: z.string().default(''),
+      // the year the story is set in (a number), or null for no fixed year: the reviewers get the calendar of that year
+      story_year: z.union([z.number(), z.string(), z.null()]).default(null),
       // non-fiction: the argument, the audience and the terms of the fact base
       thesis: z.string().default(''),
       audience: z.string().default(''),
@@ -569,6 +573,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
+    const year = Math.round(Number(r.value.story_year))
+    if (Number.isInteger(year) && year >= 1000 && year <= 2999 && book.story_year === undefined) await d.books.update(slug, () => ({ story_year: year }))
     if (fmt.article) {
       // the headline and the standfirst of the article, kept in book.md (the publisher makes them final)
       const headline = r.value.headline.replace(/^["'“”]+|["'“”]+$/g, '').replace(/\s+/g, ' ').trim()
@@ -734,6 +740,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       appendToPrompt(messages, await seriesSection(d, slug))
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
+      await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
+      appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
       // the schema names this reviewer's dimensions, so structured output and the repair retry both insist on them
       const schema = z.object({
@@ -741,16 +749,28 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         scores: z.object(Object.fromEntries(dims.map((x) => [x, z.number()]))),
         notes: z.string(),
         chapters: z.array(z.number()).default([]),
+        // every finding as a line: where, what is wrong, what to change (kept in the review file, so the rewrite gets all of them)
+        problems: z.array(z.string()).default([]),
         research_questions: z.array(z.string()).default([])
       })
-      const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2 })
+      const q = d.getQuality()
+      // a revise that comes with only good scores (and from a reviewer that isn't a must-pass gate) is a pass
+      const verdictOf = (v: z.infer<typeof schema>): 'pass' | 'revise' =>
+        v.verdict === 'revise' && !q.must_pass.includes(role) && Math.min(...Object.values(v.scores).map((x) => clamp(Number(x), 1, 10))) >= q.revise_below ? 'pass' : v.verdict
+      const first = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+      // a revise that says nothing usable is asked again; a book never fails over it (the last attempt keeps what there is)
+      const r = await withUsableNotes(ctx, messages, schema, first, {
+        effective: verdictOf,
+        notes: (v) => v.notes,
+        problems: (v) => v.problems,
+        retryLeft: ctx.job.attempts + 1 < (ctx.job.max_attempts ?? d.getFactory().max_attempts),
+        maxTokens: 6000
+      })
       run.addJson(r.cost, r.chat.model)
       // a claim that looks wrong and may not be in the notes: the researcher checks (and looks in the notes first)
       const researchJobs = await askFromReview(d, ctx.agent.id, slug, `the ${role.replace(/-/g, ' ')} doubts a claim in ${actN ? `act ${actN}` : 'the book'}`, r.value.research_questions)
       const scores: Record<string, number> = {}
       for (const [k, v] of Object.entries(r.value.scores)) scores[k.trim().toLowerCase().replace(/[\s-]+/g, '_')] = clamp(Number(v), 1, 10)
-      // a revise that comes with only good scores (and from a reviewer that isn't a must-pass gate) is a pass
-      const q = d.getQuality()
       const lowest = Math.min(...Object.values(scores))
       const verdict: 'pass' | 'revise' = r.value.verdict === 'revise' && !q.must_pass.includes(role) && lowest >= q.revise_below ? 'pass' : r.value.verdict
       const missing = dims.filter((x) => !(x in scores))
@@ -771,7 +791,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           agent: ctx.agent.id,
           model: r.chat.model.ref
         },
-        '\n' + r.value.notes.trim() + '\n'
+        '\n' + reviewBody(r.value.notes, r.value.problems) + '\n'
       )
       await made(slug, run)
       return { result: `${verdict}${verdict !== r.value.verdict ? ' (was revise, scores all >= ' + q.revise_below + ')' : ''}: ${JSON.stringify(scores)}`, resultPath: `books/${slug}/reviews/${name}` }
@@ -812,6 +832,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const tensionNote = flat ? `- Raise tension: this chapter is part of a flat stretch in the tension report (the developmental editor scored it ${(await readTensionOf(d, slug, n)) ?? 'low'} out of 10). Raise the stakes: add a sharper problem, a ticking clock, a loss or a hard choice, and end the chapter on a turn.` : ''
     const claimNote = fmt.nonfiction && !isLength && !isCheck && !isNote ? await factClaimNote(d, slug, round - 1, n) : ''
     const allNotes = [claimNote, notes, tensionNote].filter(Boolean).join('\n')
+    // a note about a weekday, a date or an earlier book may be wrong: the writer checks it against the calendar and keeps correct text
+    const calendarNote = `Notes about weekdays, dates, counts of years, or facts from earlier books of the series are open to judgement: check them against the calendar below and the series section; if the text is right, keep it.\n\n${await calendarFor(d, slug, current.body)}`
     let bibleText: string
     let researchText: string
     if (fmt.nonfiction) {
@@ -852,6 +874,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     if (branches) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n)))
     appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await seriesSection(d, slug))
+    appendToPrompt(messages, calendarNote)
     appendToPrompt(messages, await sourceChaptersSection(d, slug, n, 'rewrite', fmt.name, ctx))
     if (!isNote) appendToPrompt(messages, await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6) })

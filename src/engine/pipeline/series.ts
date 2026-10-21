@@ -1,6 +1,6 @@
 import { briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
-import { entryKey } from '../memory/bible'
+import { entryKey, sameName } from '../memory/bible'
 import type { Bible, BibleEntry } from '../memory/bible'
 import { bookRefs } from '../store/series'
 import type { BookRef, SeriesFile, SeriesStore } from '../store/series'
@@ -25,16 +25,7 @@ export const headTail = (text: string, head: number, tail: number): string => {
   return t.length <= head + tail ? t : `${t.slice(0, head).trimEnd()} [...] ${t.slice(-tail).trimStart()}`
 }
 
-const words = (name: string) => new Set(entryKey(name).split('-').filter(Boolean))
-
-/** Two names are the same person or place when one has all the words of the other ("Dec Hartley", "Declan 'Dec' Hartley"). */
-export function sameName(a: string, b: string): boolean {
-  const x = words(a)
-  const y = words(b)
-  if (!x.size || !y.size) return false
-  const [small, big] = x.size <= y.size ? [x, y] : [y, x]
-  return [...small].every((w) => big.has(w))
-}
+export { sameName }
 
 export interface SeriesPlace {
   series: SeriesFile
@@ -78,7 +69,7 @@ export function lightBibleEntries(text: string): BibleEntry[] {
       continue
     }
     const m = /^- \*\*(.+?)\*\*: (.*)$/.exec(line)
-    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', text: m[2]!.trim() })
+    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', aliases: [], text: m[2]!.trim() })
   }
   return out
 }

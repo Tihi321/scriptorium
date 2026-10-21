@@ -21,7 +21,7 @@ Pitch:
 {{revision_notes}}
 
 Give each chapter a short title and a summary saying what happens in it. For a short book two or three sentences are enough. For a long book (Long book: yes) write four to six sentences per chapter, name the characters and places in it, and make sure tension rises across the whole book, the middle has a turn, and every storyline you start is closed by the end. If the number of chapters is 1, give one chapter that holds the whole story.
-Also list the main characters with a short description each, and how each one speaks (a "voice": a few words on their way of talking), the places that matter, the story threads (promises, mysteries and subplots) that need an ending by the last chapter, the setting in a few sentences, and the style the writer should keep to.
+Also list the main characters with a short description each, and how each one speaks (a "voice": a few words on their way of talking), the places that matter, the story threads (promises, mysteries and subplots) that need an ending by the last chapter, the setting in a few sentences, and the style the writer should keep to. Also give "story_year": the year the story is set in as a number (2026, 1888), or null when it has no fixed year. Reviewers use it to check weekdays and dates.
 
 Reply with one JSON object like this:
-{"chapters": [{"title": "...", "summary": "..."}], "characters": [{"name": "...", "description": "...", "voice": "..."}], "places": [{"name": "...", "description": "..."}], "threads": ["..."], "setting": "...", "style": "..."}
+{"chapters": [{"title": "...", "summary": "..."}], "characters": [{"name": "...", "description": "...", "voice": "..."}], "places": [{"name": "...", "description": "..."}], "threads": ["..."], "setting": "...", "style": "...", "story_year": 2026}

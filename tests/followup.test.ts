@@ -46,10 +46,10 @@ describe('bible entries: names that differ in articles, case and punctuation are
       // the archivist writes the same place under another spelling, and a new place
       await bible.apply(slug, 2, {
         summary: 'Chapter two happened.',
-        characters: [{ name: 'MARA', update: 'found the key', description: '' }],
+        characters: [{ name: 'MARA', update: 'found the key', description: '', aliases: [] }],
         places: [
-          { name: 'The Lighthouse Cottage', update: 'its door was open', description: 'duplicate description' },
-          { name: 'The Harbour', update: '', description: 'a grey harbour' }
+          { name: 'The Lighthouse Cottage', update: 'its door was open', description: 'duplicate description', aliases: [] },
+          { name: 'The Harbour', update: '', description: 'a grey harbour', aliases: [] }
         ],
         threads_opened: [],
         threads_closed: ['T1', '#t2', 't9'],

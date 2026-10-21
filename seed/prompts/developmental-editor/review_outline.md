@@ -16,7 +16,7 @@ Outline:
 Story bible so far:
 {{bible}}
 
-Check: Is the middle strong, with a turn at the midpoint and rising tension? Does every subplot and thread pay off by the end? Is any stretch of chapters flat or repeating the same kind of scene? Are the characters' goals clear? Be calibrated: say "revise" only for a real structural problem you can name, and say what to change. Score structure from 1 to 10 (7 means good enough to write).
+Check: Is the middle strong, with a turn at the midpoint and rising tension? Does every subplot and thread pay off by the end? Is any stretch of chapters flat or repeating the same kind of scene? Are the characters' goals clear? Be calibrated: say "revise" only for a real structural problem you can name, and say what to change. Score structure from 1 to 10 (7 means good enough to write). "chapters" holds chapter numbers only, as plain numbers. For a "revise", give every problem as one string in "problems": where it is (the chapter), what is wrong, and what to change.
 
 Reply with one JSON object like this:
-{"verdict": "pass", "scores": {"structure": 8}, "notes": "...", "chapters": []}
+{"verdict": "pass", "scores": {"structure": 8}, "notes": "...", "chapters": [], "problems": []}

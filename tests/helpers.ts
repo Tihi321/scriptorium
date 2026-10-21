@@ -176,6 +176,8 @@ export interface PipelineEnvOptions {
   humanizer?: boolean
   /** What the mock humanizer answers: the chapter text it was given and the request. Default: the same chapter with one tic cut. */
   humanizeWith?: (chapter: string, request: string) => string
+  /** The `story_year` the mock architect puts into the outline (default: none). */
+  storyYear?: number
   /** Format the mock editor-in-chief picks. */
   format?: string
   /** Which topics.md edits to make before the engine starts. */
@@ -379,7 +381,8 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
       places: [{ name: 'Hay Barn', description: 'warm and dim' }],
       threads: o.extraThread ? ['Who left the lantern in the barn?', 'What is the fox hiding?'] : ['Who left the lantern in the barn?'],
       setting: 'a hay barn at night',
-      style: 'gentle and rhythmic'
+      style: 'gentle and rhythmic',
+      story_year: o.storyYear ?? null
     })
   })
   const cite = o.citations ? ' The facts above come from the notes [1].' : ''
@@ -407,7 +410,7 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     return JSON.stringify({
       verdict: revise ? 'revise' : 'pass',
       scores: Object.fromEntries(dimensionsFor(role).map((d) => [d, revise ? 5 : 8])),
-      notes: revise ? `Please soften the ending (${role}).` : `Looks good (${role}).`,
+      notes: revise ? `Please soften the ending (${role}): the last scene is too abrupt for a bedtime story.` : `Looks good (${role}).`,
       chapters: revise ? (o.reviewChapters?.[role] ?? []) : [],
       research_questions: round === 0 ? (o.reviewQuestions?.[role] ?? []) : []
     })
