@@ -361,6 +361,12 @@ export class Scheduler {
           continue
         }
         const claimed = await jobs.claim(job.id)
+        // the scheduler stopped while the job was being claimed: nothing aborts it later, and a job that waits for a client would hold the stop forever
+        if (claimed && this.stopped) {
+          router.limiter.release(chosen.provider)
+          await jobs.requeue(claimed.id).catch(() => undefined)
+          break
+        }
         if (!claimed) {
           router.limiter.release(chosen.provider)
           continue

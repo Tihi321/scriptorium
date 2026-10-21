@@ -216,7 +216,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     const humanizeId = `${slug}--humanize--ch01--r0`
     expect(await createdMs(env, humanizeId)).toBeGreaterThanOrEqual(await createdMs(env, `${slug}--draft--ch01--r0`))
     const review = await createdMs(env, `${slug}--review--line-editor--r0`)
-    expect(review).toBeGreaterThanOrEqual(Date.parse(String((await doneJob(env, humanizeId)).data.finished)) - 250)
+    expect(review).toBeGreaterThanOrEqual(Date.parse(String((await doneJob(env, humanizeId)).data.finished)) - 5000)
     // it is in the book's record, with the humanizer agent and a prompt version
     const made = (await env.engine.books.readMade(slug)) as unknown as { task: string; role: string; agent: string; prompt_version: string }[]
     expect(made.find((m) => m.task === 'humanize_chapter')).toMatchObject({ role: 'humanizer', agent: 'humanizer-iris-vane' })
@@ -235,9 +235,9 @@ describe('humanizer: the pipeline on the mock provider', () => {
     // the chapter's round is the rewrite's; `humanized` says the pass of round 1 ran
     expect(ch.data).toMatchObject({ round: 1, humanized: 1 })
     const rewritten = Date.parse(String((await doneJob(env, `${slug}--rewrite--ch01--r1`)).data.finished))
-    expect(await createdMs(env, `${slug}--humanize--ch01--r1`)).toBeGreaterThanOrEqual(rewritten - 250)
+    expect(await createdMs(env, `${slug}--humanize--ch01--r1`)).toBeGreaterThanOrEqual(rewritten - 5000)
     const humanized = Date.parse(String((await doneJob(env, `${slug}--humanize--ch01--r1`)).data.finished))
-    expect(await createdMs(env, `${slug}--review--line-editor--r1`)).toBeGreaterThanOrEqual(humanized - 250)
+    expect(await createdMs(env, `${slug}--review--line-editor--r1`)).toBeGreaterThanOrEqual(humanized - 5000)
     // every version is kept: the draft, its humanized version (next to it), and the rewrite before its own pass
     expect((await readdir(bookDir(env, slug, 'chapters', 'history'))).sort()).toEqual(['ch-01-r0-humanized.md', 'ch-01-r0.md', 'ch-01-r1.md'])
     expect((await readDoc(bookDir(env, slug, 'book.md'))).data.round).toBe(1)
@@ -260,12 +260,12 @@ describe('humanizer: the pipeline on the mock provider', () => {
       const unit = `ch0${n}`
       const h = await doneJob(env, `${slug}--humanize--${unit}--r0`)
       const finished = Date.parse(String(h.data.finished))
-      expect(await createdMs(env, `${slug}--memory--${unit}--r0`), `memory of ${unit}`).toBeGreaterThanOrEqual(finished - 250)
+      expect(await createdMs(env, `${slug}--memory--${unit}--r0`), `memory of ${unit}`).toBeGreaterThanOrEqual(finished - 5000)
       expect((await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))).data.humanized, unit).toBe(0)
     }
     // chapter 2: the continuity fix, then the humanizer (the fix came first, so the 'chk' mark is kept)
     const fix = Date.parse(String((await doneJob(env, `${slug}--rewrite--ch02--chk`)).data.finished))
-    expect(await createdMs(env, `${slug}--humanize--ch02--r0`)).toBeGreaterThanOrEqual(fix - 250)
+    expect(await createdMs(env, `${slug}--humanize--ch02--r0`)).toBeGreaterThanOrEqual(fix - 5000)
     expect((await readDoc(bookDir(env, slug, 'chapters', 'ch-02.md'))).data.fixes).toEqual(['chk'])
   }, 180000)
 

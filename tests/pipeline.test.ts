@@ -35,6 +35,11 @@ const stageOf = async (e: Env) => {
     return undefined // the book folder exists but book.md is not written yet
   }
 }
+/** One book only: the topic is switched off once the first book exists, so the factory starts no second one that would race with the test. */
+const oneBookOnly = async (e: Env) => {
+  await waitFor(async () => (await readdir(path.join(e.dir, 'books'))).length > 0, 30000, 'the first book')
+  await e.engine.handleCommand({ type: 'setTopicActive', id: 'jfic-bedtime-and-dreams', active: false })
+}
 const waitStage = (e: Env, stage: string, ms = 60000) => waitFor(async () => ((await stageOf(e)) === stage ? await firstBook(e) : null), ms, `stage ${stage}`)
 
 /** Checks tags are balanced and attributes quoted: enough to catch bad XHTML. */
@@ -369,6 +374,7 @@ describe('bedtime story, mock e2e', () => {
     // child safety says revise in rounds 0-3: the book is rejected at round 2 (the format's limit), and again at round 3 after the reopened rewrite
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', maxBooks: 1, revise: { 'child-safety-reviewer': [0, 1, 2, 3] } })
     const e = env
+    await oneBookOnly(e)
     const slug = (await waitStage(e, 'rejected'))!
     // freeze the factory (it would start the next book) and let running jobs end
     await e.engine.handleCommand({ type: 'pauseAll' })
@@ -417,6 +423,7 @@ describe('bedtime story, mock e2e', () => {
   it('a published book is reopened for the chapters its reviews named, and published again', async () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', maxBooks: 1 })
     const e = env
+    await oneBookOnly(e)
     const slug = (await waitStage(e, 'published'))!
     await e.engine.handleCommand({ type: 'pauseAll' })
     await waitFor(() => e.engine.scheduler.runningJobs().length === 0, 20000, 'running jobs to end')

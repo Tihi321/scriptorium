@@ -256,7 +256,7 @@ describe('refresh_factbase on a published article', () => {
     expect(await env.engine.refreshFactbase(slug)).toEqual({ queued: null, unmerged: 0 })
 
     await env.engine.handleCommand({ type: 'askResearcher', question: LATE_Q, book: slug })
-    await waitFor(async () => (await readdir(dirOf('research'))).some((f) => f.includes('what-did-the-operator-confirm')), 30000, 'the late note')
+    await waitFor(async () => (await readdir(dirOf('research'))).some((f) => f.endsWith('.md') && f.includes('what-did-the-operator-confirm')), 30000, 'the late note')
     const res = await env.engine.refreshFactbase(slug)
     expect(res.unmerged).toBe(1)
     expect(res.queued).toMatch(new RegExp(`^${slug}--factbase--refresh--manual[0-9]+$`))

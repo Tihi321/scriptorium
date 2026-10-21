@@ -127,13 +127,15 @@ export class JobStore {
 
   /** running -> queued, for a job that was stopped or has to wait. */
   async requeue(id: string, patch: Partial<JobFrontmatter> = {}): Promise<void> {
+    // the patch (attempts, not_before ...) goes into the file before it moves: once it is in queued/ a scheduler tick may claim it at once,
+    // and a patch written after the move would be lost (the retry would start with no wait and the attempt not counted)
+    if (Object.keys(patch).length > 0) await this.update('running', id, patch)
     try {
       await renameRetry(this.file('running', id), this.file('queued', id))
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
       throw err
     }
-    if (Object.keys(patch).length > 0) await this.update('queued', id, patch)
   }
 
   /** failed -> queued with the attempts reset, for a book that is retried. The old request and failure text are dropped from the body. */

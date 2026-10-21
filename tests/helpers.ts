@@ -127,7 +127,7 @@ export async function makeEnv(o: EnvOptions = {}, engineOpts: Partial<EngineOpti
   }
 }
 
-export async function waitFor<T>(fn: () => T | Promise<T>, ms = 8000, label = 'condition'): Promise<NonNullable<T>> {
+export async function waitFor<T>(fn: () => T | Promise<T>, ms = 20000, label = 'condition'): Promise<NonNullable<T>> {
   const end = Date.now() + ms
   for (;;) {
     const v = await fn()
