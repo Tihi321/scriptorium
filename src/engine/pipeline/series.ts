@@ -64,8 +64,11 @@ export async function earlierSeriesBooks(d: Deps, slug: string): Promise<string[
 export async function bibleEntriesOf(d: { books: BookStore; bible: Bible }, slug: string): Promise<BibleEntry[]> {
   const long = await d.bible.entries(slug)
   if (long.length) return long
-  // a light bible is one file: "- **Name**: description" lines under Characters (and Places, for a visual novel)
-  const text = await d.books.bible(slug)
+  return lightBibleEntries(await d.books.bible(slug))
+}
+
+/** The entries of a light bible's text: "- **Name**: description" lines under Characters (and Places, for a visual novel). */
+export function lightBibleEntries(text: string): BibleEntry[] {
   const out: BibleEntry[] = []
   let group: 'characters' | 'places' = 'characters'
   for (const line of text.split('\n')) {

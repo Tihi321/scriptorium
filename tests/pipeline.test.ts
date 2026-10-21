@@ -391,7 +391,7 @@ describe('bedtime story, mock e2e', () => {
     expect(e.events.some((ev) => ev.type === 'book.stage' && ev.book === slug && ev.stage === 'rewriting')).toBe(true)
     // reopening a book that is no longer rejected does nothing
     await e.engine.handleCommand({ type: 'reopenBook', book: slug, mode: 'review' })
-    expect(e.logs.some((l) => l.includes(`reopenBook: "${slug}" is not a rejected book`))).toBe(true)
+    expect(e.logs.some((l) => l.includes(`reopenBook: "${slug}" is not a rejected or published book`))).toBe(true)
     await e.engine.handleCommand({ type: 'resumeAll' })
     await waitFor(async () => {
       const d = (await bookMd(e, slug)).data
@@ -412,6 +412,45 @@ describe('bedtime story, mock e2e', () => {
     expect(existsSync(path.join(e.dir, 'jobs', 'done', `${slug}--rewrite--ch01--r4.md`))).toBe(false) // a review round rewrites nothing
     expect(existsSync(path.join(e.dir, 'books', slug, 'out', `${slug}.epub`))).toBe(true)
     expect((await bookMd(e, slug)).data.rounds).toBe(4)
+  }, 180000)
+
+  it('a published book is reopened for the chapters its reviews named, and published again', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', maxBooks: 1 })
+    const e = env
+    const slug = (await waitStage(e, 'published'))!
+    await e.engine.handleCommand({ type: 'pauseAll' })
+    await waitFor(() => e.engine.scheduler.runningJobs().length === 0, 20000, 'running jobs to end')
+    const topicRow = async () => parseTopics(await readFile(path.join(e.dir, 'topics.md'), 'utf8')).find((r) => r.id === 'jfic-bedtime-and-dreams')!
+    const before = await topicRow()
+    const was = (await bookMd(e, slug)).data
+    expect(was.stage).toBe('published')
+    const epub = path.join(e.dir, 'books', slug, 'out', `${slug}.epub`)
+    expect(existsSync(epub)).toBe(true)
+
+    // no chapters given and none named by the last reviews: refused, nothing changes
+    expect(await e.engine.reopenBook(slug, 'rewrite')).toMatch(/give the chapters to rewrite/)
+    expect((await bookMd(e, slug)).data.stage).toBe('published')
+    expect(await topicRow()).toEqual(before)
+
+    // a review of the last round names chapter 1 (even a pass can): that chapter is rewritten
+    const reviews = path.join(e.dir, 'books', slug, 'reviews')
+    const file = (await readdir(reviews)).find((f) => f.endsWith(`-r${was.round}.md`))!
+    const doc = await parseMdFile(path.join(reviews, file))
+    await writeMd(path.join(reviews, file), { ...doc.data, chapters: [1] }, doc.body)
+    expect(await e.engine.reopenBook(slug, 'rewrite')).toBeNull()
+    const round = Number(was.round) + 1
+    expect((await bookMd(e, slug)).data).toMatchObject({ stage: 'rewriting', round, rewrite_chapters: [1], reopened_from: 'published', published_before: was.published, extra_rounds: 1 })
+    const after = await topicRow()
+    expect(after.done).toBe(before.done - 1)
+    expect(after.inProgress).toBe(before.inProgress + 1)
+    expect(existsSync(epub)).toBe(true) // the old EPUB stays until the book is published again
+    await e.engine.handleCommand({ type: 'resumeAll' })
+    await waitFor(async () => {
+      const d = (await bookMd(e, slug)).data
+      return d.stage === 'published' && d.round === round
+    }, 60000, 'the book published again')
+    expect(existsSync(path.join(e.dir, 'jobs', 'done', `${slug}--rewrite--ch01--r${round}.md`))).toBe(true)
+    expect((await topicRow()).done).toBe(before.done)
   }, 180000)
 })
 

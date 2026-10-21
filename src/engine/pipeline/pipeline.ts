@@ -115,16 +115,19 @@ export class Pipeline {
   }
 
   /**
-   * Gives a rejected book one more round. `rewrite`: the chapters (the given ones, or the ones the round's reviews name, see
-   * `chaptersToRewrite`) are rewritten as round r+1, then reviewed again. `review`: the book is reviewed again as round r+1, with
+   * Gives a rejected or a published book one more round. `rewrite`: the chapters (the given ones, or the ones the round's reviews name,
+   * see `chaptersToRewrite`) are rewritten as round r+1, then reviewed again. `review`: the book is reviewed again as round r+1, with
    * no rewrite. `extra_rounds` in book.md goes up by one, so the book may have that round, and the publisher then decides again.
-   * Runs between ticks. Returns the error text when the book can't be reopened.
+   * A published book without given chapters rewrites only the chapters its last reviews named (pass or revise), and is refused when
+   * they named none: a whole published book is never rewritten by accident. Its EPUB and article page stay in out/ until it is
+   * published again. Runs between ticks. Returns the error text when the book can't be reopened.
    */
   reopenBook(slug: string, mode: 'rewrite' | 'review', chapters?: number[]): Promise<{ ok: true; stage: string; round: number; chapters: number[] } | { ok: false; error: string }> {
     const run = this.chain.then(async () => {
       const b = await this.books.read(slug)
       if (!b) return { ok: false as const, error: `no book "${slug}"` }
-      if (b.data.stage !== 'rejected') return { ok: false as const, error: `"${slug}" is not a rejected book (stage: ${b.data.stage})` }
+      if (b.data.stage !== 'rejected' && b.data.stage !== 'published') return { ok: false as const, error: `"${slug}" is not a rejected or published book (stage: ${b.data.stage})` }
+      const wasPublished = b.data.stage === 'published'
       const state = await this.loadState(slug, new Map())
       if (!state) return { ok: false as const, error: `book "${slug}" can't be read (its format is unknown or it has no outline yet)` }
       const total = state.outlineChapters ?? 0
@@ -137,6 +140,11 @@ export class Pipeline {
           const bad = chapters.filter((n) => !Number.isInteger(n) || n < 1 || n > total)
           if (bad.length) return { ok: false as const, error: `chapters ${bad.join(', ')} are not in the book (it has ${total})` }
           list = [...new Set(chapters)].sort((a, c) => a - c)
+        } else if (wasPublished) {
+          const keys = state.format.long ? [...reviewersFor(state.format), THREAD_CHECK] : reviewersFor(state.format)
+          const named = keys.flatMap((role) => state.reviews.get(`${role}:${r}`)?.chapters ?? []).filter((n) => n >= 1 && n <= total)
+          if (!named.length) return { ok: false as const, error: `give the chapters to rewrite (a published book's reviews named none)` }
+          list = [...new Set(named)].sort((a, c) => a - c)
         } else {
           const keys = state.format.long ? [...reviewersFor(state.format), THREAD_CHECK] : reviewersFor(state.format)
           const revise = keys.flatMap((role) => {
@@ -157,10 +165,11 @@ export class Pipeline {
           rewrite_chapters: list,
           tension_rewrite: tension,
           extra_rounds: Number(d.extra_rounds ?? 0) + 1,
-          reasons: []
+          reasons: [],
+          ...(wasPublished ? { reopened_from: 'published', published_before: typeof d.published === 'string' ? d.published : null } : {})
         }
       })
-      if (b.data.topic) await this.o.topics.adjust(b.data.topic, { inProgress: 1 })
+      if (b.data.topic) await this.o.topics.adjust(b.data.topic, wasPublished ? { done: -1, inProgress: 1 } : { inProgress: 1 })
       const stage = mode === 'rewrite' ? 'rewriting' : 'reviewing'
       this.o.emit({ type: 'book.stage', book: slug, stage })
       this.o.log(`book ${slug} reopened for a ${mode} round ${next}${mode === 'rewrite' ? ` of chapters ${list.join(', ')}` : ''}`)
@@ -171,6 +180,23 @@ export class Pipeline {
       if (res.ok) this.kick()
       return res
     })
+  }
+
+  /**
+   * Merges a non-fiction book's research notes the fact base has not taken yet, at any stage (a published book too: its text and
+   * references do not change, only `factbase/`). Returns the job id, or null when there is nothing to merge. Throws for a fiction book.
+   */
+  async refreshFactbase(slug: string): Promise<{ queued: string | null; unmerged: number }> {
+    const b = await this.books.read(slug)
+    if (!b) throw new Error(`no book "${slug}"`)
+    const format = this.o.getFormats().find((f) => f.id === b.data.format)
+    if (!format?.nonfiction && b.data.article !== true) throw new Error(`"${slug}" is not a non-fiction book or an article: only those have a fact base`)
+    const unmerged = (await unmergedNotesOf(this.deps, slug)).length
+    if (unmerged === 0) return { queued: null, unmerged }
+    const id = `${slug}--factbase--refresh--manual${Date.now()}`
+    await this.jobs.enqueue({ id, task: 'factbase_update', role: 'archivist', book: slug, unit: 'refresh', round: b.data.round, locks: [`bible:${slug}`], requested_by: 'you' })
+    this.kick()
+    return { queued: id, unmerged }
   }
 
   /** Pauses or resumes one book: its queued jobs wait while it is paused, jobs already running finish. */

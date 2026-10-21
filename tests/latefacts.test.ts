@@ -229,3 +229,49 @@ describe('a chapter already at the cap before the refresh', () => {
     await rm(dir, { recursive: true, force: true })
   })
 })
+
+describe('refresh_factbase on a published article', () => {
+  let env: Env
+  afterAll(async () => {
+    await env?.cleanup()
+  })
+  const LATE = { url: 'https://example.test/late-statement', title: 'Late statement', content: 'The operator said on Friday that the signal had been confirmed by a second station in the north of the country. '.repeat(3) }
+  const LATE_Q = 'What did the operator confirm on Friday?'
+
+  it('queues the archivist for the unmerged notes of a published book, then has nothing left to merge', async () => {
+    env = await makePipelineEnv({
+      format: 'article',
+      citations: true,
+      activate: [],
+      researchPlan: ['What did the ministry announce this week?'],
+      pagesFor: (q) => (q === LATE_Q ? [LATE] : [{ url: 'https://example.test/sea-routes', title: 'Sea routes', content: 'The passage took about six months in the early 1600s. '.repeat(4) }])
+    })
+    await env.engine.handleCommand({ type: 'setTopicActive', id: 'news-technology', active: true })
+    const slug = await waitFor(async () => (await readdir(path.join(env.dir, 'books')))[0] ?? null, 20000, 'the article folder')
+    await waitFor(() => existsSync(path.join(env.dir, 'books', slug, 'book.md')), 20000, 'book.md')
+    await env.engine.handleCommand({ type: 'setTopicActive', id: 'news-technology', active: false })
+    const dirOf = (...p: string[]) => path.join(env.dir, 'books', slug, ...p)
+    await waitFor(async () => (await env.engine.snapshot()).books.find((b) => b.slug === slug && b.stage === 'published'), 90000, 'the article to be published')
+    // nothing unmerged: nothing is queued
+    expect(await env.engine.refreshFactbase(slug)).toEqual({ queued: null, unmerged: 0 })
+
+    await env.engine.handleCommand({ type: 'askResearcher', question: LATE_Q, book: slug })
+    await waitFor(async () => (await readdir(dirOf('research'))).some((f) => f.includes('what-did-the-operator-confirm')), 30000, 'the late note')
+    const res = await env.engine.refreshFactbase(slug)
+    expect(res.unmerged).toBe(1)
+    expect(res.queued).toMatch(new RegExp(`^${slug}--factbase--refresh--manual[0-9]+$`))
+    await waitFor(() => existsSync(path.join(env.dir, 'jobs', 'done', `${res.queued}.md`)), 30000, 'the refresh job')
+    const sources = parseMd(await readFile(dirOf('factbase', 'sources.md'), 'utf8')).data.sources as { n: number; url: string }[]
+    const late = sources.find((s) => s.url === LATE.url)!
+    expect(late).toBeDefined()
+    const facts = parseMd(await readFile(dirOf('factbase', 'facts.md'), 'utf8')).data.chapters as Record<string, { fact: string; sources: number[] }[]>
+    expect(facts['1']!.some((f) => f.sources.includes(late.n))).toBe(true)
+    expect(parseMd(await readFile(dirOf('factbase', 'merged.md'), 'utf8')).data.notes as string[]).toEqual(expect.arrayContaining([expect.stringContaining('what-did-the-operator-confirm')]))
+    // the book stays published and its text did not change
+    expect((await env.engine.books.read(slug))?.data.stage).toBe('published')
+    expect(await env.engine.refreshFactbase(slug)).toEqual({ queued: null, unmerged: 0 })
+    // a fiction book has no fact base
+    await env.engine.books.create('fic', { title: 'Fic', format: 'novel', target_words: 5000, stage: 'published' }, '')
+    await expect(env.engine.refreshFactbase('fic')).rejects.toThrow(/not a non-fiction/)
+  }, 240000)
+})

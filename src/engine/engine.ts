@@ -516,6 +516,22 @@ export class Engine {
   }
 
   /** Sets or removes the model a book uses for a role. Its running jobs of that role switch at once. */
+  /** Gives a rejected or published book one more round (see `Pipeline.reopenBook`). Returns the reason when it can't be reopened, else null. */
+  async reopenBook(book: string, mode: 'rewrite' | 'review', chapters?: number[]): Promise<string | null> {
+    const res = await this.pipeline.reopenBook(book, mode, chapters)
+    if (!res.ok) {
+      this.log(`reopenBook: ${res.error}`)
+      return res.error
+    }
+    await this.emitBookUpdated(book)
+    return null
+  }
+
+  /** Merges a non-fiction book's unmerged research notes into its fact base now (see `Pipeline.refreshFactbase`). */
+  refreshFactbase(slug: string): Promise<{ queued: string | null; unmerged: number }> {
+    return this.pipeline.refreshFactbase(slug)
+  }
+
   private async setBookModel(book: string, role: string, model: string | null): Promise<void> {
     const b = await this.books.read(book)
     if (!b) return this.log(`setBookModel: no book "${book}"`)
@@ -966,12 +982,9 @@ export class Engine {
         return
       case 'setBookModel':
         return this.setBookModel(cmd.book, cmd.role, cmd.model)
-      case 'reopenBook': {
-        const res = await this.pipeline.reopenBook(cmd.book, cmd.mode, cmd.chapters)
-        if (!res.ok) this.log(`reopenBook: ${res.error}`)
-        else await this.emitBookUpdated(cmd.book)
+      case 'reopenBook':
+        await this.reopenBook(cmd.book, cmd.mode, cmd.chapters)
         return
-      }
       case 'regenerateCover':
         if (!(await this.pipeline.remakeCover(cmd.book))) this.log(`regenerateCover: "${cmd.book}" is not a published book`)
         else await this.emitBookUpdated(cmd.book)

@@ -173,6 +173,8 @@ Suggested, so the parser and the image steps agree on one structure:
 
 `SCENE: <place>, <time>`: the text before the last comma is the place, the rest the time. If there is no comma, the whole text is the place.
 
+The MCP tool `get_script {book, chapter?}` returns this JSON for a script book at any stage (`parseScript` and `parseLightBible` in `src/engine/publish/script.ts`). A `## heading` also opens a scene, the narration right after a `SCENE:` line up to the first cast or speaker line is the scene's `background`, a `---` is a `break` beat, and speaker names are written as the bible has them when one matches (else as they were written, in capitals).
+
 ## Adapting a book
 
 Scriptorium can turn a published prose book into a visual novel script (the script writer). In the library, open a published book's card and press **Adapt to visual novel**; the Script writer panel asks for the kind (linear, or with choices), an optional title and notes for the adapter. The same from MCP: `adapt_book {book, format, title?, notes?, models?}`. The owner picks linear or choices for every book.
