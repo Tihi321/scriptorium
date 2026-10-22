@@ -219,3 +219,41 @@ describe('a rewrite from an owner note is tightened too (pipeline)', () => {
     expect(await readFile(path.join(e.dir, 'books', slug, 'log.md'), 'utf8')).toContain('the note asks for more length')
   }, 180000)
 })
+
+describe('length_over at publish (pipeline)', () => {
+  type Env = Awaited<ReturnType<typeof makePipelineEnv>>
+  let env: Env | undefined
+  afterEach(async () => {
+    await env?.cleanup()
+    env = undefined
+  })
+  const prose = (n: number) => Array.from({ length: n }, (_, i) => ['The', 'little', 'fox', 'yawned', 'and', 'curled', 'up', 'in', 'the', 'warm', 'hay.'][i % 11]).join(' ')
+  const publishedBook = async (e: Env) => {
+    const slug = (await waitFor(async () => (await e.engine.snapshot()).books.find((b) => b.stage === 'published')?.slug ?? null, 90000, 'the book to be published'))!
+    return { slug, book: parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data, summary: (await e.engine.snapshot()).books.find((b) => b.slug === slug)! }
+  }
+
+  it('a book over the format ceiling is published with length_over in book.md and lengthOver in its summary', async () => {
+    // bedtime-toddler allows 800 words at most: the draft and every rewrite (also the length rewrite) come back with 1,300
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler' })
+    env.mock.on({ task: 'draft_chapter' }, () => prose(1300))
+    env.mock.on({ task: 'rewrite_chapter' }, () => prose(1300))
+    const { slug, book, summary } = await publishedBook(env)
+    const ceiling = 800
+    const ch = parseMd(await readFile(path.join(env.dir, 'books', slug, 'chapters', 'ch-01.md'), 'utf8'))
+    expect(Number(ch.data.words)).toBeGreaterThan(ceiling)
+    expect(book.stage).toBe('published')
+    expect(book.length_over).toBe(true)
+    expect(summary.lengthOver).toBe(true)
+    await env.engine.logs.flush()
+    expect(await readFile(path.join(env.dir, 'books', slug, 'log.md'), 'utf8')).toContain("over the format's ceiling of 800")
+  }, 150000)
+
+  it('a book inside the range has neither', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler' })
+    const { book, summary } = await publishedBook(env)
+    expect(book.stage).toBe('published')
+    expect(book).not.toHaveProperty('length_over')
+    expect(summary.lengthOver).toBeUndefined()
+  }, 150000)
+})
