@@ -202,3 +202,20 @@ The humanizer's script branch (`pipeline/humanizerHandlers.ts:300-306`) renames 
 4. **Migration** turns the four old settings keys into `fallbacks` + `fallback_shared` and keeps the old keys readable until it runs.
 5. **Owner-note rewrites are tightened** unless the note asks for more length.
 6. **`last_resort_model`** is empty by default, used only when every candidate is down or day-full, never when one is just busy, and has no UI control.
+
+## Status (2026-10-22)
+
+All tasks are done on `SCP-19_roadmap-tasks`. Commits: T0 df6e986, T1 f1f42f6, T2 8a2800b, T3 b88dac9, T4 927b9b5, T5 a2e5829, T6 38313dc, T7 18e45dd, T8 3f83329. T9 has no commit (`yarn test:electron` passed). T10 is the changelog and roadmap commit.
+
+- [x] T1 fallbacks as an open list
+- [x] T2 last resort model
+- [x] T3 story year in every outline
+- [x] T4 revise follow-up for the outline, act and thread reviews
+- [x] T5 humanizer adds new places to the bible
+- [x] T6 tighten owner-note rewrites
+- [x] T7 length_over test
+- [x] T8 recovery test runs on its own
+- [x] T9 electron tests (1 passed, nothing to fix)
+- [x] T10 changelog and roadmap
+
+Verification and deviations are in `changelog.md`.
