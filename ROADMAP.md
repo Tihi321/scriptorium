@@ -1,6 +1,6 @@
 # Roadmap
 
-What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-16 VN media lines, SCP-17 the screenplay writer, SCP-19 this roadmap's own items) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
+What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-16 VN media lines, SCP-17 the screenplay writer, SCP-18 mystery puzzles, SCP-19 this roadmap's own items) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
 
 ## Where it stands (2026-10-22, branch SCP-19_roadmap-tasks)
 
@@ -16,7 +16,7 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
 - **Hub tasks that change this repo:**
   - HUB-04 (SCP-14 live check).
   - HUB-06 (VN media lines, `SCP-16`): **done in code** on `SCP-16-18_hub-roadmap` (2026-10-22), not merged: the VN prompts, the outline `aliases`, the cue lines in `get_script`, EPUB and the humanizer guard (details in `.claude/tickets/SCP-16-vn-media-lines/changelog.md`). Open: the live run with VN Studio (hub step H2), which the user plays.
-  - HUB-10 (puzzle-mystery format, later phase, `SCP-18`).
+  - HUB-10 (puzzle mysteries, `SCP-18`): **done in code** on `SCP-16-18_hub-roadmap` (2026-10-22), not merged: the format `mystery-puzzle-visual-novel`, the puzzle lines, `bible/puzzles.md`, `add_story {puzzles}`, the planting check and the `get_script` beats (contract in `docs/visual-novel.md` "Puzzles", details in `.claude/tickets/SCP-18-mystery-puzzles/changelog.md`). Open: VN Studio's importer (VNO-15), the hub skill and the first production (HUB-10 phases 4 and 5), and a book written by a real model.
   - HUB-11 (screenplay writer, `SCP-17`): **done in code** on `SCP-16-18_hub-roadmap` (2026-10-22), not merged: the formats `short-film`, `cartoon` and `kids-cartoon`, the `_sp` prompts, `get_screenplay`, `adapt_book` into a screenplay (contract in `docs/screenplay.md`, details in `.claude/tickets/SCP-17-screenplay-writer/changelog.md`). Open: the first screenplay written by a real model, and the video production in the hub (phases 2 and 3).
 
 ## Models
