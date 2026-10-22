@@ -8,7 +8,7 @@ import { buildDraftContext } from '../src/engine/memory/context'
 import type { MemoryIndex } from '../src/engine/memory/index'
 import { BookStore } from '../src/engine/pipeline/books'
 import { pickNext } from '../src/engine/pipeline/handlers'
-import { seriesSection, withSeriesBible } from '../src/engine/pipeline/series'
+import { aliasesOf, lightBibleEntries, seriesSection, withSeriesBible } from '../src/engine/pipeline/series'
 import { writeMd } from '../src/engine/store/atomic'
 import { initDataFolder } from '../src/engine/store/dataFolder'
 import type { IdeaFile } from '../src/engine/store/ideas'
@@ -393,4 +393,15 @@ describe('a series in the pipeline', () => {
     expect(existsSync(path.join(e.dir, 'books', slug, 'bible', 'characters', 'brother-ambrose.md'))).toBe(false)
     expect(await readFile(path.join(e.dir, 'books', slug, 'bible', 'characters', 'ines.md'), 'utf8')).toContain('sharp')
   }, 120000)
+})
+
+
+describe('the aliases of a light bible entry', () => {
+  it('reads the Aliases: sentence up to the full stop or the voice, as VN Studio does', () => {
+    expect(aliasesOf('Bald. Aliases: the bald man, "Brother Kessler"; Kess ili Dr Vey. Voice: slow')).toEqual(['the bald man', 'Brother Kessler', 'Kess', 'Dr Vey'])
+    expect(aliasesOf('Tall. Aliases: Tom Voice: loud')).toEqual(['Tom'])
+    expect(aliasesOf('Tall and loud.')).toEqual([])
+    const entries = lightBibleEntries('## Characters\n- **Kessler**: Bald. Aliases: the bald man. Voice: slow\n- **Mara**: Small.\n')
+    expect(entries.map((e) => e.aliases)).toEqual([['the bald man'], []])
+  })
 })

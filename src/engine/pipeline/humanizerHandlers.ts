@@ -1,7 +1,7 @@
 import { analyzeRepetition } from '../memory/repetition'
 import { findMarkers } from '../research/markers'
 import type { Scheduler } from '../queue/scheduler'
-import { CAST, LINE, SCENE } from '../publish/xhtml'
+import { CAST, cueOf, LINE, SCENE } from '../publish/xhtml'
 import { pad2, countWords } from './books'
 import { cleanProse } from './llm'
 import { instructionLines, stripTrailingLeak } from './leak'
@@ -75,21 +75,25 @@ export function ticReport(chapters: { n: number; text: string }[], n: number): s
 }
 
 /** The structure of a visual novel script: how many scene lines, on-screen lines and spoken lines, and who speaks, in order. */
-export function scriptStructure(text: string): { scenes: number; cast: number; speakers: string[] } {
+export function scriptStructure(text: string): { scenes: number; cast: number; speakers: string[]; cues: string[] } {
   let scenes = 0
   let cast = 0
   const speakers: string[] = []
+  const cues: string[] = []
   for (const raw of text.replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trim()
     if (!line) continue
+    let cue: ReturnType<typeof cueOf>
     if (/^#{1,6}\s+/.test(line) || SCENE.test(line)) scenes++
-    else if (CAST.test(line)) cast++
+    else if ((cue = cueOf(line))) {
+      if (cue.text !== '') cues.push(cue.text === null ? `${cue.cue}:none` : cue.cue)
+    } else if (CAST.test(line)) cast++
     else {
       const m = LINE.exec(line)
       if (m && !/^(scene|on screen)$/i.test(m[1]!.trim())) speakers.push(m[1]!.trim())
     }
   }
-  return { scenes, cast, speakers }
+  return { scenes, cast, speakers, cues }
 }
 
 const citations = (text: string) => (text.match(/\[\d+\]/g) ?? []).sort().join('')
@@ -157,7 +161,7 @@ export function fragmentShare(text: string, script = false): number {
       .split('\n')
       .filter((l) => {
         const line = l.trim()
-        if (!line || /^#{1,6}\s/.test(line) || /^(\*\s*){3,}$|^-{3,}$/.test(line) || SCENE.test(line) || CAST.test(line)) return false
+        if (!line || /^#{1,6}\s/.test(line) || /^(\*\s*){3,}$|^-{3,}$/.test(line) || SCENE.test(line) || CAST.test(line) || cueOf(line)) return false
         const m = LINE.exec(line)
         return !(m && !/^(scene|on screen)$/i.test(m[1]!.trim()))
       })
@@ -235,8 +239,8 @@ export function humanizeProblem(original: string, revised: string, opts: { scrip
   if (opts.script) {
     const a = scriptStructure(original)
     const b = scriptStructure(revised)
-    if (a.scenes !== b.scenes || a.cast !== b.cast || a.speakers.length !== b.speakers.length || a.speakers.join('|') !== b.speakers.join('|')) {
-      return `the script lines changed (scenes ${a.scenes} to ${b.scenes}, on-screen lines ${a.cast} to ${b.cast}, speaker lines ${a.speakers.length} to ${b.speakers.length})`
+    if (a.scenes !== b.scenes || a.cast !== b.cast || a.speakers.length !== b.speakers.length || a.speakers.join('|') !== b.speakers.join('|') || a.cues.join('|') !== b.cues.join('|')) {
+      return `the script lines changed (scenes ${a.scenes} to ${b.scenes}, on-screen lines ${a.cast} to ${b.cast}, speaker lines ${a.speakers.length} to ${b.speakers.length}, picture and sound lines ${a.cues.length} to ${b.cues.length})`
     }
   }
   if (opts.nonfiction && citations(original) !== citations(revised)) return 'the source numbers [n] changed'

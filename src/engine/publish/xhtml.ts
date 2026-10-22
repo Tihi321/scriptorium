@@ -16,6 +16,33 @@ export const CAST = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
 export const LINE = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
 
 /**
+ * A cue line: `CG: ...`, `INSERT: ...`, `SFX: ...`, `AMBIENCE: ...` (Croatian `SLIKA`, `ZVUK`, `ATMOSFERA`); `CG: none` and `END CG` hide the picture.
+ * Copied verbatim from VN Studio, `src/engine/vn/script.ts` (`CUE_RE`, `END_CG_RE`), so both tools read the same lines.
+ */
+export const CUE = /^\**\s*(CG|SLIKA|INSERT|SFX|SOUND|ZVUK|AMBIENCE|ATMOSFERA)\s*:\s*\**\s*(.*?)\s*\**$/iu
+export const END_CG = /^\**\s*(?:END\s+CG|KRAJ\s+SLIKE)\s*\**$/iu
+
+export type CueKind = 'cg' | 'insert' | 'sfx' | 'ambience'
+
+/**
+ * The cue a script line is, or null. `text` is null for `CG: none`, `INSERT: none`, `AMBIENCE: none` and `END CG` (the picture or sound
+ * stops), and empty for a cue with no text (VN Studio ignores it, so callers skip it).
+ */
+export function cueOf(line: string): { cue: CueKind; text: string | null } | null {
+  const t = line.trim()
+  if (END_CG.test(t)) return { cue: 'cg', text: null }
+  const m = CUE.exec(t)
+  if (!m) return null
+  const word = m[1]!.toUpperCase()
+  const cue: CueKind = word === 'CG' || word === 'SLIKA' ? 'cg' : word === 'INSERT' ? 'insert' : word === 'SFX' || word === 'SOUND' || word === 'ZVUK' ? 'sfx' : 'ambience'
+  const text = m[2]!.trim()
+  if (cue !== 'sfx' && /^(none|ni[sš]ta)\.?$/iu.test(text)) return { cue, text: null }
+  return { cue, text }
+}
+
+const CUE_LABEL: Record<CueKind, string> = { cg: 'Picture:', insert: 'Close-up:', sfx: 'Sound:', ambience: 'Ambience:' }
+
+/**
  * A visual novel script (formats with `script: true`) to XHTML, one element per line: `SCENE: place, time` opens a scene,
  * `ON SCREEN: Name (look), ...` says who is shown, `NAME (expression): words` is a spoken line, `---` is a scene break,
  * and any other line is narration (what the reader sees or the narrator says).
@@ -26,10 +53,13 @@ export function scriptToXhtml(md: string): string {
     const line = raw.trim()
     if (!line) continue
     let m: RegExpExecArray | null
+    let c: ReturnType<typeof cueOf>
     if (/^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/.test(line)) out.push('<hr class="scene-break"/>')
     else if ((m = /^#{1,6}\s+(.*)$/.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
     else if ((m = SCENE.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
-    else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
+    else if ((c = cueOf(line))) {
+      if (c.text) out.push(`<p class="vn-cue"><span class="vn-label">${CUE_LABEL[c.cue]}</span> ${inline(c.text)}</p>`)
+    } else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
     else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
       const how = m[2] ? ` <span class="vn-how">(${inline(m[2])})</span>` : ''
       out.push(`<p class="vn-line"><span class="vn-speaker">${escapeXml(m[1]!.trim())}</span>${how} ${inline(m[3]!)}</p>`)

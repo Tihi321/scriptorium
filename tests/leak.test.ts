@@ -28,6 +28,20 @@ describe('instructionLines', () => {
   })
 })
 
+describe('the example lines of the script prompts', () => {
+  it('a chapter that holds the example picture and sound lines of the draft prompt is not taken for a leak', async () => {
+    const body = await template('writer/draft_chapter_vn.md')
+    // every example cue line of the prompt is under 40 characters (the shortest instruction line the guard keeps)
+    const examples = body.split('\n').filter((l) => /^(CG|INSERT|SFX|AMBIENCE):/.test(l))
+    expect(examples.length).toBe(4)
+    expect(examples.every((l) => l.length < 40)).toBe(true)
+    const lines = instructionLines(body)
+    const chapter = [CHAPTER, ...examples, 'END CG', 'AMBIENCE: none', 'MARA: Hello.'].join('\n')
+    expect(findLeaks(chapter, lines)).toEqual([])
+    expect(stripTrailingLeak(chapter, lines)).toEqual({ text: chapter, cut: false })
+  })
+})
+
 describe('findLeaks and stripTrailingLeak', () => {
   it('finds nothing in a chapter that quotes nothing', async () => {
     const lines = instructionLines(await template('writer/rewrite_chapter_vn.md'), [await rewriteSection()])

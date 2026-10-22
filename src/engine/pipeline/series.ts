@@ -58,6 +58,26 @@ export async function bibleEntriesOf(d: { books: BookStore; bible: Bible }, slug
   return lightBibleEntries(await d.books.bible(slug))
 }
 
+/**
+ * The other names a light bible entry gives its character: `Aliases: the bald man, Brother Kessler.` (also `Alias:`, `Also:`, Croatian
+ * `Nadimci:`), up to the first full stop or `Voice:`. Split as VN Studio splits it (`,` `;` `or` `ili`), quotes stripped, repeats left out.
+ */
+export function aliasesOf(text: string): string[] {
+  const m = /\b(?:aliases|alias|also|nadimci|nadimak)\s*:\s*([^.\n]+)/iu.exec(text)
+  if (!m) return []
+  const list = m[1]!.split(/\s+voice\s*:/i)[0]!
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of list.split(/[,;]|\s+(?:or|ili)\s+/i)) {
+    const a = part.replace(/^[\s"“„'‘]+|[\s"”'’]+$/g, '').replace(/\s+/g, ' ')
+    const k = entryKey(a)
+    if (a.length < 2 || seen.has(k)) continue
+    seen.add(k)
+    out.push(a)
+  }
+  return out
+}
+
 /** The entries of a light bible's text: "- **Name**: description" lines under Characters (and Places, for a visual novel). */
 export function lightBibleEntries(text: string): BibleEntry[] {
   const out: BibleEntry[] = []
@@ -69,7 +89,7 @@ export function lightBibleEntries(text: string): BibleEntry[] {
       continue
     }
     const m = /^- \*\*(.+?)\*\*: (.*)$/.exec(line)
-    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', aliases: [], text: m[2]!.trim() })
+    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', aliases: aliasesOf(m[2]!), text: m[2]!.trim() })
   }
   return out
 }
@@ -160,7 +180,7 @@ export async function seriesSection(d: DepsWithBible, slug: string): Promise<str
   return [...head, ...(books.length ? [`## The earlier books of the series\n\n${books.join('\n\n')}`] : [])].join('\n\n')
 }
 
-type OutlineCharacter = { name: string; description: string; voice: string }
+type OutlineCharacter = { name: string; description: string; voice: string; aliases?: string[] }
 type OutlinePlace = { name: string; description: string }
 type Carried = { name: string; text: string; from: string; voice?: string }
 

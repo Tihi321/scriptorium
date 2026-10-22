@@ -42,6 +42,8 @@ blockquote { margin: 1em 2em; font-style: italic; }
 h3.vn-scene { font-size: 1em; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; margin: 1.8em 0 0.6em; border-bottom: 1px solid #999; }
 p.vn-cast { font-size: 0.9em; color: #555; font-style: italic; }
 p.vn-cast .vn-label { font-style: normal; font-weight: bold; }
+p.vn-cue { font-size: 0.85em; color: #666; font-style: italic; }
+p.vn-cue .vn-label { font-style: normal; font-weight: bold; }
 p.vn-narration { font-style: italic; }
 p.vn-line { margin-left: 1em; text-indent: -1em; }
 p.vn-line .vn-speaker { font-weight: bold; font-variant: small-caps; letter-spacing: 0.03em; }

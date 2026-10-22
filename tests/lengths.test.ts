@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { advance } from '../src/engine/pipeline/advance'
 import type { BookState } from '../src/engine/pipeline/advance'
 import { noteWantsLength, perChapterTarget, TRIM_ABOVE } from '../src/engine/pipeline/handlers'
+import { writeMd } from '../src/engine/store/atomic'
 import { parseMd } from '../src/shared/md'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
 import { makePipelineEnv, quietResearchState, waitFor } from './helpers'
@@ -151,6 +152,35 @@ describe('a chapter far over its target is cut once (pipeline)', () => {
     // the book summary shows the gate result
     expect((await e.engine.snapshot()).books.find((b) => b.slug === slug)?.lengthGate).toMatchObject({ status: 'ok' })
   }, 120000)
+})
+
+describe('a script chapter far over its target is cut once, and the cue lines stay (pipeline)', () => {
+  type Env = Awaited<ReturnType<typeof makePipelineEnv>>
+  let env: Env | undefined
+  afterEach(async () => {
+    await env?.cleanup()
+    env = undefined
+  })
+
+  it('the tighten request of a visual novel names the picture and sound lines', async () => {
+    env = await makePipelineEnv({
+      activate: ['vn-mystery'],
+      format: 'visual-novel',
+      draftRatio: 1.5,
+      beforeStart: async (dir) => {
+        const file = path.join(dir, 'config', 'formats.md')
+        const doc = parseMd(await readFile(file, 'utf8'))
+        const formats = (doc.data.formats as { id: string }[]).map((f) => (f.id === 'visual-novel' ? { ...f, words: [1200, 4000], chapters: [4, 4] } : f))
+        await writeMd(file, { ...doc.data, formats }, doc.body)
+      }
+    })
+    const e = env
+    const slug = (await waitFor(async () => (await readdir(path.join(e.dir, 'books')))[0] ?? null, 30000, 'a book'))!
+    await waitFor(async () => parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8').catch(() => '')).data.stage === 'published', 120000, 'published')
+    const job = parseMd(await readFile(path.join(e.dir, 'jobs', 'done', `${slug}--draft--ch01--r0.md`), 'utf8'))
+    expect(job.body).toContain('Cut it to about')
+    expect(job.body).toContain('keep every SCENE, ON SCREEN, CG, INSERT, SFX and AMBIENCE line')
+  }, 180000)
 })
 
 describe('the rewrite of a long book asks for the chapter\'s own share (pipeline)', () => {

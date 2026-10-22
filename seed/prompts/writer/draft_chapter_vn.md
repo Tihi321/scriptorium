@@ -30,7 +30,23 @@ Rules:
 - Narration is short and in the present tense.
 - Use a line with only --- between scenes if you need a scene break. Start the next scene with SCENE:.
 - Write only the script. Do not write a title, chapter heading, notes or a summary, and no markdown other than the lines above.
+- ON SCREEN is only for characters. Never put a thing, a page or a crowd in it.
+- A speaker may be one of the character's aliases from the bible, in capitals (THE BALD MAN:), until the story gives the name.
 - Keep names, places and facts the same as in the earlier text.
 - In every SCENE: line name the place exactly as one of the places of the story bible (see "Places" in the bible). A new place is allowed only when the story moves somewhere the bible does not have: then name it plainly, and the engine adds it to the bible.
+
+Pictures and sounds, each on its own line:
+CG: a picture over the whole screen
+INSERT: a page or thing shown up close
+SFX: one sound effect
+AMBIENCE: a sound that loops
+END CG ends the picture. AMBIENCE: none stops the sound.
+
+- Put a picture or sound line right before the line it goes with. Never make it the last line of a scene or of the chapter.
+- CG: at most two per chapter, for the moments that matter most. Say who (bible names), doing what, and where, in one sentence. It stays until END CG or the next SCENE.
+- INSERT: a letter, a sign, a page, a photo or an object the reader must see. At most two per chapter. Put what it says in a narration line after it.
+- SFX: a single sound the story needs (a door, a shot, a phone). At most four per chapter.
+- AMBIENCE: once, right after the SCENE line, when the place has a steady sound. It plays on into the next scenes, so write a new AMBIENCE, or AMBIENCE: none, when the sound changes or stops.
+- The same picture again: copy its CG line word for word. Two different pictures start with different words.
 
 If you are not sure of a real-world fact and the research notes above do not give it, write your best line anyway and put [RESEARCH: a short, specific question] right after it, then keep writing. Do this at most three times, only for real-world facts, never for things you invent in the story.

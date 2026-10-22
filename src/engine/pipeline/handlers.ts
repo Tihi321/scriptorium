@@ -35,7 +35,8 @@ import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters,
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
-import { placesBlock, settleScenePlaces } from './scriptPlaces'
+import { cleanCastAliases, scriptBibleLine } from './scriptBible'
+import { placesBlock, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
@@ -278,7 +279,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const words = countWords(body)
     if (words <= target * TRIM_ABOVE) return { body, reply: null }
     const how = script
-      ? 'Cut narration lines and minor lines, and keep every SCENE, ON SCREEN and plot beat'
+      ? 'Cut narration lines and minor lines, and keep every SCENE, ON SCREEN, CG, INSERT, SFX and AMBIENCE line and every plot beat'
       : 'Tighten it: cut repetition and description, and keep every event, name and line of dialogue that matters'
     try {
       const retry = await run.chat({
@@ -547,7 +548,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           })
         )
         .min(1),
-      characters: z.array(z.object({ name: z.string(), description: z.string(), voice: z.string().default('') })).default([]),
+      characters: z.array(z.object({ name: z.string(), description: z.string(), voice: z.string().default(''), aliases: z.array(z.string()).default([]) })).default([]),
       places: z.array(z.object({ name: z.string(), description: z.string() })).default([]),
       threads: z.array(z.string()).default([]),
       setting: z.string().default(''),
@@ -607,7 +608,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const carried = fmt.nonfiction ? { characters: briefCharacters, places: r.value.places } : await withSeriesBible(d, slug, briefCharacters, r.value.places, ctx.log)
     // an adaptation: the cast and places of the source book, looks kept (the art reference)
     const seeded = fmt.nonfiction ? carried : await withSourceBible(d, slug, carried.characters, carried.places, ctx.log)
-    const characters = seeded.characters
+    // a script's characters carry the other names the script uses for them, cleaned so that VN Studio reads each person once
+    const characters = fmt.script ? cleanCastAliases(seeded.characters) : seeded.characters
     const places = seeded.places
     if (fmt.nonfiction) {
       // the fact base takes the place of the story bible: argument, audience, style, structure and terms (sources and facts follow per chapter)
@@ -623,7 +625,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
-        (characters.length ? characters.map((c) => `- **${c.name}**: ${c.description}${fmt.script && c.voice ? ` Voice: ${c.voice}` : ''}`).join('\n') : '(see the pitch)') +
+        (characters.length ? characters.map((c) => (fmt.script ? scriptBibleLine(c) : `- **${c.name}**: ${c.description}`)).join('\n') : '(see the pitch)') +
         // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
         (fmt.script && places.length ? `\n\n## Places\n${places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
@@ -820,6 +822,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       appendToPrompt(messages, await seriesSection(d, slug))
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
+      if (fmt.script) appendToPrompt(messages, SCRIPT_CUES_NOTE)
       await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
       appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
@@ -1257,7 +1260,7 @@ export async function storyBriefSection(d: { books: BookStore }, slug: string): 
   return `## The owner's story brief\n\nThe owner described this story. Keep its title, its characters (names, roles, looks), its plot points and its setting, and build the story around them. Where the owner's notes (if any) conflict with the brief, the owner's notes win.\n\n${briefPromptText(brief)}`
 }
 
-type OutlineCharacter = { name: string; description: string; voice: string }
+type OutlineCharacter = { name: string; description: string; voice: string; aliases?: string[] }
 
 /** The outline's characters plus every character of the owner's brief that the architect left out (matched by name, ignoring case). */
 export async function withBriefCharacters(d: { books: BookStore }, slug: string, characters: OutlineCharacter[], log: (m: string) => void): Promise<OutlineCharacter[]> {

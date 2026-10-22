@@ -18,11 +18,11 @@ Characters, places and looks (the bible):
 What a script found in this chapter (fix every one of these; it is only what a counter can see, so look for more of the same kind):
 {{tics}}
 
-The grammar of the script, which you must keep line for line: SCENE: place and time; short narration lines for what the reader sees; ON SCREEN: who is shown and how they look; NAME (expression): spoken line. Speaker names in capitals, the same every time.
+The grammar of the script, which you must keep line for line: SCENE: place and time; short narration lines for what the reader sees; ON SCREEN: who is shown and how they look; NAME (expression): spoken line. Speaker names in capitals, the same every time. Picture and sound lines (CG:, INSERT:, SFX:, AMBIENCE:, END CG) are cues for the game.
 
 What to do
 
-- Do not add, remove, merge, split or reorder SCENE lines, ON SCREEN lines or speaker lines. The number of each, and who speaks in which order, must stay the same. You change the words inside the lines, not the skeleton. Keep every name, every expression tag and every look that ON SCREEN lines give, unless the line itself says it changes.
+- Do not add, remove, merge, split or reorder SCENE lines, ON SCREEN lines, speaker lines or picture and sound lines. The number of each, and who speaks in which order, must stay the same. Keep every CG, INSERT, SFX, AMBIENCE and END CG line word for word, in the same place. You change the words inside the lines, not the skeleton. Keep every name, every expression tag and every look that ON SCREEN lines give, unless the line itself says it changes.
 - Never use an em dash (the long dash). Not one. Use a full stop, a comma, a colon or brackets, or rewrite the sentence. A script counts them and refuses a version that has more than the original.
 - Vary the length, but keep whole sentences: every sentence has a subject and a verb. Do not break a sentence into a string of verbless fragments ("Eighty-four years old, widow of a judge, second floor.") and do not add one-word sentences. A script counts them and refuses a version with more than the original.
 - Write in English, as the original is. Keep every line of dialogue in the language it is in; never translate it.

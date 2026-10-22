@@ -1,9 +1,13 @@
+import { entryKey } from '../memory/bible'
 import { lightBibleEntries, sameName } from '../pipeline/series'
-import { CAST, LINE, SCENE } from './xhtml'
+import { CAST, cueOf, LINE, SCENE } from './xhtml'
+import type { CueKind } from './xhtml'
 
 export type ScriptBeat =
-  | { type: 'cast'; cast: { name: string; look: string }[] }
-  | { type: 'line'; speaker: string; expression: string; text: string }
+  | { type: 'cast'; cast: { name: string; look: string; alias?: string }[] }
+  | { type: 'line'; speaker: string; expression: string; text: string; alias?: string }
+  /** A picture or sound line (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`); `text` is null for `CG: none`, `END CG` and `AMBIENCE: none`. */
+  | { type: 'cue'; cue: CueKind; text: string | null }
   | { type: 'narration'; text: string }
   | { type: 'break' }
 
@@ -16,7 +20,7 @@ export interface ScriptScene {
 }
 
 export interface LightBible {
-  characters: { name: string; looks: string; voice: string }[]
+  characters: { name: string; looks: string; voice: string; aliases: string[] }[]
   places: { name: string; looks: string }[]
   style: string
 }
@@ -55,13 +59,23 @@ function castOf(text: string): { name: string; look: string }[] {
  * A visual novel script chapter (the grammar of docs/visual-novel.md) as scenes and beats. `SCENE: place, time` and a `## heading` open a
  * scene, `ON SCREEN: Name (look), ...` is a cast beat, `NAME (expression): words` a line, `---` a break, anything else narration. Names are
  * written as the bible has them when one matches (`sameName`), else a speaker keeps the capitals it was written in. Lines before the
- * first scene go into a scene with no place.
+ * first scene go into a scene with no place. A cue line (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`, `END CG`) is a `cue` beat, never a speaker, and does not
+ * end the scene's `background`. `aliases` are the bible characters with their other names: a speaker or cast name that is one of them is
+ * given as the bible name, with `alias` set to the alias as the bible writes it.
  */
-export function parseScript(body: string, bibleNames: string[] = []): { scenes: ScriptScene[] } {
+export function parseScript(body: string, bibleNames: string[] = [], aliases: { name: string; aliases: string[] }[] = []): { scenes: ScriptScene[] } {
   const scenes: ScriptScene[] = []
   let scene: ScriptScene | null = null
   let background = false
   const canon = (name: string, fallback: string) => bibleNames.find((b) => sameName(b, name)) ?? fallback
+  const viaAlias = (name: string): { name: string; alias: string } | null => {
+    const key = entryKey(name)
+    for (const c of aliases) {
+      const a = c.aliases.find((x) => entryKey(x) === key)
+      if (a && entryKey(c.name) !== key) return { name: canon(c.name, c.name), alias: a }
+    }
+    return null
+  }
   const open = (text: string) => {
     scene = { ...placeAndTime(text), background: '', beats: [] }
     scenes.push(scene)
@@ -78,22 +92,32 @@ export function parseScript(body: string, bibleNames: string[] = []): { scenes: 
     const line = raw.trim()
     if (!line) continue
     let m: RegExpExecArray | null
+    let c: ReturnType<typeof cueOf>
     if (/^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/.test(line)) {
       current().beats.push({ type: 'break' })
       background = false
     } else if ((m = /^#{1,6}\s+(.*)$/.exec(line))) open(m[1]!.replace(/\*+/g, '').trim())
     else if ((m = SCENE.exec(line))) open(m[1]!)
-    else if ((m = CAST.exec(line))) {
-      current().beats.push({ type: 'cast', cast: castOf(m[1]!).map((c) => ({ name: canon(c.name, c.name), look: c.look })) })
+    else if ((c = cueOf(line))) {
+      if (c.text !== '') current().beats.push({ type: 'cue', cue: c.cue, text: c.text })
+    } else if ((m = CAST.exec(line))) {
+      current().beats.push({
+        type: 'cast',
+        cast: castOf(m[1]!).map((p) => {
+          const v = viaAlias(p.name)
+          return v ? { name: v.name, look: p.look, alias: v.alias } : { name: canon(p.name, p.name), look: p.look }
+        })
+      })
       background = false
     } else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
       const name = m[1]!.trim()
-      current().beats.push({ type: 'line', speaker: canon(name, name), expression: m[2]?.trim() ?? '', text: m[3]!.trim() })
+      const v = viaAlias(name)
+      current().beats.push({ type: 'line', speaker: v ? v.name : canon(name, name), expression: m[2]?.trim() ?? '', text: m[3]!.trim(), ...(v ? { alias: v.alias } : {}) })
       background = false
     } else {
       const text = line.replace(/^>\s?/, '')
       const s = current()
-      if (background && s.beats.length === 0) s.background = s.background ? `${s.background} ${text}` : text
+      if (background && s.beats.every((b) => b.type === 'cue')) s.background = s.background ? `${s.background} ${text}` : text
       else s.beats.push({ type: 'narration', text })
     }
   }
@@ -115,7 +139,14 @@ export function parseLightBible(text: string): LightBible {
       .filter((e) => e.group === 'characters')
       .map((e) => {
         const v = / Voice: /.exec(e.text)
-        return { name: e.name, looks: (v ? e.text.slice(0, v.index) : e.text).trim(), voice: v ? e.text.slice(v.index + v[0].length).trim() : '' }
+        const head = v ? e.text.slice(0, v.index) : e.text
+        const a = / Aliases: /.exec(head)
+        return {
+          name: e.name,
+          looks: (a ? head.slice(0, a.index) : head).trim(),
+          voice: v ? e.text.slice(v.index + v[0].length).trim() : '',
+          aliases: e.aliases
+        }
       }),
     places: entries.filter((e) => e.group === 'places').map((e) => ({ name: e.name, looks: e.text })),
     style: styleText

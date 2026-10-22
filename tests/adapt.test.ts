@@ -60,11 +60,11 @@ async function writeSource(dir: string, o: { stage?: string; bible?: 'long' | 'l
   if ((o.bible ?? 'light') === 'long') {
     await mkdir(path.join(root, 'bible', 'characters'), { recursive: true })
     await mkdir(path.join(root, 'bible', 'places'), { recursive: true })
-    await writeMd(path.join(root, 'bible', 'characters', 'mara.md'), { kind: 'character', name: 'Mara', voice: 'dry, quick' }, '\nLOOKS-MARA: thirty, small, red scarf, grey eyes.\n\n- Ch 3: wakes the moon.\n')
+    await writeMd(path.join(root, 'bible', 'characters', 'mara.md'), { kind: 'character', name: 'Mara', voice: 'dry, quick', aliases: ['Lampy'] }, '\nLOOKS-MARA: thirty, small, red scarf, grey eyes.\n\n- Ch 3: wakes the moon.\n')
     await writeMd(path.join(root, 'bible', 'places', 'the-barn.md'), { kind: 'place', name: 'The Barn' }, '\nLOOKS-BARN: a leaning red barn with a round window.\n')
   } else {
     await mkdir(path.join(root, 'bible'), { recursive: true })
-    await writeMd(path.join(root, 'bible', 'bible.md'), { kind: 'bible' }, '\n# Story bible (light)\n\n## Setting\nA village.\n\n## Characters\n- **Mara**: LOOKS-MARA thirty, red scarf.\n- **Old Tom**: LOOKS-TOM bent and kind.\n\n## Places\n- **The Barn**: LOOKS-BARN a leaning red barn.\n\n## Style\nGentle.\n')
+    await writeMd(path.join(root, 'bible', 'bible.md'), { kind: 'bible' }, '\n# Story bible (light)\n\n## Setting\nA village.\n\n## Characters\n- **Mara**: LOOKS-MARA thirty, red scarf. Aliases: Lampy.\n- **Old Tom**: LOOKS-TOM bent and kind.\n\n## Places\n- **The Barn**: LOOKS-BARN a leaning red barn.\n\n## Style\nGentle.\n')
   }
 }
 
@@ -205,6 +205,9 @@ describe('the bible of an adaptation', () => {
       expect(out.characters[0]!.description).toContain('a lamplighter')
       expect(out.characters[0]!.description).toContain('From the source book "The Moon Lamp"')
       expect(out.characters[0]!.description).toContain('LOOKS-MARA')
+      // the source's other names come along, and are not copied into the description as a sentence
+      expect(out.characters[0]!.aliases).toEqual(['Lampy'])
+      expect(out.characters[0]!.description).not.toContain('Aliases:')
       expect(out.places.map((p) => p.name)).toEqual(['The Barn'])
       expect(out.places[0]!.description).toContain('LOOKS-BARN')
       if (bible === 'light') expect(out.characters.map((c) => c.name)).toEqual(['Mara', 'Old Tom'])
@@ -301,7 +304,7 @@ describe('an adaptation in the pipeline', () => {
           { title: 'The Waking', summary: 'The moon wakes.', source_chapters: [3] },
           { title: 'Bright Night', summary: 'The village celebrates.', source_chapters: [3, 99] }
         ],
-        characters: [{ name: 'Mara', description: 'a lamplighter', voice: 'dry' }],
+        characters: [{ name: 'Mara', description: 'a lamplighter', voice: 'dry', aliases: ['the lamplighter', 'Mara', 'Old Tom', 'Dr. Vey'] }],
         places: [],
         threads: ['Will the moon wake?'],
         setting: 'a village',
@@ -362,6 +365,15 @@ describe('an adaptation in the pipeline', () => {
     expect(bible).toContain('LOOKS-MARA')
     expect(bible).toContain('Old Tom')
     expect(bible).toContain('LOOKS-BARN')
+    // the aliases are one sentence before the voice: the own name and another character's name are dropped, the full stop of Dr. too, the source's alias is added
+    expect(bible).toMatch(/- \*\*Mara\*\*: a lamplighter From the source book "The Moon Lamp": .*LOOKS-MARA.* Aliases: the lamplighter, Dr Vey, Lampy\. Voice: dry\n/)
+    expect(bible).toContain('- **Old Tom**: ')
+    // the outline asks for aliases, the draft for the picture and sound lines, and every script prompt of the book names them
+    expect(prompts.outline![0]).toContain('aliases')
+    expect(prompts.draft1![0]).toContain('CG')
+    expect(prompts.draft1![0]).toContain('INSERT')
+    expect(prompts.rewrite![0]).toContain('Keep the CG, INSERT, SFX and AMBIENCE lines')
+    for (const role of ['originality-checker', 'line-editor', 'developmental-editor']) expect(prompts[`review:${role}`]![0], role).toContain('picture and sound cues for the visual novel app')
     // each draft got the full text of its source chapters and not of the others
     expect(prompts.draft1![0]).toContain('SOURCE-TEXT-ONE')
     expect(prompts.draft1![0]).not.toContain('SOURCE-TEXT-TWO')

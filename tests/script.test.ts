@@ -60,17 +60,90 @@ describe('parseScript', () => {
   })
 })
 
+describe('parseScript: picture and sound lines', () => {
+  const CUES = [
+    'SCENE: The harbour wall, dusk',
+    'AMBIENCE: waves on stone, a far foghorn',
+    'Rain needles the grey water.',
+    'ON SCREEN: Mara (worried)',
+    'SFX: a door bangs open',
+    'MARA (worried): He is late.',
+    'CG: Mara at the end of the pier',
+    'INSERT: a torn page with a map',
+    'SOUND: a single gunshot',
+    'MARA: Who fired that?',
+    'END CG',
+    '**CG:** the lamp, lit at last',
+    'CG: none',
+    'AMBIENCE: none',
+    'CG:',
+    'ZVUK: vrata',
+    'SLIKA: svjetionik'
+  ].join('\n')
+
+  it('reads every cue form as a cue beat, never as a speaker, and keeps the empty ones out', () => {
+    const { scenes } = parseScript(CUES, ['Mara'])
+    expect(scenes).toHaveLength(1)
+    expect(scenes[0]!.background).toBe('Rain needles the grey water.')
+    expect(scenes[0]!.beats).toEqual([
+      { type: 'cue', cue: 'ambience', text: 'waves on stone, a far foghorn' },
+      { type: 'cast', cast: [{ name: 'Mara', look: 'worried' }] },
+      { type: 'cue', cue: 'sfx', text: 'a door bangs open' },
+      { type: 'line', speaker: 'Mara', expression: 'worried', text: 'He is late.' },
+      { type: 'cue', cue: 'cg', text: 'Mara at the end of the pier' },
+      { type: 'cue', cue: 'insert', text: 'a torn page with a map' },
+      { type: 'cue', cue: 'sfx', text: 'a single gunshot' },
+      { type: 'line', speaker: 'Mara', expression: '', text: 'Who fired that?' },
+      { type: 'cue', cue: 'cg', text: null },
+      { type: 'cue', cue: 'cg', text: 'the lamp, lit at last' },
+      { type: 'cue', cue: 'cg', text: null },
+      { type: 'cue', cue: 'ambience', text: null },
+      { type: 'cue', cue: 'sfx', text: 'vrata' },
+      { type: 'cue', cue: 'cg', text: 'svjetionik' }
+    ])
+    expect(scenes[0]!.beats.some((b) => b.type === 'line' && /^(CG|SFX|INSERT|AMBIENCE|SOUND)$/.test(b.speaker))).toBe(false)
+  })
+
+  it('a cue right after SCENE does not end the background', () => {
+    const { scenes } = parseScript('SCENE: The barn, night\nAMBIENCE: crickets\nA red barn.\nStraw on the floor.\nMARA: Hello.')
+    expect(scenes[0]).toMatchObject({ place: 'The barn', background: 'A red barn. Straw on the floor.' })
+    expect(scenes[0]!.beats[0]).toEqual({ type: 'cue', cue: 'ambience', text: 'crickets' })
+    expect(scenes[0]!.beats).toHaveLength(2)
+  })
+
+  it('an alias as a speaker or on screen gives the bible name and the alias', () => {
+    const chars = [{ name: 'Kessler', aliases: ['the bald man', 'Brother Kessler'] }, { name: 'Mara', aliases: [] }]
+    const { scenes } = parseScript('SCENE: Hall, day\nON SCREEN: The bald man (grim), Mara (small)\nTHE BALD MAN: Sit.\nBROTHER KESSLER (soft): Please.\nKESSLER: Enough.\nMARA: No.', ['Kessler', 'Mara'], chars)
+    expect(scenes[0]!.beats).toEqual([
+      { type: 'cast', cast: [{ name: 'Kessler', look: 'grim', alias: 'the bald man' }, { name: 'Mara', look: 'small' }] },
+      { type: 'line', speaker: 'Kessler', expression: '', text: 'Sit.', alias: 'the bald man' },
+      { type: 'line', speaker: 'Kessler', expression: 'soft', text: 'Please.', alias: 'Brother Kessler' },
+      { type: 'line', speaker: 'Kessler', expression: '', text: 'Enough.' },
+      { type: 'line', speaker: 'Mara', expression: '', text: 'No.' }
+    ])
+  })
+})
+
 describe('parseLightBible', () => {
   it('reads characters with looks and voice, places and the style', () => {
     const bible = parseLightBible(
       ['## Characters', '- **Mara**: Seventeen, small and wiry. Voice: short sentences, dry jokes', '- **Tomas**: Tall and loud.', '', '## Places', '- **The harbour wall**: A long stone pier at dusk.', '', '## Style', 'Moody, rain-soaked.', 'Warm interiors.', ''].join('\n')
     )
     expect(bible.characters).toEqual([
-      { name: 'Mara', looks: 'Seventeen, small and wiry.', voice: 'short sentences, dry jokes' },
-      { name: 'Tomas', looks: 'Tall and loud.', voice: '' }
+      { name: 'Mara', looks: 'Seventeen, small and wiry.', voice: 'short sentences, dry jokes', aliases: [] },
+      { name: 'Tomas', looks: 'Tall and loud.', voice: '', aliases: [] }
     ])
     expect(bible.places).toEqual([{ name: 'The harbour wall', looks: 'A long stone pier at dusk.' }])
     expect(bible.style).toBe('Moody, rain-soaked.\nWarm interiors.')
+  })
+
+  it('reads Aliases: before Voice:, keeps them out of the looks, and stops at the first full stop', () => {
+    const bible = parseLightBible(
+      ['## Characters', '- **Kessler**: Bald, broad, a grey coat. Aliases: the bald man, "Brother Kessler"; Kess ili Dr Vey. Voice: slow, low', '- **Mara**: Small. Aliases: the girl, the girl. Voice: dry', '- **Tomas**: Tall. Aliases: Tom Voice: loud', ''].join('\n')
+    )
+    expect(bible.characters[0]).toEqual({ name: 'Kessler', looks: 'Bald, broad, a grey coat.', voice: 'slow, low', aliases: ['the bald man', 'Brother Kessler', 'Kess', 'Dr Vey'] })
+    expect(bible.characters[1]).toMatchObject({ looks: 'Small.', voice: 'dry', aliases: ['the girl'] })
+    expect(bible.characters[2]).toMatchObject({ looks: 'Tall.', voice: 'loud', aliases: ['Tom'] })
   })
 
   it('gives empty lists for a text without a bible', () => {

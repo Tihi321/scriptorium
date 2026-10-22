@@ -297,7 +297,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'get_script',
     {
       description:
-        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration or a break; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
+        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice, aliases}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration, a break or a cue ({type: "cue", cue: "cg" | "insert" | "sfx" | "ambience", text}: a picture or sound line, text null for `CG: none`, `END CG` and `AMBIENCE: none`). A speaker or cast name that is one of the aliases of a character comes out as the bible name, with `alias` set on the line or the cast entry; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
       inputSchema: { book: z.string().describe('Book slug'), chapter: z.number().int().positive().optional().describe('Only this chapter') },
       annotations: READ
     },
@@ -328,7 +328,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
               choices: entry?.choices ?? [],
               ending: entry?.ending ?? null,
               ...(entry?.source_chapters ? { sourceChapters: entry.source_chapters } : {}),
-              scenes: parseScript(c.body, names).scenes
+              scenes: parseScript(c.body, names, bible.characters).scenes
             }
           })
       }

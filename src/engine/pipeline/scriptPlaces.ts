@@ -66,6 +66,10 @@ export function placeDescriptions(body: string, unknown: string[]): Map<string, 
   return out
 }
 
+/** Every reviewer of a script book gets this: the cue lines are for the game, not prose. */
+export const SCRIPT_CUES_NOTE =
+  'Lines that start with CG:, INSERT:, SFX: or AMBIENCE:, and END CG lines, are picture and sound cues for the visual novel app. They are not text the reader sees: do not review them as prose.'
+
 /** The block that tells the writer which place names the bible has. Empty when the bible has none. */
 export function placesBlock(places: string[]): string {
   if (!places.length) return ''
