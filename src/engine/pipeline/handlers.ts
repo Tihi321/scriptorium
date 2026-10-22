@@ -993,8 +993,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       }
     }
     if (countWords(body) < 20) throw new Error(`the rewrite of chapter ${n} came back too short`)
-    // a round rewrite far over the target gets one request to cut it (a length rewrite says its own number, a note of the owner is their choice)
-    if (!isLength && !isNote) {
+    // a rewrite far over the target gets one request to cut it. A length rewrite says its own number. A note of the owner is tightened too,
+    // unless the note itself asks for more length (then the owner wants the long chapter)
+    const noteLonger = isNote && noteWantsLength(ctx.jobBody)
+    if (noteLonger && countWords(body) > target * TRIM_ABOVE) ctx.log(`the note asks for more length: the chapter of ${countWords(body)} words (target ${target}) is not tightened`)
+    if (!isLength && !noteLonger) {
       const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens)
       if (out.reply) {
         r = out.reply
@@ -1134,6 +1137,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     d.emit({ type: 'book.stage', book: slug, stage: 'published' })
     return { result: `published "${title}" (score ${decision.score})`, resultPath: path.relative(d.dataDir, epub).split(path.sep).join('/') }
   })
+}
+
+/** A note of the owner that asks for more length ("make it longer", "add another scene"): its rewrite is not tightened. */
+export function noteWantsLength(note: string): boolean {
+  return /\b(longer|expand|lengthen|more (detail|words|scenes?)|add (a|an|another|more)\b|flesh out)/i.test(note)
 }
 
 /** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
