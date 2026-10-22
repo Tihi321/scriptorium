@@ -35,7 +35,7 @@ import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters,
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
-import { addPlacesToBible, canonicalScenes, placeDescriptions, placesBlock } from './scriptPlaces'
+import { placesBlock, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
@@ -305,19 +305,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
   }
 
   /** A visual novel script: its SCENE places are the bible's names, and the places the bible lacks are added to it (see scriptPlaces.ts). */
-  const settlePlaces = async (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => {
-    const bible = await d.books.bible(slug)
-    if (!bible) return body // a structured bible keeps its places in files: the script is left as it is
-    const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)
-    const out = canonicalScenes(body, places)
-    for (const r of out.renamed) ctx.log(`SCENE place "${r.from}" written as the bible's "${r.to}"`)
-    if (out.unknown.length) {
-      const text = placeDescriptions(out.body, out.unknown)
-      await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + addPlacesToBible(bible, out.unknown.map((p) => ({ place: p, text: text.get(p) ?? '' })), n))
-      ctx.log(`new place(s) added to the bible: ${out.unknown.join(', ')}`)
-    }
-    return out.body
-  }
+  const settlePlaces = (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => settleScenePlaces(d, slug, n, body, ctx.log)
 
   sched.register('generate_ideas', async (ctx) => {
     const run = new Run(ctx)

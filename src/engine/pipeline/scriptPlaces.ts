@@ -1,4 +1,7 @@
 import { entryKey, sameName } from '../memory/bible'
+import { writeMd } from '../store/atomic'
+import type { BookStore } from './books'
+import { lightBibleEntries } from './series'
 import { parseScript } from '../publish/script'
 import { SCENE } from '../publish/xhtml'
 
@@ -89,4 +92,22 @@ export function addPlacesToBible(bible: string, entries: { place: string; text: 
   const block = `## Places\n${lines.join('\n')}\n\n`
   if (style) return `${text.slice(0, style.index)}${block}${text.slice(style.index)}`
   return `${text.replace(/\s+$/, '')}\n\n${block.replace(/\s+$/, '')}\n`
+}
+
+/**
+ * A visual novel script of chapter `n`: its SCENE places become the bible's names, and the places the bible lacks are added to the light bible
+ * (under "## Places", with the chapter number). A structured bible keeps its places in files: the script is left as it is. Returns the script.
+ */
+export async function settleScenePlaces(d: { books: BookStore }, slug: string, n: number, body: string, log: (message: string) => void): Promise<string> {
+  const bible = await d.books.bible(slug)
+  if (!bible) return body
+  const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)
+  const out = canonicalScenes(body, places)
+  for (const r of out.renamed) log(`SCENE place "${r.from}" written as the bible's "${r.to}"`)
+  if (out.unknown.length) {
+    const text = placeDescriptions(out.body, out.unknown)
+    await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + addPlacesToBible(bible, out.unknown.map((p) => ({ place: p, text: text.get(p) ?? '' })), n))
+    log(`new place(s) added to the bible: ${out.unknown.join(', ')}`)
+  }
+  return out.body
 }
