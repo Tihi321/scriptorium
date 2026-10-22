@@ -58,10 +58,19 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await seriesSection(d, slug))
     await ensureProblemsRule(d.dataDir, messages, 'developmental-editor', 'review_outline')
-    const r = await chatJson(ctx, messages, reviewSchema(['structure']), { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+    const q = d.getQuality()
+    const outlineSchema = reviewSchema(['structure'])
+    const first = await chatJson(ctx, messages, outlineSchema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+    // a revise whose notes say nothing usable ("three fixes below" and no list) is asked again, then the job is tried again
+    const r = await withUsableNotes(ctx, messages, outlineSchema, first, {
+      effective: (v) => (v.verdict === 'revise' && clamp(Number(v.scores.structure), 1, 10) >= q.revise_below ? 'pass' : v.verdict),
+      notes: (v) => v.notes,
+      problems: (v) => v.problems,
+      retryLeft: ctx.job.attempts + 1 < (ctx.job.max_attempts ?? d.getFactory().max_attempts),
+      maxTokens: 6000
+    })
     run.addJson(r.cost, r.chat.model)
     const score = clamp(Number(r.value.scores.structure), 1, 10)
-    const q = d.getQuality()
     const verdict = r.value.verdict === 'revise' && score >= q.revise_below ? 'pass' : r.value.verdict
     await writeMd(
       d.books.file(slug, 'reviews', 'outline-review.md'),
@@ -260,7 +269,15 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
       })
       await ensureProblemsRule(d.dataDir, messages, 'developmental-editor', 'act_review')
       appendToPrompt(messages, await calendarFor(d, slug, chapters.map((c) => c.body).join('\n')))
-      const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+      const first = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+      // a revise whose notes say nothing usable is asked again, then the job is tried again (the verdict is used as written)
+      const r = await withUsableNotes(ctx, messages, schema, first, {
+        effective: (v) => v.verdict,
+        notes: (v) => v.notes,
+        problems: (v) => v.problems,
+        retryLeft: ctx.job.attempts + 1 < (ctx.job.max_attempts ?? d.getFactory().max_attempts),
+        maxTokens: 6000
+      })
       run.addJson(r.cost, r.chat.model)
       for (const t of r.value.tension) if (act.chapters.includes(t.chapter)) tension[String(t.chapter)] = clamp(Number(t.score), 1, 10)
       const flat = flatStretches(tension)
@@ -325,7 +342,15 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
         const schema = reviewSchema(['threads']).extend({ resolved: z.array(z.string()).default([]) })
         await ensureProblemsRule(d.dataDir, messages, 'continuity-checker', 'thread_check')
         appendToPrompt(messages, await calendarFor(d, slug, `${summaries.join('\n')}\n${last?.body ?? ''}`))
-        const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+        const first = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+        // a revise whose notes say nothing usable is asked again, then the job is tried again
+        const r = await withUsableNotes(ctx, messages, schema, first, {
+          effective: (v) => (v.verdict === 'revise' && clamp(Number(v.scores.threads), 1, 10) >= d.getQuality().revise_below ? 'pass' : v.verdict),
+          notes: (v) => v.notes,
+          problems: (v) => v.problems,
+          retryLeft: ctx.job.attempts + 1 < (ctx.job.max_attempts ?? d.getFactory().max_attempts),
+          maxTokens: 6000
+        })
         run.addJson(r.cost, r.chat.model)
         score = clamp(Number(r.value.scores.threads), 1, 10)
         verdict = r.value.verdict === 'revise' && score >= d.getQuality().revise_below ? 'pass' : r.value.verdict

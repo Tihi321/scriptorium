@@ -305,3 +305,47 @@ describe('threads left open reach the publisher; flat stretches get a raise-tens
     expect(env.counters.calls.research_plan).toBe(1)
   })
 })
+
+describe('a revise without a list of fixes is asked again by the outline, act and thread reviews', () => {
+  type Env = Awaited<ReturnType<typeof makePipelineEnv>>
+  let env: Env
+  afterAll(async () => {
+    await env?.cleanup()
+  })
+  const PROBLEMS = ['Chapter 1: the fox has a white coat here. Fix: make it grey.', 'Chapter 2: the lamp is lit twice. Fix: keep one lighting.']
+
+  it('for each of the three, the first answer promises "three fixes below" with no list, the follow-up gives them, and they land in the review file', async () => {
+    env = await makePipelineEnv({ activate: ['fic-fantasy-epic'], format: 'novel', smallNovel: true, extraThread: true })
+    const asked: Record<string, string[]> = { review_outline: [], act_review: [], thread_check: [] }
+    const first: Record<string, number> = { review_outline: 0, act_review: 0, thread_check: 0 }
+    const scoreKey: Record<string, string> = { review_outline: 'structure', act_review: 'structure', thread_check: 'threads' }
+    for (const task of Object.keys(asked)) {
+      env.mock.on({ task }, (req) => {
+        const follow = req.messages.length > 2
+        const scores = { [scoreKey[task]!]: 5 }
+        if (follow) {
+          asked[task]!.push(req.messages[req.messages.length - 1]!.content)
+          // the whole answer, with every problem. Its verdict is a pass so the book goes on (the file still lists the problems)
+          return JSON.stringify({ verdict: 'pass', scores: { [scoreKey[task]!]: 9 }, notes: `Second answer of ${task}.`, chapters: [], problems: PROBLEMS, tension: [], resolved: [] })
+        }
+        if ((first[task] = (first[task] ?? 0) + 1) === 1) return JSON.stringify({ verdict: 'revise', scores, notes: 'Three fixes below.', chapters: [], tension: [], resolved: [] })
+        return JSON.stringify({ verdict: 'pass', scores: { [scoreKey[task]!]: 9 }, notes: 'Fine.', chapters: [], tension: [], resolved: [] })
+      })
+    }
+    const slug = (await waitFor(async () => (await env.engine.snapshot()).books.find((b) => b.stage === 'published')?.slug ?? null, 120000, 'the novel to be published'))!
+    for (const task of Object.keys(asked)) {
+      expect(asked[task]!.length, task).toBeGreaterThanOrEqual(1)
+      expect(asked[task]![0], task).toContain('Your verdict is revise, but')
+    }
+    const reviews = path.join(env.dir, 'books', slug, 'reviews')
+    const files = await readdir(reviews)
+    const bodyOf = async (name: string) => parseMd(await readFile(path.join(reviews, name), 'utf8')).body
+    for (const [task, name] of [['review_outline', 'outline-review.md'], ['act_review', files.find((f) => /^actreview-/.test(f)) ?? 'actreview-1.md'], ['thread_check', files.find((f) => /^thread-check-/.test(f)) ?? 'thread-check-r0.md']] as const) {
+      const body = await bodyOf(name)
+      expect(body, `${task} (${name})`).toContain(`Second answer of ${task}.`)
+      expect(body, task).toContain('## Problems')
+      expect(body, task).toContain(`1. ${PROBLEMS[0]}`)
+      expect(body, task).toContain(`2. ${PROBLEMS[1]}`)
+    }
+  }, 180000)
+})
