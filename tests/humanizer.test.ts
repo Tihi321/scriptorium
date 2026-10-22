@@ -167,7 +167,7 @@ describe('humanizer: the guards and the report', () => {
       'SCENE: The lamp room, night',
       'MARA (whispering): There is a map under the lens and somebody wanted it hidden from us all.'
     ].join('\n')
-    expect(scriptStructure(script)).toEqual({ scenes: 2, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'], cues: [] })
+    expect(scriptStructure(script)).toEqual({ scenes: 2, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'], cues: [], puzzleLines: [] })
     const livelier = script.replace('Gulls wheel over the water', 'Gulls scream over the black water').replace('girl.', 'girl, and you know it.')
     expect(humanizeProblem(script, livelier, { script: true })).toBeNull()
     // a dropped speaker line, a swapped speaker, a merged scene, a lost on-screen line
@@ -194,7 +194,7 @@ describe('humanizer: the guards and the report', () => {
       'MARA (whispering): There is a map under the lens and somebody wanted it hidden from us all.'
     ].join('\n')
     // a cue is not a speaker "CG", "SFX" or "AMBIENCE"
-    expect(scriptStructure(script)).toEqual({ scenes: 1, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'], cues: ['ambience', 'sfx', 'cg', 'cg:none', 'insert'] })
+    expect(scriptStructure(script)).toEqual({ scenes: 1, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'], cues: ['ambience', 'sfx', 'cg', 'cg:none', 'insert'], puzzleLines: [] })
     expect(scriptStructure('CG: none\nAMBIENCE: none\nSFX:\nSOUND: a shot').cues).toEqual(['cg:none', 'ambience:none', 'sfx'])
     // reworded cue text is fine
     expect(humanizeProblem(script, script.replace('a bell rings out over the water', 'a ship bell, far off').replace('Gulls wheel', 'Gulls scream'), { script: true })).toBeNull()

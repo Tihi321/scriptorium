@@ -138,6 +138,40 @@ export async function migrateNewspaper(dataDir: string, seedDir: string | undefi
   return { changes }
 }
 
+/**
+ * Appends the seed's entries for `ids` to config/formats.md (the text of the seed's entries, before the closing `---`, line endings kept) for
+ * every id the data folder's file does not have. Returns the ids added. A folder without the file, or a seed without the entry, is not touched.
+ */
+async function appendSeedFormats(dataDir: string, seedDir: string, ids: string[]): Promise<string[]> {
+  const formatsFile = path.join(dataDir, 'config', 'formats.md')
+  const seedFormats = path.join(seedDir, 'config', 'formats.md')
+  if (!existsSync(formatsFile) || !existsSync(seedFormats)) return []
+  const text = await fs.readFile(formatsFile, 'utf8')
+  const have = formatBlocks(text)
+  const seed = formatBlocks(await fs.readFile(seedFormats, 'utf8'))
+  const add = ids.filter((id) => !have.has(id) && seed.has(id))
+  if (!add.length) return []
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (lines[0]?.trim() !== '---' || end <= 0) return []
+  let at = end
+  while (at > 1 && !lines[at - 1]!.trim()) at--
+  lines.splice(at, 0, ...add.flatMap((id) => seed.get(id)!.split('\n')))
+  await atomicWrite(formatsFile, lines.join(eol))
+  return add
+}
+
+/** The format of the mystery with puzzles. */
+export const PUZZLE_FORMAT_IDS = ['mystery-puzzle-visual-novel']
+
+/** The mystery-with-puzzles format arrived after data folders existed: it is appended to config/formats.md when its id is missing. Running it again changes nothing. */
+export async function migratePuzzles(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  if (!seedDir) return { changes: [] }
+  const added = await appendSeedFormats(dataDir, seedDir, PUZZLE_FORMAT_IDS)
+  return { changes: added.length ? [`config/formats.md: added the puzzle format (${added.join(', ')})`] : [] }
+}
+
 /** The screenplay formats of the seed, in this order. */
 export const SCREENPLAY_FORMAT_IDS = ['short-film', 'cartoon', 'kids-cartoon']
 
@@ -154,26 +188,8 @@ const VIDEOS_ROW = 'vid-short-film'
 export async function migrateScreenplay(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
   const changes: string[] = []
   if (!seedDir) return { changes }
-  const formatsFile = path.join(dataDir, 'config', 'formats.md')
-  const seedFormats = path.join(seedDir, 'config', 'formats.md')
-  if (existsSync(formatsFile) && existsSync(seedFormats)) {
-    const text = await fs.readFile(formatsFile, 'utf8')
-    const have = formatBlocks(text)
-    const seed = formatBlocks(await fs.readFile(seedFormats, 'utf8'))
-    const add = SCREENPLAY_FORMAT_IDS.filter((id) => !have.has(id) && seed.has(id))
-    if (add.length > 0) {
-      const eol = text.includes('\r\n') ? '\r\n' : '\n'
-      const lines = text.split(/\r?\n/)
-      const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
-      if (lines[0]?.trim() === '---' && end > 0) {
-        let at = end
-        while (at > 1 && !lines[at - 1]!.trim()) at--
-        lines.splice(at, 0, ...add.flatMap((id) => seed.get(id)!.split('\n')))
-        await atomicWrite(formatsFile, lines.join(eol))
-        changes.push(`config/formats.md: added the screenplay formats (${add.join(', ')})`)
-      }
-    }
-  }
+  const added = await appendSeedFormats(dataDir, seedDir, SCREENPLAY_FORMAT_IDS)
+  if (added.length) changes.push(`config/formats.md: added the screenplay formats (${added.join(', ')})`)
   const topicsFile = path.join(dataDir, 'topics.md')
   const seedTopics = path.join(seedDir, 'topics.md')
   if (existsSync(topicsFile) && existsSync(seedTopics)) {

@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { ORNAMENT_CSS, ornamentHtml, ornamentSvg } from './art'
 import { choicesHtml, escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
+import type { PuzzleView } from './xhtml'
 
 export interface EpubChapter {
   title: string
@@ -10,6 +11,8 @@ export interface EpubChapter {
   script?: boolean
   /** A screenplay (a script with SHOT, MUSIC, SFX and TITLE lines): `script` is set too. */
   screenplay?: boolean
+  /** A mystery with puzzles: the puzzles by key (title, clue texts), for the `PUZZLE:` lines. */
+  puzzles?: Record<string, PuzzleView>
   /** A story with choices: the choices at the end (`to` is the 1-based position of the target chapter). */
   choices?: { text: string; to: number }[]
   /** A story with choices: this chapter is an ending. */
@@ -46,6 +49,13 @@ p.vn-cast { font-size: 0.9em; color: #555; font-style: italic; }
 p.vn-cast .vn-label { font-style: normal; font-weight: bold; }
 p.vn-cue { font-size: 0.85em; color: #666; font-style: italic; }
 p.vn-cue .vn-label { font-style: normal; font-weight: bold; }
+p.vn-clue, p.vn-evidence { font-size: 0.9em; margin: 0.8em 1em; padding: 0.4em 0.7em; border: 1px solid #999; border-radius: 4px; }
+p.vn-clue { background: #f4f1e8; }
+p.vn-evidence { font-style: italic; }
+p.vn-clue .vn-label, p.vn-evidence .vn-label, p.vn-testimony .vn-label, p.vn-puzzle-title .vn-label { font-style: normal; font-weight: bold; }
+div.vn-puzzle { margin: 1.2em 0; padding: 0.6em 1em; border: 2px solid #666; border-radius: 6px; }
+div.vn-puzzle ul { margin: 0.4em 0 0; padding-left: 1.2em; font-size: 0.9em; }
+p.vn-testimony { font-size: 0.9em; color: #555; margin: 1em 0 0.4em; }
 p.vn-narration { font-style: italic; }
 p.vn-line { margin-left: 1em; text-indent: -1em; }
 p.vn-line .vn-speaker { font-weight: bold; font-variant: small-caps; letter-spacing: 0.03em; }
@@ -127,7 +137,7 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
     const n = String(i + 1).padStart(2, '0')
     const file = `chapter-${n}.xhtml`
     const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
-    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
+    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
     manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
     spine.push(`<itemref idref="ch${n}"/>`)
     navItems.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)

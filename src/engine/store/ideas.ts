@@ -40,7 +40,8 @@ const briefFields = (b: StoryBrief) => ({
   ...(b.series?.trim() ? { series: b.series.trim(), ...(b.seriesIndex ? { series_index: b.seriesIndex } : {}) } : {}),
   ...(b.models && Object.keys(b.models).length ? { role_models: b.models } : {}),
   ...(b.humanize === false ? { humanize: false } : {}),
-  ...(b.sourceBook?.trim() ? { source_book: b.sourceBook.trim() } : {})
+  ...(b.sourceBook?.trim() ? { source_book: b.sourceBook.trim() } : {}),
+  ...(b.puzzles?.length ? { puzzles: b.puzzles } : {})
 })
 
 /**

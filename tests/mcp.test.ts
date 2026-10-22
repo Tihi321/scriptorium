@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadMcpConfig, startMcpServer } from '../src/engine/mcp/server'
 import type { McpHandle } from '../src/engine/mcp/server'
+import { writeMd } from '../src/engine/store/atomic'
 import { acquireEngineLock } from '../src/engine/store/dataFolder'
 import { parseMd } from '../src/shared/md'
 import { makeEnv, waitFor } from './helpers'
@@ -709,6 +710,50 @@ describe('MCP: the prompt once, waiting for a book, absolute paths, book models 
     expect((await call(c, 'get_script', { book: 'vn', chapter: 5 })).raw).toMatch(/not written/)
     await makeBook(env!, 'prose', 'published')
     expect((await call(c, 'get_script', { book: 'prose' })).raw).toMatch(/not a visual novel script \(its format is novel\)/)
+  })
+
+  it('add_story takes puzzles, and get_script returns the puzzle beats and the puzzles of bible/puzzles.md', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    const core = { format: 1, kind: 'murdle', size: 3, clues: [{ id: 'c1', type: 'not', a: 's1', b: 'w1' }], murder: { place: 'p1', answer: { suspect: 's1', weapon: 'w1', place: 'p1' } } }
+    const added = await call(c, 'add_story', {
+      title: 'The Dinner Party',
+      premise: 'A body in the library.',
+      format: 'mystery-puzzle-visual-novel',
+      puzzles: [{ key: 'dinner', kind: 'murdle', core, names: { s1: 'Colonel Ash', w1: 'rope', p1: 'library' }, text: { c1: 'Colonel Ash did not have the rope.', murder: 'The body was found in the library.' } }]
+    })
+    expect(added.isError).toBe(false)
+    const idea = parseMd(await readFile(path.join(env!.dir, 'ideas', `${added.data.slug}.md`), 'utf8'))
+    expect(idea.data.puzzles).toEqual([expect.objectContaining({ key: 'dinner', kind: 'murdle', names: { s1: 'Colonel Ash', w1: 'rope', p1: 'library' } })])
+    expect(idea.body).not.toContain('Colonel Ash did not have the rope') // the puzzles are data, not text of the brief
+    expect((await call(c, 'add_story', { title: 'Bad', puzzles: [{ key: 'bad key' }] })).isError).toBe(true)
+
+    await env!.engine.books.create('mystery', { title: 'The Dinner Party', format: 'mystery-puzzle-visual-novel', stage: 'drafting', target_words: 5000, script: true, puzzles: true }, '')
+    await mkdir(path.join(env!.engine.books.dir('mystery'), 'bible'), { recursive: true })
+    await writeFile(env!.engine.books.file('mystery', 'bible', 'bible.md'), ['---', 'kind: bible', '---', '## Characters', '- **Miss Cole**: A cook. Aliases: the cook. Voice: calm', ''].join('\n'))
+    await writeMd(env!.engine.books.file('mystery', 'bible', 'puzzles.md'), { kind: 'puzzles', puzzles: [{ key: 'dinner', kind: 'murdle', chapter: 1, core, names: { s1: 'Colonel Ash' }, text: { c1: 'Colonel Ash did not have the rope.' }, clueAt: { c1: 1 } }] }, '\nPuzzles\n')
+    await env!.engine.books.writeChapter('mystery', {
+      n: 1,
+      title: 'The Body',
+      round: 0,
+      body: 'SCENE: The library, night\nCLUE: dinner/c1: Colonel Ash had left the rope on the shelf.\nEVIDENCE: watch: A watch, stopped at 9:10.\nPUZZLE: dinner (murdle)\nTESTIMONY: Miss Cole\nTHE COOK: I was in the garden.\nMISS COLE (calm): I saw nothing.\nEND TESTIMONY\n'
+    })
+    const out = (await call(c, 'get_script', { book: 'mystery' })).data
+    expect(out.puzzles).toEqual([expect.objectContaining({ key: 'dinner', chapter: 1, names: { s1: 'Colonel Ash' }, clueAt: { c1: 1 } })])
+    expect(out.puzzles[0].core).toMatchObject({ format: 1, kind: 'murdle' })
+    expect(out.chapters[0].scenes[0].beats).toEqual([
+      { type: 'clue', puzzle: 'dinner', clue: 'c1', text: 'Colonel Ash had left the rope on the shelf.' },
+      { type: 'evidence', key: 'watch', text: 'A watch, stopped at 9:10.' },
+      { type: 'puzzle', puzzle: 'dinner', kind: 'murdle' },
+      {
+        type: 'testimony',
+        witness: 'Miss Cole',
+        statements: [
+          { n: 1, speaker: 'Miss Cole', expression: '', text: 'I was in the garden.', alias: 'the cook' },
+          { n: 2, speaker: 'Miss Cole', expression: 'calm', text: 'I saw nothing.' }
+        ]
+      }
+    ])
   })
 
   it('get_screenplay returns the parsed screenplay of a screenplay book, get_script refuses it, and get_screenplay refuses the others', async () => {

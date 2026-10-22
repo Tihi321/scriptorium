@@ -1,6 +1,6 @@
 import { entryKey } from '../memory/bible'
 import { lightBibleEntries, sameName } from '../pipeline/series'
-import { CAST, cueOf, LINE, SCENE } from './xhtml'
+import { CAST, cueOf, LINE, puzzleLineOf, SCENE } from './xhtml'
 import type { CueKind } from './xhtml'
 
 export type ScriptBeat =
@@ -8,6 +8,14 @@ export type ScriptBeat =
   | { type: 'line'; speaker: string; expression: string; text: string; alias?: string }
   /** A picture or sound line (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`); `text` is null for `CG: none`, `END CG` and `AMBIENCE: none`. */
   | { type: 'cue'; cue: CueKind; text: string | null }
+  /** A clue of a puzzle found here (`CLUE: <puzzle>/<clue>: prose`). */
+  | { type: 'clue'; puzzle: string; clue: string; text: string }
+  /** An item for the court record (`EVIDENCE: <key>: prose`). */
+  | { type: 'evidence'; key: string; text: string }
+  /** The puzzle is played here (`PUZZLE: <key> (<kind>)`; `kind` null when the line has none). */
+  | { type: 'puzzle'; puzzle: string; kind: string | null }
+  /** A cross-examination: the statements between `TESTIMONY: <witness>` and `END TESTIMONY`, `n` from 1. */
+  | { type: 'testimony'; witness: string; statements: { n: number; speaker: string; expression: string; text: string; alias?: string }[] }
   | { type: 'narration'; text: string }
   | { type: 'break' }
 
@@ -59,7 +67,7 @@ export function castOf(text: string): { name: string; look: string }[] {
  * A visual novel script chapter (the grammar of docs/visual-novel.md) as scenes and beats. `SCENE: place, time` and a `## heading` open a
  * scene, `ON SCREEN: Name (look), ...` is a cast beat, `NAME (expression): words` a line, `---` a break, anything else narration. Names are
  * written as the bible has them when one matches (`sameName`), else a speaker keeps the capitals it was written in. Lines before the
- * first scene go into a scene with no place. A cue line (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`, `END CG`) is a `cue` beat, never a speaker, and does not
+ * first scene go into a scene with no place. A puzzle line (`CLUE:`, `EVIDENCE:`, `PUZZLE:`, `TESTIMONY:` with its speaker lines up to `END TESTIMONY`) is a `clue`, `evidence`, `puzzle` or `testimony` beat (docs/visual-novel.md "Puzzles"). A cue line (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`, `END CG`) is a `cue` beat, never a speaker, and does not
  * end the scene's `background`. `aliases` are the bible characters with their other names: a speaker or cast name that is one of them is
  * given as the bible name, with `alias` set to the alias as the bible writes it.
  */
@@ -75,6 +83,12 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
       if (a && entryKey(c.name) !== key) return { name: canon(c.name, c.name), alias: a }
     }
     return null
+  }
+  /** The testimony beat that is open: speaker lines go into it until `END TESTIMONY` or a line of another kind. */
+  let testimony: Extract<ScriptBeat, { type: 'testimony' }> | null = null
+  const isSpeaker = (line: string): RegExpExecArray | null => {
+    const sm = LINE.exec(line)
+    return sm && !/^(scene|on screen)$/i.test(sm[1]!.trim()) && !cueOf(line) && !puzzleLineOf(line) && !SCENE.exec(line) ? sm : null
   }
   const open = (text: string) => {
     scene = { ...placeAndTime(text), background: '', beats: [] }
@@ -93,6 +107,18 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
     if (!line) continue
     let m: RegExpExecArray | null
     let c: ReturnType<typeof cueOf>
+    let pz: ReturnType<typeof puzzleLineOf>
+    if (testimony) {
+      const sm = isSpeaker(line)
+      if (sm) {
+        const name = sm[1]!.trim()
+        const v = viaAlias(name)
+        testimony.statements.push({ n: testimony.statements.length + 1, speaker: v ? v.name : canon(name, name), expression: sm[2]?.trim() ?? '', text: sm[3]!.trim(), ...(v ? { alias: v.alias } : {}) })
+        continue
+      }
+      testimony = null // END TESTIMONY, or a line of another kind, closes it
+      if (puzzleLineOf(line)?.kind === 'end-testimony') continue
+    }
     if (/^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/.test(line)) {
       current().beats.push({ type: 'break' })
       background = false
@@ -100,6 +126,16 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
     else if ((m = SCENE.exec(line))) open(m[1]!)
     else if ((c = cueOf(line))) {
       if (c.text !== '') current().beats.push({ type: 'cue', cue: c.cue, text: c.text })
+    } else if ((pz = puzzleLineOf(line))) {
+      if (pz.kind === 'clue') current().beats.push({ type: 'clue', puzzle: pz.puzzle, clue: pz.clue, text: pz.text })
+      else if (pz.kind === 'evidence') current().beats.push({ type: 'evidence', key: pz.key, text: pz.text })
+      else if (pz.kind === 'puzzle') current().beats.push({ type: 'puzzle', puzzle: pz.puzzle, kind: pz.puzzleKind })
+      else if (pz.kind === 'testimony') {
+        const witness = canon(pz.witness, pz.witness)
+        testimony = { type: 'testimony', witness: viaAlias(pz.witness)?.name ?? witness, statements: [] }
+        current().beats.push(testimony)
+        background = false
+      }
     } else if ((m = CAST.exec(line))) {
       current().beats.push({
         type: 'cast',
@@ -117,7 +153,7 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
     } else {
       const text = line.replace(/^>\s?/, '')
       const s = current()
-      if (background && s.beats.every((b) => b.type === 'cue')) s.background = s.background ? `${s.background} ${text}` : text
+      if (background && s.beats.every((b) => b.type === 'cue' || b.type === 'clue' || b.type === 'evidence' || b.type === 'puzzle')) s.background = s.background ? `${s.background} ${text}` : text
       else s.beats.push({ type: 'narration', text })
     }
   }

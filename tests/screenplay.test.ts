@@ -195,7 +195,7 @@ describe('migrateScreenplay', () => {
     await initDataFolder(dir, seedDir)
     const formatsFile = path.join(dir, 'config', 'formats.md')
     let formats = await readFile(formatsFile, 'utf8')
-    formats = formats.slice(0, formats.indexOf('  - id: short-film\n')) + formats.slice(formats.indexOf('---\n# Formats'))
+    formats = formats.slice(0, formats.indexOf('  - id: short-film\n')) + formats.slice(formats.indexOf('  - id: mystery-puzzle-visual-novel\n'))
     await writeFile(formatsFile, formats.replace(/\n/g, eol))
     const topicsFile = path.join(dir, 'topics.md')
     const topics = (await readFile(topicsFile, 'utf8')).slice(0, (await readFile(topicsFile, 'utf8')).indexOf('\n## Videos')).trimEnd() + '\n'

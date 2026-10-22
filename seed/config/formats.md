@@ -329,6 +329,28 @@ formats:
       everyday words, a warm narrator voice-over and a few short spoken lines (about two and a half words a second), a little repetition
       and a refrain a child can join in with. A small, cosy problem, solved kindly: no peril, no villains, nothing scary, no sad endings.
       Music cues are soft and playful, at most twice in the whole film.
+  - id: mystery-puzzle-visual-novel
+    name: Mystery with puzzles (visual novel)
+    enabled: true
+    script: true
+    puzzles: true
+    humanize: false
+    kinds: []
+    juvenile: false
+    age_band: null
+    words: [6000, 20000]
+    chapters: [3, 8]
+    read_aloud: false
+    reviewers: [continuity-checker, developmental-editor, line-editor, beta-reader]
+    guidance: |
+      A mystery written as a visual novel script (SCENE lines, short narration, ON SCREEN lines and short speaker lines with expressions) with
+      logic puzzles between its scenes: the player reads, finds clues, solves a puzzle (who did it, with what, where, or who lies) and the story
+      goes on. The puzzles are made by code and come with the story brief: each has a fixed solution and fixed clues, and the story only tells them.
+      The outline places each puzzle in a chapter after the chapters that plant its clues. The facts of the story (the culprit, the weapon, the
+      place, who lies) are the solution of the puzzle: never contradict it and never state it before the puzzle. Every clue of a puzzle is planted
+      in the story before its puzzle, as one CLUE line that says exactly what the clue says, in the story's own words. Evidence that a testimony
+      needs is planted with an EVIDENCE line before it. Keep a fair mystery: a clever reader could solve it from what the story has shown, and
+      every suspect has a reason. Short present-tense narration, distinct voices, and each chapter ends on a moment that pulls the reader on.
 ---
 # Formats
 
@@ -345,6 +367,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `research_prep`: the writer lists research questions before each chapter (one short model call per chapter, answered by the researcher before the chapter is written). `false` by default; books whose genre or topic contains a word of `research_prep_genres` in `config/factory.md` get it too, whatever the format says.
 - `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel formats are for topics of kind `visual-novel` and `juvenile-visual-novel`, so they are never picked for an ordinary fiction topic.
 - `screenplay`: a screenplay for a short film or cartoon (with `script: true`, so it keeps the SCENE places of the bible, the tighten text, adaptation through `adapt_book` and the script layout of the EPUB and the reader). Chapters are sequences of the film, written as shots (`SHOT (framing, move, 6s): what we see`, `ON SCREEN:`, `MUSIC:`, `SFX:`, `TITLE:`, `NARRATOR:` and `NAME (V.O.):` voice-over, `NAME (delivery):` dialogue). The architect, writer and line editor use the `_sp` prompts (`outline_sp.md`, `draft_chapter_sp.md`, `rewrite_chapter_sp.md`, `review_sp.md`; a role without one uses its plain prompt, never the `_vn` one), and `get_screenplay` returns the parsed film. The screenplay formats are for topics of kind `video` and `juvenile-video` (all switched off in `topics.md`) and for a story that fixes the format (`add_story` with `format`, `adapt_book`): they are never picked for a story with no topic. Leave `humanize: false`. See `docs/screenplay.md`.
+- `puzzles`: a mystery with logic puzzles (with `script: true`). The puzzles are made by code (VN Studio's `vno_puzzle_generate`) and handed over in the story brief (`add_story {puzzles}`); the architect places each in a chapter (`bible/puzzles.md`), the writers plant its clues as `CLUE:` lines and write the `PUZZLE:` line, `EVIDENCE:` and `TESTIMONY:` lines, and the continuity review checks that every clue is planted before its puzzle. Scriptorium has no solver. Never picked by a topic: only a story that fixes the format gets it. Leave `humanize: false`. See `docs/visual-novel.md` "Puzzles".
 - `runtime`: `[min, max]` seconds of film a screenplay format should run. The writers are told the runtime and the chapter's share of it; `get_screenplay` reports the real one.
 - `choices`: a story with choices (a choose-your-path book or a visual novel with choices). The architect plans a map of chapters: some end with two or three choices, each leading to a later chapter, and the story has at least two endings. The writer sees only the chapters that can lead to the one it writes, the reviewers read every path, and the EPUB and the reader end those chapters with links to the chapters the choices lead to ("The End" on an ending). The extra instructions are in `prompts/_choices.md`. The choice formats are for topics of kind `interactive-fiction`, `juvenile-interactive-fiction`, `visual-novel` and `juvenile-visual-novel`. Short formats only (not `long`).
 - `reviewers`: optional list of reviewer roles to override the default set. The default set is continuity, developmental, line, copy, beta reader and originality, plus child safety for juvenile formats and read-aloud for read-aloud formats.

@@ -1,13 +1,14 @@
 import { analyzeRepetition } from '../memory/repetition'
 import { findMarkers } from '../research/markers'
 import type { Scheduler } from '../queue/scheduler'
-import { CAST, cueOf, LINE, SCENE } from '../publish/xhtml'
+import { CAST, cueOf, LINE, puzzleLineOf, SCENE } from '../publish/xhtml'
 import { pad2, countWords } from './books'
 import { cleanProse } from './llm'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { buildMessages } from './prompts'
 import { bibleFor } from './nfcontext'
 import { settleScenePlaces } from './scriptPlaces'
+import { PUZZLE_HUMANIZER_NOTE } from './puzzles'
 import { formatVars, recordMade, Run, stripLeadingHeading, storyBriefSection, unitNumber, variant } from './handlers'
 import type { PipelineDeps } from './handlers'
 
@@ -75,11 +76,12 @@ export function ticReport(chapters: { n: number; text: string }[], n: number): s
 }
 
 /** The structure of a visual novel script: how many scene lines, on-screen lines and spoken lines, and who speaks, in order. */
-export function scriptStructure(text: string): { scenes: number; cast: number; speakers: string[]; cues: string[] } {
+export function scriptStructure(text: string): { scenes: number; cast: number; speakers: string[]; cues: string[]; puzzleLines: string[] } {
   let scenes = 0
   let cast = 0
   const speakers: string[] = []
   const cues: string[] = []
+  const puzzleLines: string[] = []
   for (const raw of text.replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trim()
     if (!line) continue
@@ -87,13 +89,14 @@ export function scriptStructure(text: string): { scenes: number; cast: number; s
     if (/^#{1,6}\s+/.test(line) || SCENE.test(line)) scenes++
     else if ((cue = cueOf(line))) {
       if (cue.text !== '') cues.push(cue.text === null ? `${cue.cue}:none` : cue.cue)
-    } else if (CAST.test(line)) cast++
+    } else if (puzzleLineOf(line)) puzzleLines.push(line.replace(/\s+/g, ' '))
+    else if (CAST.test(line)) cast++
     else {
       const m = LINE.exec(line)
       if (m && !/^(scene|on screen)$/i.test(m[1]!.trim())) speakers.push(m[1]!.trim())
     }
   }
-  return { scenes, cast, speakers, cues }
+  return { scenes, cast, speakers, cues, puzzleLines }
 }
 
 const citations = (text: string) => (text.match(/\[\d+\]/g) ?? []).sort().join('')
@@ -161,7 +164,7 @@ export function fragmentShare(text: string, script = false): number {
       .split('\n')
       .filter((l) => {
         const line = l.trim()
-        if (!line || /^#{1,6}\s/.test(line) || /^(\*\s*){3,}$|^-{3,}$/.test(line) || SCENE.test(line) || CAST.test(line) || cueOf(line)) return false
+        if (!line || /^#{1,6}\s/.test(line) || /^(\*\s*){3,}$|^-{3,}$/.test(line) || SCENE.test(line) || CAST.test(line) || cueOf(line) || puzzleLineOf(line)) return false
         const m = LINE.exec(line)
         return !(m && !/^(scene|on screen)$/i.test(m[1]!.trim()))
       })
@@ -239,7 +242,7 @@ export function humanizeProblem(original: string, revised: string, opts: { scrip
   if (opts.script) {
     const a = scriptStructure(original)
     const b = scriptStructure(revised)
-    if (a.scenes !== b.scenes || a.cast !== b.cast || a.speakers.length !== b.speakers.length || a.speakers.join('|') !== b.speakers.join('|') || a.cues.join('|') !== b.cues.join('|')) {
+    if (a.scenes !== b.scenes || a.cast !== b.cast || a.speakers.length !== b.speakers.length || a.speakers.join('|') !== b.speakers.join('|') || a.cues.join('|') !== b.cues.join('|') || a.puzzleLines.join('\n') !== b.puzzleLines.join('\n')) {
       return `the script lines changed (scenes ${a.scenes} to ${b.scenes}, on-screen lines ${a.cast} to ${b.cast}, speaker lines ${a.speakers.length} to ${b.speakers.length}, picture and sound lines ${a.cues.length} to ${b.cues.length})`
     }
   }
@@ -286,6 +289,8 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     run.version = version
     const owner = await storyBriefSection(d, slug)
     if (owner) messages[messages.length - 1]!.content += `\n\n${owner}`
+    // a mystery with puzzles: the puzzle lines are made by code and must come back unchanged
+    if (fmt.puzzles) messages[messages.length - 1]!.content += `\n\n${PUZZLE_HUMANIZER_NOTE}`
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6), temperature: 0.8 })
     let revised = stripLeadingHeading(cleanProse(r.text))
     // a model that ends with the instructions it was given: the tail is cut, a leak in the middle refuses the version

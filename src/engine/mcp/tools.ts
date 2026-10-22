@@ -11,6 +11,9 @@ import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
 import { parseLightBible, parseScript } from '../publish/script'
 import { musicCues, parseScreenplay, runtimeOf } from '../publish/screenplay'
+import { puzzleEntrySchema } from '../../shared/puzzles'
+import type { PuzzleEntry } from '../../shared/puzzles'
+import { puzzlesOf } from '../pipeline/puzzles'
 import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, seriesSummary, serverStatuses, topicSummary } from '../summary'
 import { bookRefs, seriesMembers } from '../store/series'
 import { TOPIC_KINDS } from '../store/topics'
@@ -298,7 +301,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'get_script',
     {
       description:
-        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice, aliases}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration, a break or a cue ({type: "cue", cue: "cg" | "insert" | "sfx" | "ambience", text}: a picture or sound line, text null for `CG: none`, `END CG` and `AMBIENCE: none`). A speaker or cast name that is one of the aliases of a character comes out as the bible name, with `alias` set on the line or the cast entry; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
+        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice, aliases}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration, a break, a puzzle beat of a mystery with puzzles ({type: "clue", puzzle, clue, text} for a CLUE line, {type: "evidence", key, text}, {type: "puzzle", puzzle, kind} and {type: "testimony", witness, statements: [{n, speaker, expression, text}]}; `puzzles` at the top level lists the puzzles of the book from bible/puzzles.md) or a cue ({type: "cue", cue: "cg" | "insert" | "sfx" | "ambience", text}: a picture or sound line, text null for `CG: none`, `END CG` and `AMBIENCE: none`). A speaker or cast name that is one of the aliases of a character comes out as the bible name, with `alias` set on the line or the cast entry; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
       inputSchema: { book: z.string().describe('Book slug'), chapter: z.number().int().positive().optional().describe('Only this chapter') },
       annotations: READ
     },
@@ -332,7 +335,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
               ...(entry?.source_chapters ? { sourceChapters: entry.source_chapters } : {}),
               scenes: parseScript(c.body, names, bible.characters).scenes
             }
-          })
+          }),
+        puzzles: await puzzlesOf(engine, slug)
       }
     })
   )
@@ -492,11 +496,15 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
         humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),
+        puzzles: z
+          .array(puzzleEntrySchema)
+          .optional()
+          .describe('A mystery with puzzles (format "mystery-puzzle-visual-novel"): the puzzles, each as VN Studio makes them (vno_puzzle_generate): {key, kind: "murdle", title?, core (the whole core), names (item id -> name in the story), text (clue id and "murder" -> the canonical sentence)}; for a testimony also {testimony: {witness, breaks: [{statement, evidence}], evidence: [{key, description}]}}. Scriptorium keeps them as bible/puzzles.md, the outline places each in a chapter and the writers plant the clues (docs/visual-novel.md "Puzzles")'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; puzzles?: PuzzleEntry[]; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -515,6 +523,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.genre ? { genre: a.genre } : {}),
           ...(a.series ? { series: a.series } : {}),
           ...(a.humanize === false ? { humanize: false } : {}),
+          ...(a.puzzles?.length ? { puzzles: a.puzzles } : {}),
           ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
