@@ -344,6 +344,39 @@ describe('humanizer: the pipeline on the mock provider', () => {
     }
     for (let n = 1; n <= 4; n++) expect((await doneJob(env, `${slug}--humanize--ch0${n}--r0`)).body).toMatch(/kept as it was \(the script lines changed/)
   }, 180000)
+
+  it('a visual novel pass that moves a scene to a new place adds the place to the light bible, with the chapter number', async () => {
+    const prose = (n: number) => Array.from({ length: n }, (_, i) => ['The', 'little', 'fox', 'yawned', 'and', 'curled', 'up', 'in', 'the', 'warm', 'hay.'][i % 11]).join(' ')
+    env = await makePipelineEnv({
+      activate: ['vn-mystery'],
+      format: 'visual-novel',
+      humanizer: true,
+      // the humanizer words the barn scene as a new place
+      humanizeWith: (chapter) => chapter.replace('SCENE: Hay Barn', 'SCENE: The cellar').replace('yawned', 'gave a huge yawn'),
+      beforeStart: async (dir) => {
+        const file = path.join(dir, 'config', 'formats.md')
+        const doc = parseMd(await readFile(file, 'utf8'))
+        const formats = (doc.data.formats as { id: string }[]).map((f) => (f.id === 'visual-novel' ? { ...f, words: [1200, 4000], chapters: [4, 4] } : f))
+        await writeMd(file, { ...doc.data, formats }, doc.body)
+      }
+    })
+    env.mock.on({ task: 'draft_chapter' }, (req) => {
+      const text = req.messages[req.messages.length - 1]!.content
+      const words = Number(/(?:chapter should be about|Keep the chapter at about|Cut it to about) (\d+) words/.exec(text)?.[1] ?? 200)
+      return `SCENE: Hay Barn, night\nON SCREEN: Fox (sleepy)\n${prose(words)}\nFOX (sleepy): I am so tired.`
+    })
+    const slug = await published(env)
+    for (let n = 1; n <= 4; n++) {
+      const ch = await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))
+      expect(ch.body, `chapter ${n}`).toContain('SCENE: The cellar, night')
+      expect(ch.data.humanized, `chapter ${n}`).toBe(0)
+    }
+    const bible = (await readDoc(bookDir(env, slug, 'bible', 'bible.md'))).body
+    expect(bible).toMatch(/## Places[\s\S]*- \*\*The cellar\*\*: .*\(first seen in chapter 1\)/)
+    expect(bible.match(/\*\*The cellar\*\*/g)).toHaveLength(1)
+    await env.engine.logs.flush()
+    expect(await readFile(bookDir(env, slug, 'log.md'), 'utf8')).toContain('humanizer: new place(s) added to the bible: The cellar')
+  }, 180000)
 })
 
 describe('humanizer: the role, the seed and the migration', () => {

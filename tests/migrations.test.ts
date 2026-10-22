@@ -5,8 +5,9 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { initDataFolder } from '../src/engine/store/dataFolder'
-import { migrateClientProvider, migrateSeedPrompts } from '../src/engine/store/migrations'
+import { migrateClientProvider, migrateFallbacks, migrateSeedPrompts } from '../src/engine/store/migrations'
 import { SEED_HISTORY, seedHash } from '../src/engine/store/seedHistory'
+import { parseMd } from '../src/shared/md'
 import { seedDir } from './helpers'
 
 const dirs: string[] = []
@@ -190,5 +191,70 @@ describe('the seed history', () => {
       }
     }
     expect(missing, 'run `yarn seed:hashes`').toEqual([])
+  })
+})
+
+describe('migrateFallbacks (SCP-19)', () => {
+  const oldSettings = (extra: string[], body = ['# Settings', '', 'My own note.', '', '## Default models', '', 'old text about `default_paid_model`.', '', '## Mine', '', 'Keep this.', '']) =>
+    ['---', 'kind: settings', 'kindle_address: me@kindle.com', 'default_paid_model: deepseek/deepseek-v4-pro', 'default_strata_model: strata/qwen3.8-flash-next', 'default_lmstudio_model: lmstudio/gemma', ...extra, 'lmstudio_parallel: 2', '---', ...body].join('\n')
+  const settingsFolder = async (text: string) => {
+    const dir = await tmp()
+    await mkdir(path.join(dir, 'config'), { recursive: true })
+    await writeFile(path.join(dir, 'config', 'settings.md'), text)
+    return dir
+  }
+  const read = async (dir: string) => parseMd(await readFile(path.join(dir, 'config', 'settings.md'), 'utf8'))
+
+  it('an empty model_order gives paid, strata, lmstudio, not shared; the old keys go and the body section is replaced', async () => {
+    const dir = await settingsFolder(oldSettings(['model_order: []']))
+    const r = await migrateFallbacks(dir, seedDir)
+    expect(r.changes).toHaveLength(1)
+    const doc = await read(dir)
+    expect(doc.data).toMatchObject({ kindle_address: 'me@kindle.com', lmstudio_parallel: 2, fallbacks: ['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/gemma'], fallback_shared: false })
+    for (const k of ['default_paid_model', 'default_strata_model', 'default_lmstudio_model', 'model_order']) expect(doc.data).not.toHaveProperty(k)
+    expect(doc.body).toContain('My own note.')
+    expect(doc.body).toContain('Keep this.')
+    expect(doc.body).toContain('`fallbacks` is the list of models')
+    expect(doc.body).not.toContain('old text about')
+    expect(doc.body.match(/## Default models/g)).toHaveLength(1)
+  })
+
+  it('model_order [paid, lmstudio, strata] gives that order and turns the shared order on', async () => {
+    const dir = await settingsFolder(oldSettings(['model_order: [paid, lmstudio, strata]']))
+    await migrateFallbacks(dir, seedDir)
+    expect((await read(dir)).data).toMatchObject({ fallbacks: ['deepseek/deepseek-v4-pro', 'lmstudio/gemma', 'strata/qwen3.8-flash-next'], fallback_shared: true })
+  })
+
+  it('a group model_order leaves out goes last; a missing default model is the seed one', async () => {
+    const dir = await settingsFolder(['---', 'kind: settings', 'default_lmstudio_model: lmstudio/gemma', 'model_order: [lmstudio]', '---', '# Settings', ''].join('\n'))
+    await migrateFallbacks(dir, seedDir)
+    expect((await read(dir)).data).toMatchObject({ fallbacks: ['lmstudio/gemma', 'deepseek/deepseek-flash', 'strata/qwen3.8-flash-next'], fallback_shared: true })
+  })
+
+  it('leaves a migrated file, a file without the old keys and a missing file alone', async () => {
+    const text = ['---', 'kind: settings', 'fallbacks:', '  - a/b', 'fallback_shared: true', '---', '# Settings', '', '## Default models', '', 'mine', ''].join('\n')
+    const dir = await settingsFolder(text)
+    expect((await migrateFallbacks(dir, seedDir)).changes).toEqual([])
+    expect(await readFile(path.join(dir, 'config', 'settings.md'), 'utf8')).toBe(text)
+    const bare = await settingsFolder(['---', 'kind: settings', '---', '# Settings', ''].join('\n'))
+    expect((await migrateFallbacks(bare, seedDir)).changes).toEqual([])
+    expect((await migrateFallbacks(await tmp(), seedDir)).changes).toEqual([])
+    // running it twice on an old file changes nothing the second time
+    const old = await settingsFolder(oldSettings(['model_order: []']))
+    expect((await migrateFallbacks(old, seedDir)).changes).toHaveLength(1)
+    expect((await migrateFallbacks(old, seedDir)).changes).toEqual([])
+  })
+
+  it('without a seed the body stays as it is, and initDataFolder migrates an old folder once', async () => {
+    const dir = await settingsFolder(oldSettings(['model_order: []']))
+    await migrateFallbacks(dir, undefined)
+    const doc = await read(dir)
+    expect(doc.data.fallbacks).toHaveLength(3)
+    expect(doc.body).toContain('old text about')
+    const old = await settingsFolder(oldSettings(['model_order: [strata]']))
+    const first = await initDataFolder(old, seedDir)
+    expect(first.migrated.filter((l) => l.includes('fallbacks'))).toHaveLength(1)
+    expect((await read(old)).data).toMatchObject({ fallbacks: ['strata/qwen3.8-flash-next', 'deepseek/deepseek-v4-pro', 'lmstudio/gemma'], fallback_shared: true })
+    expect((await initDataFolder(old, seedDir)).migrated.filter((l) => l.includes('fallbacks'))).toHaveLength(0)
   })
 })

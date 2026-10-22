@@ -7,8 +7,7 @@ import { cleanProse } from './llm'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { buildMessages } from './prompts'
 import { bibleFor } from './nfcontext'
-import { lightBibleEntries } from './series'
-import { canonicalScenes } from './scriptPlaces'
+import { settleScenePlaces } from './scriptPlaces'
 import { formatVars, recordMade, Run, stripLeadingHeading, storyBriefSection, unitNumber, variant } from './handlers'
 import type { PipelineDeps } from './handlers'
 
@@ -297,13 +296,8 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     const problem = leakProblem ?? humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
     if (problem) ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
     let body = problem ? current.body : revised
-    // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently)
-    if (!problem && fmt.script) {
-      const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)
-      const canon = canonicalScenes(body, places)
-      for (const r of canon.renamed) ctx.log(`humanizer: SCENE place "${r.from}" written as the bible's "${r.to}"`)
-      body = canon.body
-    }
+    // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently), and a place the bible lacks is added to it
+    if (!problem && fmt.script) body = await settleScenePlaces(d, slug, n, body, (m) => ctx.log(`humanizer: ${m}`))
     // the round is the chapter's own (it stays), `humanized` says in which book round the pass ran: a pass that was refused counts too, so it is not asked again
     await d.books.writeChapter(slug, {
       n,

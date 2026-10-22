@@ -156,6 +156,7 @@ export function modelSummaries(registry: ModelRegistry): ModelSummary[] {
       model: m.id,
       family: m.family,
       local: m.provider.local,
+      kind: registry.kindOf(m.ref),
       enabled: m.provider.available,
       shown: registry.isShown(m.ref),
       source: m.picked ? ('picked' as const) : m.discovered ? ('discovered' as const) : ('config' as const),

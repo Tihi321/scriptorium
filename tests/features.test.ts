@@ -128,13 +128,17 @@ describe('commands', () => {
     expect(md.body).toContain('Sending books to your Kindle')
     expect((await env.engine.snapshot()).settings).toMatchObject({ kindleAddress: 'me_1@kindle.com', smtpPort: 465, smtpSecure: true })
     // the model defaults: left out they keep their values, sent they are written and the registry follows
-    expect(md.data).toMatchObject({ default_paid_model: 'deepseek/deepseek-flash', default_lmstudio_model: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', lmstudio_parallel: 4, lmstudio_context: 131072, lmstudio_ttl_minutes: 60 })
-    await env.engine.handleCommand({ type: 'saveSettings', kindleAddress: 'me_1@kindle.com', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, defaultPaidModel: 'deepseek/deepseek-v4-pro', defaultStrataModel: 'strata/qwen3.8-flash-next-low', defaultLmstudioModel: 'lmstudio/nail-qwen3.6-35b-a3b-mtp', lmstudioParallel: 2, lmstudioContext: 65536, lmstudioTtlMinutes: 30 })
+    expect(md.data).toMatchObject({ fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallback_shared: false, lmstudio_parallel: 4, lmstudio_context: 131072, lmstudio_ttl_minutes: 60 })
+    await env.engine.handleCommand({ type: 'saveSettings', kindleAddress: 'me_1@kindle.com', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: [' deepseek/deepseek-v4-pro ', 'strata/qwen3.8-flash-next-low', 'deepseek/deepseek-v4-pro', 'lmstudio/nail-qwen3.6-35b-a3b-mtp', 'no-slash'], fallbackShared: true, lmstudioParallel: 2, lmstudioContext: 65536, lmstudioTtlMinutes: 30 })
     const md2 = parseMd(await readFile(path.join(env.dir, 'config', 'settings.md'), 'utf8'))
-    expect(md2.data).toMatchObject({ default_paid_model: 'deepseek/deepseek-v4-pro', default_strata_model: 'strata/qwen3.8-flash-next-low', default_lmstudio_model: 'lmstudio/nail-qwen3.6-35b-a3b-mtp', lmstudio_parallel: 2, lmstudio_context: 65536, lmstudio_ttl_minutes: 30 })
+    expect(md2.data).toMatchObject({ fallbacks: ['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'], fallback_shared: true, lmstudio_parallel: 2, lmstudio_context: 65536, lmstudio_ttl_minutes: 30 })
     expect(env.engine.registry.resolve('paid')).toBe('deepseek/deepseek-v4-pro')
-    expect(env.engine.registry.resolve('lmstudio')).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
-    expect(last('snapshot')).toMatchObject({ settings: { lmstudioParallel: 2 } })
+    expect(last('snapshot')).toMatchObject({ settings: { lmstudioParallel: 2, fallbackShared: true, fallbacks: ['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'] } })
+    // an empty list is refused: the rows stay, and the flag can be switched off alone
+    await env.engine.handleCommand({ type: 'saveSettings', kindleAddress: 'me_1@kindle.com', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: [], fallbackShared: false })
+    const md3 = parseMd(await readFile(path.join(env.dir, 'config', 'settings.md'), 'utf8'))
+    expect(md3.data.fallbacks).toEqual(['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'])
+    expect(md3.data.fallback_shared).toBe(false)
   })
 
   it('setSecret only accepts the allowlist and never logs a value', async () => {

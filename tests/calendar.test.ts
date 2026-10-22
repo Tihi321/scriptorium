@@ -1,7 +1,10 @@
-import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { calendarSection, datesIn, storyYear, weekdayMismatches, weekdayOf } from '../src/engine/pipeline/calendar'
+import { STORY_YEAR_RULE, ensureStoryYearRule } from '../src/engine/pipeline/handlers'
 import { dimensionsFor } from '../src/engine/pipeline/scoring'
 import { parseMd } from '../src/shared/md'
 import { makePipelineEnv, waitFor } from './helpers'
@@ -92,5 +95,55 @@ describe('the reviewers and the writer get the calendar', () => {
     expect(rewrites.length).toBeGreaterThan(0)
     expect(rewrites[0]).toContain('open to judgement')
     expect(rewrites[0]).toContain('The story is set in 2026')
+  }, 120000)
+})
+
+describe('the story year in every outline variant', () => {
+  let env: Awaited<ReturnType<typeof makePipelineEnv>> | undefined
+  afterEach(async () => {
+    await env?.cleanup()
+    env = undefined
+  })
+
+  it('the seed outline prompts of every variant ask for story_year', async () => {
+    for (const f of ['outline', 'outline_vn', 'outline_nf', 'outline_article']) {
+      expect(await readFile(path.join(__dirname, '..', 'seed', 'prompts', 'architect', `${f}.md`), 'utf8'), f).toContain('"story_year"')
+    }
+  })
+
+  it('an outline prompt without the field gets the engine rule appended; one with it is left alone', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'scriptorium-year-'))
+    try {
+      await mkdir(path.join(dir, 'prompts', 'architect'), { recursive: true })
+      await writeFile(path.join(dir, 'prompts', 'architect', 'outline.md'), '---\nkind: prompt\nrole: architect\ntask: outline\n---\nOutline {{title}}. Reply with {"chapters": []}\n')
+      await writeFile(path.join(dir, 'prompts', 'architect', 'outline_nf.md'), '---\nkind: prompt\nrole: architect\ntask: outline_nf\n---\nReply with {"chapters": [], "story_year": null}\n')
+      const old = [{ role: 'user' as const, content: 'Outline X.' }]
+      await ensureStoryYearRule(dir, old, 'outline')
+      expect(old[0]!.content).toBe(`Outline X.\n\n${STORY_YEAR_RULE}`)
+      const current = [{ role: 'user' as const, content: 'Outline X.' }]
+      await ensureStoryYearRule(dir, current, 'outline_nf')
+      expect(current[0]!.content).toBe('Outline X.')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  const yearOf = async (dir: string, topic: string): Promise<unknown> => {
+    await env!.engine.handleCommand({ type: 'setTopicActive', id: topic, active: true })
+    const slug = await waitFor(async () => (await readdir(path.join(dir, 'books')))[0] ?? null, 20000, 'the book folder')
+    await env!.engine.handleCommand({ type: 'setTopicActive', id: topic, active: false })
+    const file = path.join(dir, 'books', slug, 'book.md')
+    await waitFor(async () => existsSync(file) && parseMd(await readFile(file, 'utf8')).data.story_year !== undefined, 60000, 'story_year in book.md')
+    return parseMd(await readFile(file, 'utf8')).data.story_year
+  }
+
+  it('a non-fiction outline answer with story_year sets it in book.md', async () => {
+    env = await makePipelineEnv({ format: 'nonfiction-short', citations: true, activate: [], storyYear: 1888 })
+    expect(await yearOf(env.dir, 'his-books-and-printing')).toBe(1888)
+  }, 120000)
+
+  it('an article outline answer with story_year sets it in book.md', async () => {
+    env = await makePipelineEnv({ format: 'article', citations: true, activate: [], storyYear: 2026 })
+    expect(await yearOf(env.dir, 'news-technology')).toBe(2026)
   }, 120000)
 })

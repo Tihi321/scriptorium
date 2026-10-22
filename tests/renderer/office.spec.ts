@@ -263,21 +263,43 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   // the Models panel: the alias defaults, a provider lists its models on Detect, ticking one shows it in the pickers,
   // a model without a price can't be ticked, a model can be added by its id, and LM Studio's load settings
   await page.getByTestId('settings-open').click()
-  await expect(page.getByTestId('set-defaultPaidModel')).toHaveCount(0) // moved to the Models panel
+  await expect(page.getByTestId('fallback-add')).toHaveCount(0) // the fallback list is in the Models panel
   await page.getByTestId('settings-close').click()
   await page.getByTestId('models-open').click()
   await expect(page.getByTestId('models-dialog')).toBeVisible()
-  await page.getByTestId('set-defaultPaidModel').selectOption('openrouter/google/gemma-4-31b-it:free')
-  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', defaultPaidModel: 'openrouter/google/gemma-4-31b-it:free', kindleAddress: 'reader@kindle.com' }))
-  await expect(page.getByTestId('set-defaultPaidModel')).toHaveValue('openrouter/google/gemma-4-31b-it:free')
-  // one fallback order for every role: moving a group turns it on, unticking goes back to each role's own order
+  const lastSave = async () => (await commands(page)).filter((c) => c.type === 'saveSettings').at(-1) as unknown as { fallbacks: string[]; fallbackShared: boolean; kindleAddress: string }
+  // the fallback list: one row per model, each answering to its kind's alias
+  await expect(page.locator('[data-testid^="fallback-row-"]')).toHaveCount(3)
+  await expect(page.getByTestId('fallback-alias-0')).toHaveText('paid')
+  await expect(page.getByTestId('fallback-alias-1')).toHaveText('strata')
+  await expect(page.getByTestId('fallback-alias-2')).toHaveText('lmstudio')
+  await expect(page.getByTestId('fallback-kind-0')).toHaveValue('paid')
+  await page.getByTestId('fallback-model-0').selectOption('openrouter/google/gemma-4-31b-it:free')
+  expect((await lastSave()).fallbacks[0]).toBe('openrouter/google/gemma-4-31b-it:free')
+  expect((await lastSave()).kindleAddress).toBe('reader@kindle.com')
+  await expect(page.getByTestId('fallback-model-0')).toHaveValue('openrouter/google/gemma-4-31b-it:free')
+  // add a row (an API model), turn it into an LM Studio row, move it up and remove it
+  await page.getByTestId('fallback-add').click()
+  await expect(page.locator('[data-testid^="fallback-row-"]')).toHaveCount(4)
+  expect((await lastSave()).fallbacks).toHaveLength(4)
+  await expect(page.getByTestId('fallback-alias-3')).toHaveText('paid-2')
+  await page.getByTestId('fallback-kind-3').selectOption('lmstudio')
+  await expect(page.getByTestId('fallback-alias-3')).toHaveText('lmstudio-2')
+  const four = (await lastSave()).fallbacks
+  expect(four[3]).toMatch(/^lmstudio\//)
+  await page.getByTestId('fallback-up-3').click()
+  await expect(page.getByTestId('fallback-model-2')).toHaveValue(four[3]!)
+  expect((await lastSave()).fallbacks).toEqual([four[0], four[1], four[3], four[2]])
+  await page.getByTestId('fallback-remove-2').click()
+  await expect(page.locator('[data-testid^="fallback-row-"]')).toHaveCount(3)
+  expect((await lastSave()).fallbacks).toEqual([four[0], four[1], four[2]])
+  // one fallback order for every role: ticking turns it on, unticking goes back to each role's own order
   await expect(page.getByTestId('order-shared')).not.toBeChecked()
-  await page.getByTestId('order-up-lmstudio').click()
-  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', modelOrder: ['paid', 'lmstudio', 'strata'] }))
+  await page.getByTestId('order-shared').click() // follows the engine's snapshot, so not check()
+  expect((await lastSave()).fallbackShared).toBe(true)
   await expect(page.getByTestId('order-shared')).toBeChecked()
-  await expect(page.locator('[data-testid="order-paid"], [data-testid="order-lmstudio"], [data-testid="order-strata"]').nth(1)).toHaveAttribute('data-testid', 'order-lmstudio')
-  await page.getByTestId('order-shared').click() // follows the engine's snapshot, so not uncheck()
-  expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', modelOrder: [] }))
+  await page.getByTestId('order-shared').click()
+  expect((await lastSave()).fallbackShared).toBe(false)
   await expect(page.getByTestId('order-shared')).not.toBeChecked()
   await page.getByTestId('models-provider-openrouter').click()
   expect(await commands(page)).not.toContainEqual({ type: 'detectModels', provider: 'openrouter' }) // only on the button

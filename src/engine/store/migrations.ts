@@ -311,3 +311,58 @@ export async function migrateSeedPrompts(dataDir: string, seedDir: string | unde
   }
   return { changes }
 }
+
+/** The fixed default models of before SCP-19, as the seed had them (for a settings.md that lacks one of the keys). */
+const OLD_DEFAULT_MODELS = {
+  paid: 'deepseek/deepseek-flash',
+  strata: 'strata/qwen3.8-flash-next',
+  lmstudio: 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'
+} as const
+const OLD_SETTINGS_KEYS = ['default_paid_model', 'default_strata_model', 'default_lmstudio_model', 'model_order']
+
+/** The "## Default models" section of a settings.md body (heading to the next `## ` heading or the end), or null. */
+function defaultModelsSection(body: string): { from: number; to: number } | null {
+  const m = /^## Default models[ \t]*\r?$/m.exec(body)
+  if (!m) return null
+  const rest = body.slice(m.index + m[0].length)
+  const next = /^## /m.exec(rest)
+  return { from: m.index, to: next ? m.index + m[0].length + next.index : body.length }
+}
+
+/**
+ * SCP-19: `config/settings.md` had three fixed default models and `model_order`; it has `fallbacks` (an open list of `provider/model`) and
+ * `fallback_shared` now. A settings.md with any of the old keys and no `fallbacks` gets `fallbacks` = its three default models in
+ * `model_order` order (groups that order leaves out follow as paid, strata, lmstudio; an empty order gives paid, strata, lmstudio) and
+ * `fallback_shared` = `model_order` is not empty; the old keys go. The body keeps what the owner wrote, except that its "## Default
+ * models" section is replaced with the seed's (the text describes the old keys). Running it again changes nothing. A folder without the file is
+ * not touched.
+ */
+export async function migrateFallbacks(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  const changes: string[] = []
+  const file = path.join(dataDir, 'config', 'settings.md')
+  if (!existsSync(file)) return { changes }
+  const doc = await readMd(file)
+  const data = doc.data
+  if (data.fallbacks !== undefined || !OLD_SETTINGS_KEYS.some((k) => k in data)) return { changes }
+  const model = (g: keyof typeof OLD_DEFAULT_MODELS): string => {
+    const v = data[`default_${g}_model`]
+    return typeof v === 'string' && v.trim() ? v.trim() : OLD_DEFAULT_MODELS[g]
+  }
+  const order = (Array.isArray(data.model_order) ? data.model_order : []).filter((g): g is keyof typeof OLD_DEFAULT_MODELS => g === 'paid' || g === 'strata' || g === 'lmstudio')
+  const groups = [...new Set([...order, 'paid', 'strata', 'lmstudio'] as (keyof typeof OLD_DEFAULT_MODELS)[])]
+  const next: Record<string, unknown> = { ...data }
+  for (const k of OLD_SETTINGS_KEYS) delete next[k]
+  next.fallbacks = [...new Set(groups.map(model))]
+  next.fallback_shared = order.length > 0
+  let body = doc.body
+  const mine = defaultModelsSection(body)
+  const seedFile = seedDir ? path.join(seedDir, 'config', 'settings.md') : ''
+  if (mine && seedFile && existsSync(seedFile)) {
+    const seedBody = parseMd(await fs.readFile(seedFile, 'utf8')).body
+    const theirs = defaultModelsSection(seedBody)
+    if (theirs) body = body.slice(0, mine.from) + seedBody.slice(theirs.from, theirs.to).replace(/\s*$/, '\n\n') + body.slice(mine.to)
+  }
+  await writeMd(file, next, body)
+  changes.push(`config/settings.md: the default models and model_order became fallbacks (${(next.fallbacks as string[]).join(', ')}; one order for every role: ${next.fallback_shared})`)
+  return { changes }
+}

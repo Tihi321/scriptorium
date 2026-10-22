@@ -35,7 +35,7 @@ import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters,
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
-import { addPlacesToBible, canonicalScenes, placeDescriptions, placesBlock } from './scriptPlaces'
+import { placesBlock, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
@@ -305,19 +305,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
   }
 
   /** A visual novel script: its SCENE places are the bible's names, and the places the bible lacks are added to it (see scriptPlaces.ts). */
-  const settlePlaces = async (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => {
-    const bible = await d.books.bible(slug)
-    if (!bible) return body // a structured bible keeps its places in files: the script is left as it is
-    const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)
-    const out = canonicalScenes(body, places)
-    for (const r of out.renamed) ctx.log(`SCENE place "${r.from}" written as the bible's "${r.to}"`)
-    if (out.unknown.length) {
-      const text = placeDescriptions(out.body, out.unknown)
-      await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + addPlacesToBible(bible, out.unknown.map((p) => ({ place: p, text: text.get(p) ?? '' })), n))
-      ctx.log(`new place(s) added to the bible: ${out.unknown.join(', ')}`)
-    }
-    return out.body
-  }
+  const settlePlaces = (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => settleScenePlaces(d, slug, n, body, ctx.log)
 
   sched.register('generate_ideas', async (ctx) => {
     const run = new Run(ctx)
@@ -538,6 +526,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     run.version = version
     // a story with choices: the architect plans a map of chapters with choices and endings
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
+    await ensureStoryYearRule(d.dataDir, messages, variant(fmt, 'outline'))
     appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await seriesSection(d, slug))
     // an adaptation: the source, the chapter range to compress it into and, with choices, the source's ending as the canon path
@@ -1004,8 +993,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       }
     }
     if (countWords(body) < 20) throw new Error(`the rewrite of chapter ${n} came back too short`)
-    // a round rewrite far over the target gets one request to cut it (a length rewrite says its own number, a note of the owner is their choice)
-    if (!isLength && !isNote) {
+    // a rewrite far over the target gets one request to cut it. A length rewrite says its own number. A note of the owner is tightened too,
+    // unless the note itself asks for more length (then the owner wants the long chapter)
+    const noteLonger = isNote && noteWantsLength(ctx.jobBody)
+    if (noteLonger && countWords(body) > target * TRIM_ABOVE) ctx.log(`the note asks for more length: the chapter of ${countWords(body)} words (target ${target}) is not tightened`)
+    if (!isLength && !noteLonger) {
       const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens)
       if (out.reply) {
         r = out.reply
@@ -1147,9 +1139,21 @@ Build the outline on these facts: the period, places, jobs, distances and durati
   })
 }
 
+/** A note of the owner that asks for more length ("make it longer", "add another scene"): its rewrite is not tightened. */
+export function noteWantsLength(note: string): boolean {
+  return /\b(longer|expand|lengthen|more (detail|words|scenes?)|add (a|an|another|more)\b|flesh out)/i.test(note)
+}
+
 /** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
 export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean }, task: string): string {
   return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
+}
+
+/** Added to an outline prompt from an older data folder that does not ask for `story_year` (the seed prompts do). */
+export const STORY_YEAR_RULE = `Also give "story_year" in the JSON object: the year the book is set in (or, for an article, the year it is about) as a number such as 2026, or null when it has no fixed year. Reviewers use it to check weekdays and dates.`
+
+export async function ensureStoryYearRule(dataDir: string, messages: ChatMessage[], task: string): Promise<void> {
+  if (!(await loadPrompt(dataDir, 'architect', task)).raw.includes('"story_year"')) appendToPrompt(messages, STORY_YEAR_RULE)
 }
 
 function topicKind(formatId: string, formats: FormatEntry[]): string | null {

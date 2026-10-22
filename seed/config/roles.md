@@ -41,7 +41,7 @@ roles:
 
 The default models for each role, as an ordered list of `provider/model` or an alias. The first model is the default. If it fails, is rate-limited or is over budget, the next one is tried. An agent's own `model` field (in `agents/<agent>.md`) goes in front of this list.
 
-The aliases `paid`, `strata` and `lmstudio` stand for the default models in `config/settings.md` (also in the app's Models panel): DeepSeek V4.1 Flash, Strata's Qwen3.8-Flash-Next and LM Studio's Gemma 4 E4B to start with. Change a default there and every role that uses the alias follows.
+The aliases `paid`, `strata` and `lmstudio` stand for the first API, Strata and LM Studio row of the `fallbacks` list in `config/settings.md` (also in the app's Models panel): DeepSeek V4.1 Flash, Strata's Qwen3.8-Flash-Next and LM Studio's Gemma 4 E4B to start with. `paid-2`, `lmstudio-2` ... stand for the second row of a kind, and so on. Change a row there and every role that uses the alias follows.
 
 Starting choices, all of them first guesses to be tuned in the model picker:
 - Writers, architect, editor-in-chief, idea generator, publisher: the paid default, with Strata and then LM Studio as fallbacks.
@@ -50,4 +50,4 @@ Starting choices, all of them first guesses to be tuned in the model picker:
 - Archivist, researcher and the checks (continuity, originality, fact): Strata with thinking on `low` (named directly, it is not the Strata default), then LM Studio, then the paid default.
 - Embeddings: the local nomic model in LM Studio. Strata has no embeddings, so LM Studio keeps nomic loaded while Strata runs.
 
-Reviewer jobs prefer a model family different from the book's writer. Changing a default here applies at once: a running job asks its current request again on the new model. `model_order` in `config/settings.md` (the Models panel) can sort every list here by group (API, Strata, LM Studio) instead. The engine rewrites this file when you change a role default in the UI, so comments in the YAML are not kept. The text below the frontmatter is.
+Reviewer jobs prefer a model family different from the book's writer. Changing a default here applies at once: a running job asks its current request again on the new model. `fallback_shared` in `config/settings.md` (the Models panel) can give every role the fallback list there instead, top to bottom. The engine rewrites this file when you change a role default in the UI, so comments in the YAML are not kept. The text below the frontmatter is.

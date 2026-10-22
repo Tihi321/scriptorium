@@ -145,6 +145,7 @@ export class Engine {
       router: this.router,
       budget: this.budget,
       logs: this.logs,
+      log: (text) => this.log(text),
       getFactory: () => this.factory,
       emit: this.emit,
       pollMs: opts.pollMs,
@@ -207,6 +208,7 @@ export class Engine {
     await this.loadQualityAndFormats()
     await this.loadSettings()
     await this.registry.load()
+    this.warnAliases()
     void this.discoverModels()
     // providers with `concurrency: auto` (Strata) follow the slot count their server reports: asked now and every few seconds,
     // so starting Strata with a "4 at once" or a "one at a time" script needs no change in providers.md
@@ -600,6 +602,7 @@ export class Engine {
         const name = path.basename(e.rel, '.md')
         if (name === 'providers' || name === 'roles' || name === 'models') {
           await this.registry.load()
+          this.warnAliases()
           if (name !== 'providers') this.scheduler.changeModel() // running jobs follow a changed role list
           this.emit(await this.snapshot()) // the pickers show the models and role defaults
           if (name === 'providers') void this.discoverModels()
@@ -611,7 +614,8 @@ export class Engine {
           if (before !== this.factory.paused) this.emit({ type: 'factory.paused', paused: this.factory.paused })
         } else if (name === 'settings') {
           await this.loadSettings()
-          await this.registry.load() // the role aliases and the LM Studio context may have changed
+          await this.registry.load() // the fallback list and the LM Studio context may have changed
+          this.warnAliases()
           this.scheduler.changeModel() // running jobs follow changed default models or their order
         }
         else if (name === 'quality' || name === 'formats') await this.loadQualityAndFormats()
@@ -638,6 +642,16 @@ export class Engine {
     this.registry.setDefaults(modelDefaultsOf(this.settings))
   }
 
+  /** Aliases already reported, so a reload that changes nothing stays quiet. */
+  private aliasWarned = new Set<string>()
+
+  /** Logs once each alias of roles.md that names no row of the fallback list (its model is skipped like an unknown one). */
+  private warnAliases(): void {
+    const now = new Set(this.registry.unresolvedAliases())
+    for (const a of now) if (!this.aliasWarned.has(a)) this.log(`roles.md: "${a}" names no row in the fallback list`)
+    this.aliasWarned = now
+  }
+
   settingsSummary(): SettingsSummary {
     const s = this.settings
     return {
@@ -647,10 +661,8 @@ export class Engine {
       smtpPort: s.smtp_port,
       smtpUser: s.smtp_user,
       smtpSecure: s.smtp_secure,
-      defaultPaidModel: s.default_paid_model,
-      defaultStrataModel: s.default_strata_model,
-      defaultLmstudioModel: s.default_lmstudio_model,
-      modelOrder: s.model_order,
+      fallbacks: s.fallbacks,
+      fallbackShared: s.fallback_shared,
       lmstudioParallel: s.lmstudio_parallel,
       lmstudioContext: s.lmstudio_context,
       lmstudioTtlMinutes: s.lmstudio_ttl_minutes,
@@ -1071,6 +1083,11 @@ export class Engine {
         }
         const port = Number.isFinite(cmd.smtpPort) && cmd.smtpPort > 0 ? Math.round(cmd.smtpPort) : 587
         const s = this.settings
+        // the fallback list: trimmed, no duplicates, each a provider/model, at least one row (else the old list stays)
+        const rows = cmd.fallbacks ? [...new Set(cmd.fallbacks.map((r) => r.trim()).filter((r) => r.includes('/')))] : []
+        const fallbacks = rows.length > 0 ? rows : undefined
+        // the keys of before SCP-19 are gone once the list is saved
+        for (const old of ['default_paid_model', 'default_strata_model', 'default_lmstudio_model', 'model_order']) delete doc.data[old]
         await writeMd(
           file,
           {
@@ -1082,10 +1099,8 @@ export class Engine {
             smtp_port: port,
             smtp_user: cmd.smtpUser.trim(),
             smtp_secure: !!cmd.smtpSecure,
-            default_paid_model: cmd.defaultPaidModel?.trim() || s.default_paid_model,
-            default_strata_model: cmd.defaultStrataModel?.trim() || s.default_strata_model,
-            default_lmstudio_model: cmd.defaultLmstudioModel?.trim() || s.default_lmstudio_model,
-            model_order: cmd.modelOrder ? [...new Set(cmd.modelOrder.filter((g) => g === 'paid' || g === 'strata' || g === 'lmstudio'))] : s.model_order,
+            fallbacks: fallbacks ?? s.fallbacks,
+            fallback_shared: cmd.fallbackShared ?? s.fallback_shared,
             lmstudio_parallel: Math.min(16, Math.max(1, Math.round(cmd.lmstudioParallel ?? s.lmstudio_parallel) || 1)),
             lmstudio_context: Math.max(2048, Math.round(cmd.lmstudioContext ?? s.lmstudio_context) || 32768),
             lmstudio_ttl_minutes: Math.max(1, Math.round(cmd.lmstudioTtlMinutes ?? s.lmstudio_ttl_minutes) || 60)
@@ -1095,7 +1110,8 @@ export class Engine {
         if (cmd.maxBooksInProgress !== undefined) await this.setMaxBooksInProgress(cmd.maxBooksInProgress)
         await this.loadSettings()
         await this.registry.load()
-        this.scheduler.changeModel() // running jobs follow changed default models or their order
+        this.warnAliases()
+        this.scheduler.changeModel() // running jobs follow a changed fallback list or its order
         this.scheduler.kick()
         this.emit(await this.snapshot()) // the role defaults shown in the pickers follow the new aliases
         return
