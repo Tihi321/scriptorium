@@ -66,6 +66,14 @@ export function placeDescriptions(body: string, unknown: string[]): Map<string, 
   return out
 }
 
+/** Every reviewer of a script book gets this: the cue lines are for the game, not prose. */
+export const SCRIPT_CUES_NOTE =
+  'Lines that start with CG:, INSERT:, SFX: or AMBIENCE:, and END CG lines, are picture and sound cues for the visual novel app. They are not text the reader sees: do not review them as prose.'
+
+/** The same for a screenplay: its cue lines are shot and sound cues for the film. */
+export const SCREENPLAY_CUES_NOTE =
+  'Lines that start with SHOT, MUSIC, SFX or TITLE are shot, music and sound cues for the film that is made from this screenplay. They are not prose: do not review them as prose. Check their form only: every scene has at least one SHOT, a shot is one camera take of 4 to 10 seconds, and the spoken words of a shot fit its length (about 2.5 words a second).'
+
 /** The block that tells the writer which place names the bible has. Empty when the bible has none. */
 export function placesBlock(places: string[]): string {
   if (!places.length) return ''

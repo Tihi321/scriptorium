@@ -95,13 +95,13 @@ describe('the migration', () => {
     const formatsFile = path.join(dir, 'config', 'formats.md')
     let formats = await readFile(formatsFile, 'utf8')
     const cut = formats.indexOf('  - id: article\n')
-    const end = formats.indexOf('---\n# Formats')
+    const end = formats.indexOf('  - id: short-film\n') // the screenplay formats follow the newspaper ones
     formats = formats.slice(0, cut) + formats.slice(end)
     formats = formats.replace('\n- `article`:', '\n- `x-removed`:')
     await writeFile(formatsFile, formats.replace(/\n/g, eol))
     const topicsFile = path.join(dir, 'topics.md')
     let topics = await readFile(topicsFile, 'utf8')
-    topics = topics.slice(0, topics.indexOf('\n## Newspaper')).trimEnd() + '\n'
+    topics = topics.slice(0, topics.indexOf('\n## Newspaper')).trimEnd() + '\n' + topics.slice(topics.indexOf('\n## Videos'))
     // a row of the owner's own, edited by hand
     topics = topics.replace(/^\| fic-action-and-adventure +\| Action & Adventure +\| fiction +\| no +\| 5/m, (m) => m.replace('| no ', '| yes'))
     await writeFile(topicsFile, topics.replace(/\n/g, eol))

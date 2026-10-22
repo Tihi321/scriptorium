@@ -8,7 +8,7 @@ async function commands(page: Page) {
   return page.evaluate(() => (globalThis as unknown as { __scriptoriumFake: FakeDebug }).__scriptoriumFake.commands)
 }
 
-test('a published book opens the Script writer, which adapts it into a visual novel', async ({ page }) => {
+test('a published book opens the Script writer, which adapts it into a visual novel or a screenplay', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto('/?demo&seed=3&tick=0')
@@ -27,6 +27,10 @@ test('a published book opens the Script writer, which adapts it into a visual no
   await expect(page.getByTestId('adapt-format-hint')).toContainText('no choices')
   await page.getByTestId('adapt-format').selectOption('choice-visual-novel')
   await expect(page.getByTestId('adapt-format-hint')).toContainText('canon path')
+  // a screenplay format is listed too, with its own hint
+  await page.getByTestId('adapt-format').selectOption('short-film')
+  await expect(page.getByTestId('adapt-format-hint')).toContainText('film')
+  await page.getByTestId('adapt-format').selectOption('choice-visual-novel')
   await page.getByTestId('adapt-title').fill('Hedgehog Hospital, the Script')
   await page.getByTestId('adapt-notes').fill('Keep the night nurse.')
   await page.getByTestId('adapt-submit').click()

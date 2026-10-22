@@ -1,3 +1,5 @@
+import { parsePuzzleEntries } from './puzzles'
+import type { PuzzleEntry } from './puzzles'
 /**
  * The owner's story brief. A story is a file in ideas/ (and, once a book is started, books/<slug>/brief.md). Its body is
  * markdown sections, so it can be edited by hand. The engine, the UI and MCP all read and write it through this module.
@@ -41,6 +43,8 @@ export interface StoryBrief {
   sourceBook?: string
   /** `false`: the book gets no humanizer pass (frontmatter `humanize: false`). Unset: the format decides. */
   humanize?: boolean
+  /** The puzzles of a mystery with puzzles (frontmatter `puzzles`): VN Studio's puzzle cores with names and canonical clue sentences. Not part of the text. */
+  puzzles?: PuzzleEntry[]
 }
 
 export const emptyBrief = (): StoryBrief => ({ title: '', premise: '', plot: '', characters: [], setting: '', style: '', sections: [] })
@@ -160,6 +164,8 @@ export function briefOf(data: Record<string, unknown>, body: string): StoryBrief
   if (data.humanize === false) brief.humanize = false
   const sourceBook = str(data.source_book)
   if (sourceBook) brief.sourceBook = sourceBook
+  const puzzles = parsePuzzleEntries(data.puzzles)
+  if (puzzles.length) brief.puzzles = puzzles
   const rm = data.role_models
   if (rm && typeof rm === 'object' && !Array.isArray(rm)) {
     const models = Object.fromEntries(Object.entries(rm).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k, (v as string).trim()]))

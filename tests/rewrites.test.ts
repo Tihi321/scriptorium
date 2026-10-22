@@ -185,6 +185,8 @@ describe('the places of a script', () => {
     // no Places heading: it is made before Style
     const none = addPlacesToBible('## Characters\n- **Mara**: A girl.\n\n## Style\nMoody.\n', [{ place: 'The cellar', text: '' }], 2)
     expect(none).toBe('## Characters\n- **Mara**: A girl.\n\n## Places\n- **The cellar**: (first seen in chapter 2)\n\n## Style\nMoody.\n')
+    // cue lines right after SCENE do not end the scene's first narration lines
+    expect(placeDescriptions('SCENE: The cellar, midnight\nAMBIENCE: dripping water\nDamp stone and a single candle.\nSFX: a drip\nMARA: Hello.', ['The cellar']).get('The cellar')).toBe('Damp stone and a single candle.')
     expect(placesBlock(places)).toContain('exactly as one of these bible places: Observatory Grand Hall; Harbour Wall.')
     expect(placesBlock([])).toBe('')
   })

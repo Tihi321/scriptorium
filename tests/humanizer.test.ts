@@ -167,7 +167,7 @@ describe('humanizer: the guards and the report', () => {
       'SCENE: The lamp room, night',
       'MARA (whispering): There is a map under the lens and somebody wanted it hidden from us all.'
     ].join('\n')
-    expect(scriptStructure(script)).toEqual({ scenes: 2, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'] })
+    expect(scriptStructure(script)).toEqual({ scenes: 2, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'], cues: [], puzzleLines: [] })
     const livelier = script.replace('Gulls wheel over the water', 'Gulls scream over the black water').replace('girl.', 'girl, and you know it.')
     expect(humanizeProblem(script, livelier, { script: true })).toBeNull()
     // a dropped speaker line, a swapped speaker, a merged scene, a lost on-screen line
@@ -177,6 +177,36 @@ describe('humanizer: the guards and the report', () => {
     expect(humanizeProblem(script, script.replace('ON SCREEN: ', ''), { script: true })).toMatch(/script lines changed/)
     // the same change is fine in prose
     expect(humanizeProblem(script, script.replace('BRAM (gruff)', 'MARA (gruff)'))).toBeNull()
+  })
+
+  it('keeps the picture and sound lines of a script: their kinds and their order, not their words', () => {
+    const script = [
+      'SCENE: The harbour, dawn',
+      'AMBIENCE: gulls and slow water against the pier',
+      'Gulls wheel over the water and a rope creaks against the pier at the very edge of morning.',
+      'ON SCREEN: MARA (freckled, ink on her fingers)',
+      'SFX: a bell rings out over the water',
+      'MARA (worried): The boat is late again and I do not like it one bit this morning at all.',
+      'CG: Mara stands at the end of the pier, watching',
+      'BRAM (gruff): It will come when the tide lets it and not a minute before that, girl.',
+      'END CG',
+      'INSERT: a torn page with a map on it',
+      'MARA (whispering): There is a map under the lens and somebody wanted it hidden from us all.'
+    ].join('\n')
+    // a cue is not a speaker "CG", "SFX" or "AMBIENCE"
+    expect(scriptStructure(script)).toEqual({ scenes: 1, cast: 1, speakers: ['MARA', 'BRAM', 'MARA'], cues: ['ambience', 'sfx', 'cg', 'cg:none', 'insert'], puzzleLines: [] })
+    expect(scriptStructure('CG: none\nAMBIENCE: none\nSFX:\nSOUND: a shot').cues).toEqual(['cg:none', 'ambience:none', 'sfx'])
+    // reworded cue text is fine
+    expect(humanizeProblem(script, script.replace('a bell rings out over the water', 'a ship bell, far off').replace('Gulls wheel', 'Gulls scream'), { script: true })).toBeNull()
+    // a dropped, added, changed or reordered cue line is refused
+    expect(humanizeProblem(script, script.replace('SFX: a bell rings out over the water\n', ''), { script: true })).toMatch(/script lines changed/)
+    expect(humanizeProblem(script, script.replace('\nEND CG', ''), { script: true })).toMatch(/script lines changed/)
+    expect(humanizeProblem(script, script.replace('BRAM (gruff)', 'SFX: a gull cries\nBRAM (gruff)'), { script: true })).toMatch(/script lines changed/)
+    expect(humanizeProblem(script, script.replace('SFX: a bell rings out over the water', 'INSERT: a bell rings out over the water'), { script: true })).toMatch(/script lines changed/)
+    const [a, b] = ['AMBIENCE: gulls and slow water against the pier', 'SFX: a bell rings out over the water']
+    expect(humanizeProblem(script, script.replace(`${a}\n`, '').replace(b, `${b}\n${a}`), { script: true })).toMatch(/script lines changed/)
+    // in prose the cue lines mean nothing
+    expect(humanizeProblem(script, script.replace('SFX: a bell rings out over the water\n', ''))).toBeNull()
   })
 
   it('finds the machine-prose habits of a chapter and the repeated phrases that touch it', () => {

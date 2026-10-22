@@ -186,6 +186,20 @@ export const formatEntrySchema = z.looseObject({
    */
   script: z.boolean().default(false),
   /**
+   * A screenplay for a short film or cartoon (needs `script: true`): shots, voice-over and music cues instead of a visual novel's
+   * speaker and picture lines. The writer, architect and line editor use the `_sp` prompts, `get_screenplay` returns it as JSON, and the
+   * format is never picked for a story with no topic (only when the story fixes it, or a topic of kind `video` or `juvenile-video` has it).
+   */
+  screenplay: z.boolean().default(false),
+  /**
+   * A mystery with puzzles (needs `script: true`): logic puzzles made by code (VN Studio) between the scenes. The story brief carries the puzzle
+   * cores (`puzzles`), the outline places them, the writers plant the clues and write the `PUZZLE:` line (docs/visual-novel.md "Puzzles").
+   * Never picked by a topic: only a story that fixes the format gets it.
+   */
+  puzzles: z.boolean().default(false),
+  /** [min, max] seconds of film the whole screenplay should run (screenplay formats). */
+  runtime: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
+  /**
    * A story with choices: some chapters end with two or three choices, each leading to a later chapter, and the
    * story has several endings. The engine adds the matching section of `prompts/_choices.md` to the prompts.
    * For short formats only (not `long`).
@@ -299,6 +313,8 @@ export const ideaSchema = z.looseObject({
   humanize: z.boolean().optional(),
   /** Slug of a published book this story adapts (a visual novel script of a prose book). The story waits until that book is published. */
   source_book: z.string().optional(),
+  /** The puzzle cores of a mystery with puzzles (see src/shared/puzzles.ts), handed over by the hub. */
+  puzzles: z.array(z.unknown()).optional(),
   created: z.string().optional()
 })
 

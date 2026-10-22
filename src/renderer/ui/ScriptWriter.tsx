@@ -4,22 +4,25 @@ import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
 
 /** The visual novel formats the script writer offers when the engine lists none (older engines). */
-const FALLBACK = [
+const FALLBACK: { id: string; name: string; kinds?: string[] }[] = [
   { id: 'visual-novel', name: 'Visual novel' },
   { id: 'choice-visual-novel', name: 'Visual novel with choices' }
 ]
 
 const isChoices = (id: string) => id.includes('choice')
+/** A screenplay format (a short film or cartoon) is for topics of kind video or juvenile-video. */
+const isScreenplay = (f: { kinds?: string[] }) => !!f.kinds?.includes('video') || !!f.kinds?.includes('juvenile-video')
 
 /**
- * The script writer: adapts a published book into a visual novel script. The owner picks linear (one story, no choices) or
- * with choices (the book's own ending stays one canon path), an optional title and notes for the adapter. "Adapt" sends the
+ * The script writer: adapts a published book into a visual novel script or a screenplay for a short film or cartoon. The owner picks
+ * linear (one story, no choices) or with choices (the book's own ending stays one canon path), or a screenplay format, an optional title and notes for the adapter. "Adapt" sends the
  * story; the factory starts the book at once, because the source is published.
  */
 export function ScriptWriter({ book, onDone }: { book: BookSummary; onDone(): void }) {
   const formats = useOffice((s) => s.formats)
-  const options = formats.filter((f) => f.kinds.includes('visual-novel'))
+  const options = formats.filter((f) => f.kinds.includes('visual-novel') || isScreenplay(f))
   const choices = options.length ? options : FALLBACK
+  const screenplay = (id: string) => options.some((f) => f.id === id && isScreenplay(f))
   const [format, setFormat] = useState(choices.find((f) => !isChoices(f.id))?.id ?? choices[0]!.id)
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
@@ -33,20 +36,24 @@ export function ScriptWriter({ book, onDone }: { book: BookSummary; onDone(): vo
     <div className="stack script-writer" data-testid="script-writer">
       <div className="panel-title">Script writer</div>
       <span className="dim">
-        Turns "{book.title}" into a visual novel script that VN Studio can import. The story, characters and ending of the book stay; the architect compresses it into chapters of script scenes.
+        Turns "{book.title}" into a visual novel script that VN Studio can import, or into a screenplay for a short film or cartoon. The story, characters and ending of the book stay; the architect compresses it into chapters of script scenes.
       </span>
       <label className="stack">
-        <span className="dim">Kind of visual novel</span>
+        <span className="dim">Kind of script</span>
         <select style={full} value={format} onChange={(e) => setFormat(e.target.value)} disabled={sent} data-testid="adapt-format">
           {choices.map((f) => (
             <option key={f.id} value={f.id}>
-              {isChoices(f.id) ? 'With choices' : 'Linear'} ({f.name})
+              {isScreenplay(f) ? 'Screenplay' : isChoices(f.id) ? 'With choices' : 'Linear'} ({f.name})
             </option>
           ))}
         </select>
       </label>
       <span className="dim" data-testid="adapt-format-hint">
-        {isChoices(format) ? "The reader picks at the end of chapters. The book's own ending stays one canon path; the other paths branch off it." : 'One story from start to end, no choices, like the book.'}
+        {screenplay(format)
+          ? 'Shots, voice-over and music cues for a film of one to three minutes. The story is compressed to fit; get_screenplay returns it.'
+          : isChoices(format)
+            ? "The reader picks at the end of chapters. The book's own ending stays one canon path; the other paths branch off it."
+            : 'One story from start to end, no choices, like the book.'}
       </span>
       <input style={full} value={title} placeholder={`Title (optional, default "${book.title}")`} disabled={sent} data-testid="adapt-title" onChange={(e) => setTitle(e.target.value)} />
       <textarea style={full} rows={3} value={notes} placeholder="Notes for the adapter (optional): what to keep, cut or change" disabled={sent} data-testid="adapt-notes" onChange={(e) => setNotes(e.target.value)} />

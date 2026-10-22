@@ -127,9 +127,83 @@ export async function migrateNewspaper(dataDir: string, seedDir: string | undefi
     const from = seedText.search(/^## Newspaper\s*$/m)
     if (!hasSection && from >= 0) {
       const eol = text.includes('\r\n') ? '\r\n' : '\n'
-      const section = seedText.slice(from).replace(/\s+$/, '').split('\n').join(eol)
+      // up to the next section (the seed's Videos section follows it)
+      const rest = seedText.slice(from)
+      const next = rest.slice(2).search(/^## /m)
+      const section = (next < 0 ? rest : rest.slice(0, next + 2)).replace(/\s+$/, '').split('\n').join(eol)
       await atomicWrite(topicsFile, `${text.replace(/\s+$/, '')}${eol}${eol}${section}${eol}`)
       changes.push('topics.md: added the Newspaper section (8 topics of kind article, all switched off)')
+    }
+  }
+  return { changes }
+}
+
+/**
+ * Appends the seed's entries for `ids` to config/formats.md (the text of the seed's entries, before the closing `---`, line endings kept) for
+ * every id the data folder's file does not have. Returns the ids added. A folder without the file, or a seed without the entry, is not touched.
+ */
+async function appendSeedFormats(dataDir: string, seedDir: string, ids: string[]): Promise<string[]> {
+  const formatsFile = path.join(dataDir, 'config', 'formats.md')
+  const seedFormats = path.join(seedDir, 'config', 'formats.md')
+  if (!existsSync(formatsFile) || !existsSync(seedFormats)) return []
+  const text = await fs.readFile(formatsFile, 'utf8')
+  const have = formatBlocks(text)
+  const seed = formatBlocks(await fs.readFile(seedFormats, 'utf8'))
+  const add = ids.filter((id) => !have.has(id) && seed.has(id))
+  if (!add.length) return []
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (lines[0]?.trim() !== '---' || end <= 0) return []
+  let at = end
+  while (at > 1 && !lines[at - 1]!.trim()) at--
+  lines.splice(at, 0, ...add.flatMap((id) => seed.get(id)!.split('\n')))
+  await atomicWrite(formatsFile, lines.join(eol))
+  return add
+}
+
+/** The format of the mystery with puzzles. */
+export const PUZZLE_FORMAT_IDS = ['mystery-puzzle-visual-novel']
+
+/** The mystery-with-puzzles format arrived after data folders existed: it is appended to config/formats.md when its id is missing. Running it again changes nothing. */
+export async function migratePuzzles(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  if (!seedDir) return { changes: [] }
+  const added = await appendSeedFormats(dataDir, seedDir, PUZZLE_FORMAT_IDS)
+  return { changes: added.length ? [`config/formats.md: added the puzzle format (${added.join(', ')})`] : [] }
+}
+
+/** The screenplay formats of the seed, in this order. */
+export const SCREENPLAY_FORMAT_IDS = ['short-film', 'cartoon', 'kids-cartoon']
+
+/** The id of the first row of the Videos section of topics.md: a data folder that has it (or a `## Videos` heading) has the section. */
+const VIDEOS_ROW = 'vid-short-film'
+
+/**
+ * The screenplay writer arrived after data folders existed. At every start: the formats `short-film`, `cartoon` and `kids-cartoon` are
+ * appended to config/formats.md when their ids are missing (the text of the seed's entries, so your own formats and comments stay as they
+ * are), and the seed's `## Videos` section (a table of inactive topics of kind `video` and `juvenile-video`) is appended to topics.md when
+ * it has no such section and no row `vid-short-film`. Line endings are kept. Running it again changes nothing. A folder without these files,
+ * or a seed without the entries, is not touched.
+ */
+export async function migrateScreenplay(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  const changes: string[] = []
+  if (!seedDir) return { changes }
+  const added = await appendSeedFormats(dataDir, seedDir, SCREENPLAY_FORMAT_IDS)
+  if (added.length) changes.push(`config/formats.md: added the screenplay formats (${added.join(', ')})`)
+  const topicsFile = path.join(dataDir, 'topics.md')
+  const seedTopics = path.join(seedDir, 'topics.md')
+  if (existsSync(topicsFile) && existsSync(seedTopics)) {
+    const text = await fs.readFile(topicsFile, 'utf8')
+    const hasSection = /^#{2,6}\s+Videos\s*$/im.test(text) || new RegExp(`^\\|\\s*${VIDEOS_ROW}\\s*\\|`, 'm').test(text)
+    const seedText = (await fs.readFile(seedTopics, 'utf8')).replace(/\r\n/g, '\n')
+    const from = seedText.search(/^## Videos\s*$/m)
+    if (!hasSection && from >= 0) {
+      const eol = text.includes('\r\n') ? '\r\n' : '\n'
+      const rest = seedText.slice(from)
+      const next = rest.slice(2).search(/^## /m)
+      const section = (next < 0 ? rest : rest.slice(0, next + 2)).replace(/\s+$/, '').split('\n').join(eol)
+      await atomicWrite(topicsFile, `${text.replace(/\s+$/, '')}${eol}${eol}${section}${eol}`)
+      changes.push('topics.md: added the Videos section (3 topics of kind video and juvenile-video, all switched off)')
     }
   }
   return { changes }

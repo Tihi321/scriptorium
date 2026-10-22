@@ -2,6 +2,8 @@
 
 This document describes how Scriptorium writes a visual novel and what the files look like, so a separate app can turn a finished book into a playable visual novel: pictures for every scene (from ComfyUI, or drawn by a model with a pixel-art tool) with the text shown on top.
 
+A film is not a visual novel: books of the screenplay formats (`short-film`, `cartoon`, `kids-cartoon`, `screenplay: true`) are written as shots and read with `get_screenplay` (see [screenplay.md](screenplay.md)); `get_script` refuses them, and VN Studio never lists them.
+
 Scriptorium only writes the text. It never makes images for a visual novel. Everything below is plain markdown in the data folder, so the other app reads the files and needs nothing from the engine.
 
 ## What kind of visual novel
@@ -19,7 +21,7 @@ A book is a folder `books/<slug>/` in the data folder (default `~/Scriptorium`).
 | File | What it holds | Use in the app |
 | --- | --- | --- |
 | `book.md` | Frontmatter: `title`, `author`, `genre`, `format: visual-novel`, `script: true`, `stage` (`published` when finished), `blurb`, `topic`, `topic_name` | Pick books with `script: true` and `stage: published`; title screen |
-| `bible/bible.md` | The art reference: `## Setting`, `## Characters` (one bullet per character: `- **Name**: looks, then who they are. Voice: ...`), `## Places` (one bullet per place: how it looks), `## Style` | Character sprites and backgrounds, the same in every scene |
+| `bible/bible.md` | The art reference: `## Setting`, `## Characters` (one bullet per character: `- **Name**: looks, then who they are. Aliases: ... Voice: ...`; one bullet per person), `## Places` (one bullet per place: how it looks), `## Style` | Character sprites and backgrounds, the same in every scene |
 | `chapters/ch-01.md` ... | Frontmatter `n`, `title`, `words`; the body is the script | The scenes and the text |
 | `outline.md` | Chapter titles and summaries; for a book with choices also the chapter map (`choices`, `ending`) | Chapter select, scene summaries, the branches |
 | `cover-brief.md` | One paragraph describing a cover picture | Title-screen image |
@@ -30,11 +32,14 @@ A book is a folder `books/<slug>/` in the data folder (default `~/Scriptorium`).
 ```markdown
 ## Characters
 - **Mara**: Seventeen, small and wiry, sun-browned skin, dark curly hair tied back with a red scarf, grey eyes, a yellow oilskin raincoat over a patched blue jumper. The lighthouse keeper's daughter, stubborn and brave. Voice: short sentences, dry jokes, never says sorry.
+- **Kessler**: Sixty, bald and broad, a grey coat and a pipe. The lighthouse's old engineer. Aliases: the bald man, Brother Kessler. Voice: slow, low, answers a question with a question.
 - **Tomas**: ...
 
 ## Places
 - **Harbour wall**: A long stone pier at dusk, wet black stones, a rusted iron rail, fishing boats bobbing on grey water, the lighthouse beam sweeping across a purple sky.
 ```
+
+One bullet per person. `Aliases:` lists the other names the script uses for the same person (a description the narration uses before the name is known, a title, a nickname), separated by commas, ending at the first full stop (so an alias has none: `Dr Vey`, not `Dr. Vey`), and it comes **before** `Voice:` (a reader that splits the entry at `Voice:` would otherwise take the aliases for the voice). An alias is never another character's name. A speaker label or an `ON SCREEN:` name that is an alias means that character, and the app may show the alias as the name tag.
 
 ## The script grammar
 
@@ -44,7 +49,16 @@ A chapter body is read **line by line**. Empty lines mean nothing. Each line is 
 | --- | --- | --- |
 | Scene break | `---` (or `***`, `___`) | A transition inside the chapter (fade to black) |
 | Scene | `SCENE: <place>, <time>` | A new scene: a new background. Also accepted: a markdown heading `## <place>` |
-| On screen | `ON SCREEN: Name (look), Name (look), ...` | Who is visible from now on, each with how they look right now (the bracket is optional) |
+| Picture | `CG: <description>` | A picture over the whole screen (a key moment). It stays until `CG: none`, `END CG` or the next `SCENE` |
+| Close-up | `INSERT: <description>` | A thing or a page shown up close (a letter, a sign, an object). Same rules as `CG:` |
+| Sound effect | `SFX: <description>` (also `SOUND:`) | One sound, played once |
+| Ambience | `AMBIENCE: <description>` | A background sound that loops until the next `AMBIENCE:` or `AMBIENCE: none`; it plays on into the next scenes of the chapter |
+| Stop | `CG: none`, `END CG`, `AMBIENCE: none` | Hides the picture, stops the sound |
+| Clue | `CLUE: <puzzle>/<clue>: <prose>` | A clue of a puzzle is found here (a puzzle book, see [Puzzles](#puzzles-mystery-with-puzzles)) |
+| Evidence | `EVIDENCE: <key>: <prose>` | An item goes into the court record (an `insert` image `cg_<key>`) |
+| Puzzle | `PUZZLE: <key>` or `PUZZLE: <key> (<kind>)` | The player solves puzzle `<key>` here |
+| Testimony | `TESTIMONY: <witness>`, speaker lines, `END TESTIMONY` | The statements of a cross-examination |
+| On screen | `ON SCREEN: Name (look), Name (look), ...` | Who is visible from now on, each with how they look right now (the bracket is optional). Only characters: a thing, a page or a crowd goes to `INSERT:` or narration |
 | Speaker line | `NAME: words` or `NAME (expression): words` | A text box with a name tag. NAME is in capitals |
 | Narration | anything else | A narrator text box (no name tag): what the reader sees, actions, glances. Present tense |
 
@@ -54,7 +68,14 @@ The patterns the renderer uses (`src/engine/publish/xhtml.ts`, JavaScript regula
 const SCENE = /^\**\s*scene\s*:\s*\**\s*(.+?)\s*\**$/i
 const CAST  = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
 const LINE  = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
+// copied from VN Studio (src/engine/vn/script.ts), which reads the same lines; Croatian keywords too
+const CUE     = /^\**\s*(CG|SLIKA|INSERT|SFX|SOUND|ZVUK|AMBIENCE|ATMOSFERA)\s*:\s*\**\s*(.*?)\s*\**$/iu
+const END_CG  = /^\**\s*(?:END\s+CG|KRAJ\s+SLIKE)\s*\**$/iu
 ```
+
+The cue lines are checked right after `SCENE` and before `ON SCREEN` and the speaker lines, so `CG:` is never a speaker called "CG". `CG: none`, `INSERT: none`, `AMBIENCE: none` (also `ništa`, `nista`) and `END CG` mean "stop". A cue with no text is ignored.
+
+The four puzzle lines (`CLUE`, `EVIDENCE`, `PUZZLE`, `TESTIMONY` and `END TESTIMONY`) are checked straight after the cue lines above and before `ON SCREEN` and the speaker lines, so `CLUE:` is never a speaker called "CLUE". Their regular expressions are in [Puzzles](#puzzles-mystery-with-puzzles). No puzzle keyword is a picture or sound keyword, and none is a screenplay line (`SHOT`, `MUSIC`, `SFX`, `TITLE`; [screenplay.md](screenplay.md)): a screenplay does not read the puzzle lines, and a visual novel does not read `SHOT`, `MUSIC` or `TITLE`.
 
 Inside any text, `*word*` or `_word_` is emphasis and `**word**` is strong, as in markdown.
 
@@ -62,13 +83,20 @@ A short example of a chapter:
 
 ```text
 SCENE: The harbour wall, dusk
+AMBIENCE: waves on stone, a far foghorn
 Rain needles the grey water. The lighthouse beam sweeps over the boats.
 ON SCREEN: Mara (soaked raincoat, worried)
 MARA (worried): He said he'd be back before the lamp was lit.
+SFX: running boots on wet stone
 Footsteps on the wet stones. Someone is running.
 ON SCREEN: Mara (startled), Tomas (out of breath, grinning)
 TOMAS (grinning): Did you miss me?
 MARA (annoyed): You're *late*.
+INSERT: a torn page, a hand-drawn map
+TOMAS: I found this in the boat.
+CG: Mara and Tomas at the pier's end
+MARA (whispering): Then it is true.
+END CG
 ---
 SCENE: The lighthouse kitchen, night
 A low room with a black iron stove and a single oil lamp. Wet coats drip by the door.
@@ -83,6 +111,7 @@ Keep a state while walking the lines:
 - **Background** = the last `SCENE`. To draw it, use the scene's place and time, the narration lines right after it (until the first speaker line), and the matching place in `## Places` of the bible (match on the name, case-insensitive, or on the first words of the SCENE line).
 - **Sprites** = the last `ON SCREEN` list. Each name matches a character in `## Characters` of the bible (case-insensitive). The bracket is the character's current look or pose. The bible gives the fixed look (face, hair, clothes, colours).
 - **Expression** = the bracket of a speaker line (`MARA (annoyed)`). Show that character's sprite with that expression while the line is shown. Without a bracket, keep the last one.
+- **Pictures and sounds**: a `CG:` or `INSERT:` goes on the next beat of its scene and stays until `CG: none`, `END CG` or the next `SCENE`. An `AMBIENCE:` loops until the next `AMBIENCE:` or `AMBIENCE: none`, through the following scenes, and stops at the end of the chapter. An `SFX:` plays once when the next beat starts. A cue with no beat after it in its scene has nothing to go with: VN Studio drops it with a warning, so the writer is asked never to end a scene with one. The same picture shown twice needs the same opening words (VN Studio keys a picture by its first four content words), two different pictures need different ones.
 - **Text box** = each speaker line (name tag + words) and each narration line (no name tag). One click per line.
 - A speaker who is not in the `ON SCREEN` list speaks off screen (a voice from the dark, a phone call): show the text box without a sprite, or add them to the screen. Your choice.
 - A chapter starts with an empty screen. `---` clears the screen (sprites and background) until the next `SCENE`.
@@ -92,10 +121,108 @@ Keep a state while walking the lines:
 The writer is a language model following a prompt, so the app must be lenient:
 
 - Guaranteed by the engine: the files and folders above, `script: true` in `book.md`, the chapter order, plain UTF-8 markdown.
-- Asked of the model, usually followed, not guaranteed: every scene starts with `SCENE:`, `ON SCREEN:` after every change, names in capitals and the same every time, names that match the bible, the bracket on speaker lines. The line editor checks the script form in its review, and a book with real problems gets rewritten before it is published, but small slips get through.
+- Asked of the model, usually followed, not guaranteed: every scene starts with `SCENE:`, `ON SCREEN:` after every change, names in capitals and the same every time, names that match the bible, the bracket on speaker lines, the picture and sound lines (at most two `CG:`, two `INSERT:` and four `SFX:` per chapter, `AMBIENCE:` once per scene, none of them last in a scene), `ON SCREEN:` naming only characters, and `Aliases:` in the bible's entries (the engine writes that sentence from the outline's `aliases`, cleaned: no full stops, no own name, no other character's name, at most five). The line editor checks the script form in its review, and a book with real problems gets rewritten before it is published, but small slips get through.
 - So: a speaker line without a matching character is still a text box; a scene without `SCENE` keeps the last background; an unknown place is drawn from the SCENE text alone; a line that matches nothing is narration.
 
-## Making the pictures
+## Puzzles (mystery with puzzles)
+
+The format `mystery-puzzle-visual-novel` (`script: true`, `puzzles: true`) is a visual novel with logic puzzles between its scenes. The player reads, finds clues, solves a puzzle (who did it, with what, where), and the story goes on. **Code makes the puzzle, the writer only dresses it**: VN Studio makes the puzzle core with `vno_puzzle_generate` (the solution and the structured clues, proved unique and solvable by deduction), the hub hands it to Scriptorium in the story brief (`add_story {puzzles}`), Scriptorium keeps it as `bible/puzzles.md`, the architect places each puzzle in a chapter, and the writers plant its clues in the story and put the `PUZZLE:` line where the player solves it. Scriptorium has no solver. VN Studio imports the book (VNO-15), reads the lines below, and checks that the prose of every clue still means the constraint of the core.
+
+### The four lines
+
+```text
+CLUE: dinner/c2: The rope was either in the kitchen or the garden, Hartley noted.
+EVIDENCE: pocket_watch: A pocket watch, stopped at 9:10, its glass cracked.
+PUZZLE: dinner (murdle)
+TESTIMONY: Miss Cole
+MISS COLE (calm): I was in the garden all evening.
+MISS COLE: I never touched the poison.
+END TESTIMONY
+```
+
+| Line | Pattern | Meaning |
+| --- | --- | --- |
+| Clue | `CLUE: <puzzle>/<clue>: <prose>` | Clue `<clue>` of puzzle `<puzzle>` is found here. `<prose>` is the clue as the story tells it, in the story's own words (names as in the bible), saying exactly what the core's clue says. One line per clue, before the puzzle's `PUZZLE:` line. It is shown as a line of text |
+| Evidence | `EVIDENCE: <key>: <prose>` | An item the player picks up (a letter, a watch, a photo): it goes into the court record. `<prose>` describes it. It is an `insert` image with the key `cg_<key>` |
+| Puzzle | `PUZZLE: <key>` or `PUZZLE: <key> (<kind>)` | Puzzle `<key>` is played here. `<kind>` is the puzzle's `kind` in `bible/puzzles.md` (`murdle` now; `knights`, `testimony` and `grid` are planned) and may be left out |
+| Testimony | `TESTIMONY: <witness>` | Opens a cross-examination of `<witness>` (a character name or alias of the bible) |
+| (statements) | `NAME: words` or `NAME (expression): words` | The statements of the testimony, in order, as normal speaker lines. Statement 1 is the first speaker line after `TESTIMONY:`. The block lasts until `END TESTIMONY`, or until any line that is not a speaker line |
+| End | `END TESTIMONY` | Closes the testimony |
+
+Ids: `<puzzle>`, `<clue>` and `<key>` are made of `A-Z a-z 0-9 _ -`, no spaces. A clue id is the id of the core (`c1`, `c2`, ...; `murder` is the id of the core's murder note). Which statement breaks, and with which evidence, is never in the text: it is in `bible/puzzles.md` (below).
+
+The regular expressions (`src/engine/publish/xhtml.ts`, JavaScript; Croatian keywords as for the picture and sound lines, so translated books from Book Translator keep working: `TRAG`, `DOKAZ`, `ZAGONETKA`, `SVJEDOČENJE`, `KRAJ SVJEDOČENJA`):
+
+```js
+const CLUE_RE         = /^\**\s*(CLUE|TRAG)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*\/\s*([A-Za-z0-9_-]+)\s*:\s*\**\s*(.*?)\s*\**$/iu
+const EVIDENCE_RE     = /^\**\s*(EVIDENCE|DOKAZ)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*:\s*\**\s*(.*?)\s*\**$/iu
+const PUZZLE_RE       = /^\**\s*(PUZZLE|ZAGONETKA)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*(?:\(\s*([A-Za-z0-9_-]+)\s*\))?\s*\**$/iu
+const TESTIMONY_RE    = /^\**\s*(TESTIMONY|SVJEDOČENJE)\s*:\s*\**\s*(.+?)\s*\**$/iu
+const END_TESTIMONY_RE = /^\**\s*(?:END\s+TESTIMONY|KRAJ\s+SVJEDOČENJA)\s*\**$/iu
+```
+
+They are checked after `SCENE` and the picture and sound lines (`CUE`, `END_CG`), and before `ON SCREEN` and the speaker line. A line of these keywords that does not fit its pattern (for example `CLUE: no slash`), is not a puzzle line: it falls through to the speaker rule and is read as a speaker line (`CLUE`), as any unknown line is. The prompts never ask for such a line.
+
+How a reader plays them (VN Studio, VNO-15):
+
+- `CLUE:` is shown as a line of text (narration, no name tag). The clue id is recorded as found at that beat (`clueAt`); the puzzle screen lists the clues found so far. A clue that is never found is a book fault (see "What is checked").
+- `EVIDENCE:` is shown as a line of text and adds the item to the court record, with an `insert` picture `cg_<key>` drawn from the prose.
+- `PUZZLE:` is the puzzle beat; the puzzle comes from `bible/puzzles.md` by key.
+- `TESTIMONY:` ... `END TESTIMONY` is one cross-examination beat with its statements.
+- Like a picture cue, none of these lines should be the last line of a scene: there is nothing for it to go with.
+
+### `bible/puzzles.md`
+
+Markdown with YAML frontmatter, written by Scriptorium when the outline is made, from the `puzzles` of the story brief. Every puzzle of the book is one entry:
+
+```yaml
+---
+kind: puzzles
+puzzles:
+  - key: dinner                 # the <puzzle> of the lines
+    kind: murdle                # murdle now; knights, testimony, grid later
+    title: The Dinner Party     # optional
+    chapter: 2                  # the chapter with the PUZZLE: line (set by the outline)
+    core: { ... }               # the puzzle core of VN Studio, as vno_puzzle_generate returns it (format 1): categories, solution, clues, murder, difficulty, steps
+    names: { s1: Colonel Ash, w1: rope, p1: library }   # item id -> the name in the story
+    text:                       # canonical English sentence of each clue and of the murder note
+      c1: Doctor Birch did not have the rope.
+      murder: The body was found in the library.
+    clueAt: { c1: 1, c2: 1, c3: 2 }   # the chapter planned to plant each clue (by the engine)
+  - key: courtroom
+    kind: testimony
+    chapter: 4
+    testimony:
+      witness: Miss Cole
+      breaks: [{ statement: 2, evidence: pocket_watch }]   # statement n (1-based) is broken by presenting evidence <key>
+      evidence: [{ key: pocket_watch, description: A pocket watch, stopped at 9:10 }]
+---
+(the same, as a readable list: the solution in words, the clues with their ids)
+```
+
+`core`, `names`, `text` and `testimony` are the hub's data and are kept exactly as given; `chapter` and `clueAt` are the engine's placement. A reader trusts the `core` for the logic and the lines only for the story: it never decides which clue is true from the prose (VN Studio's read-back check does that).
+
+### What the writer is asked, and what is checked
+
+Asked of the model (in the outline, draft and rewrite prompts of a puzzle book): every puzzle is placed in one chapter; every clue of the core is planted as a `CLUE:` line, in the story, before the puzzle's `PUZZLE:` line, in words that say exactly what the canonical sentence says (no more, no less: a changed name, a dropped option or an added hint changes the puzzle); the names are the core's names; evidence that a testimony needs is planted (`EVIDENCE:`) before it; the story's facts (culprit, weapon, place, who lies) are the core's solution, never contradicted and never stated outright before the puzzle.
+
+Checked by the engine (`puzzleProblems`, in the continuity review of every round): each puzzle of `bible/puzzles.md` has exactly one `PUZZLE:` line; every clue id of its core is in a `CLUE:` line of that chapter or an earlier one, before the `PUZZLE:` line; no `CLUE:` names a clue the core does not have; every evidence key a testimony needs (`bible/puzzles.md`) is planted as an `EVIDENCE:` line before the puzzle's `PUZZLE:` line, and a testimony puzzle has its `TESTIMONY:` block. A problem makes the review say revise and names the chapter; the writer rewrites. The humanizer is off for the format, and its guard (when an owner switches it on) refuses a version in which a puzzle line changed in any word. **Not checked by Scriptorium**: that the prose of a clue means the core's clue (VN Studio does it at import and the hub sends a rewrite note back), and the puzzle logic.
+
+### In the JSON of `get_script`
+
+The beats (one script line is one beat, like `cue`):
+
+```json
+{ "type": "clue", "puzzle": "dinner", "clue": "c2", "text": "The rope was either in the kitchen or the garden, Hartley noted." }
+{ "type": "evidence", "key": "pocket_watch", "text": "A pocket watch, stopped at 9:10, its glass cracked." }
+{ "type": "puzzle", "puzzle": "dinner", "kind": "murdle" }
+{ "type": "testimony", "witness": "Miss Cole", "statements": [
+    { "n": 1, "speaker": "Miss Cole", "expression": "calm", "text": "I was in the garden all evening." },
+    { "n": 2, "speaker": "Miss Cole", "expression": "", "text": "I never touched the poison." } ] }
+```
+
+`kind` is `null` when the line has none. The `testimony` beat holds its statements (speaker names are written as the bible has them, with `alias` when written under an alias, as for a `line`); there is no separate beat for `END TESTIMONY`. A clue, evidence or puzzle line does not end a scene's `background`. The top level of the JSON gets `puzzles`: the entries of `bible/puzzles.md` as above (empty for a book with none).
+
 
 A suggested pipeline for the app. None of it exists yet.
 
@@ -146,7 +273,7 @@ Suggested, so the parser and the image steps agree on one structure:
   "author": "Mara Quill",
   "genre": "Mystery",
   "style": "Moody, rain-soaked, warm interiors against cold exteriors.",
-  "characters": [{ "name": "Mara", "looks": "Seventeen, small and wiry, ...", "voice": "short sentences, dry jokes" }],
+  "characters": [{ "name": "Mara", "looks": "Seventeen, small and wiry, ...", "voice": "short sentences, dry jokes", "aliases": ["the keeper's girl"] }],
   "places": [{ "name": "Harbour wall", "looks": "A long stone pier at dusk, ..." }],
   "chapters": [
     {
@@ -160,6 +287,7 @@ Suggested, so the parser and the image steps agree on one structure:
           "time": "dusk",
           "background": "Rain needles the grey water. The lighthouse beam sweeps over the boats.",
           "beats": [
+            { "type": "cue", "cue": "ambience", "text": "waves on stone, a far foghorn" },
             { "type": "cast", "cast": [{ "name": "Mara", "look": "soaked raincoat, worried" }] },
             { "type": "line", "speaker": "Mara", "expression": "worried", "text": "He said he'd be back before the lamp was lit." },
             { "type": "narration", "text": "Footsteps on the wet stones. Someone is running." }
@@ -174,6 +302,8 @@ Suggested, so the parser and the image steps agree on one structure:
 `SCENE: <place>, <time>`: the text before the last comma is the place, the rest the time. If there is no comma, the whole text is the place.
 
 The MCP tool `get_script {book, chapter?}` returns this JSON for a script book at any stage (`parseScript` and `parseLightBible` in `src/engine/publish/script.ts`). A `## heading` also opens a scene, the narration right after a `SCENE:` line up to the first cast or speaker line is the scene's `background`, a `---` is a `break` beat, and speaker names are written as the bible has them when one matches (else as they were written, in capitals).
+
+A picture or sound line is a `cue` beat, one per line: `{ "type": "cue", "cue": "cg" | "insert" | "sfx" | "ambience", "text": "..." }`, with `text: null` for `CG: none`, `END CG` and `AMBIENCE: none` (an empty cue is left out). A cue does not end a scene's `background`, so an `AMBIENCE:` right after `SCENE:` is fine. A speaker or cast name that is one of a character's aliases is given as the character's bible name, and the line or cast entry has `alias` (the alias as the bible writes it), so the app can show it as the name tag: `{ "type": "line", "speaker": "Kessler", "alias": "the bald man", ... }`. `characters[].aliases` lists them.
 
 ## Adapting a book
 
@@ -193,5 +323,6 @@ Scriptorium can turn a published prose book into a visual novel script (the scri
 
 - Formats: `visual-novel` and `choice-visual-novel` for topics of kind `visual-novel`, `kids-visual-story` and `kids-choice-visual-story` for kind `juvenile-visual-novel`, all with `script: true`; the choice formats also have `choices: true`. The editor-in-chief picks one of the formats of the topic's kind; set `enabled: false` on a format to stop it being picked.
 - Choices: `prompts/_choices.md` holds the extra instructions for planning, writing and reviewing a story with choices.
-- Prompts: `architect/outline_vn.md` (looks of characters and places for the bible), `writer/draft_chapter_vn.md` and `writer/rewrite_chapter_vn.md` (the script grammar), `line-editor/review_vn.md` (dialogue, voices and the script form), `humanizer/humanize_chapter_vn.md` (livelier lines and narration with the `SCENE:`, `ON SCREEN:` and speaker lines kept one for one; the engine keeps the original chapter if their number or order changes). Other roles use their usual prompts with the format guidance. Edit them in the data folder's `prompts/` to change the style of the scripts.
-- The EPUB and the in-app reader show the script with scene headings, an "On screen" line, bold speaker names and italic narration.
+- Prompts: `architect/outline_vn.md` (looks of characters and places for the bible), `writer/draft_chapter_vn.md` and `writer/rewrite_chapter_vn.md` (the script grammar), `line-editor/review_vn.md` (dialogue, voices and the script form), `humanizer/humanize_chapter_vn.md` (livelier lines and narration with the `SCENE:`, `ON SCREEN:`, speaker and picture and sound lines kept one for one; the engine keeps the original chapter if their number or order changes, or the kinds and order of the cue lines; the cue text is asked to stay word for word, but only reworded text is let through). Other roles use their usual prompts with the format guidance. Edit them in the data folder's `prompts/` to change the style of the scripts.
+- The prompts ask for the picture and sound lines (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`, `END CG`, with the limits above), for `ON SCREEN:` with characters only, and, in the outline, for `aliases` per character. The outline handler writes the `Aliases:` sentence before `Voice:` (`scriptBible.ts`: `cleanAliases`, `scriptBibleLine`); an adaptation's aliases from the source book are merged in. Every reviewer of a script book gets a note that the cue lines are picture and sound cues, not prose; the line editor checks their form only. The tighten request of a script keeps them.
+- The EPUB and the in-app reader show the script with scene headings, an "On screen" line, bold speaker names, italic narration and the picture and sound lines as small grey italic notes (`Picture:`, `Close-up:`, `Sound:`, `Ambience:`; `END CG`, `CG: none` and `AMBIENCE: none` are not shown).

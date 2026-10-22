@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { briefOf, emptyBrief, renderBrief } from '../../shared/brief'
+import { briefOf, briefPromptText, emptyBrief, renderBrief } from '../../shared/brief'
 import type { BriefCharacter, StoryBrief } from '../../shared/brief'
 import type { BookSummary } from '../../shared/protocol'
 import { ROLES } from '../../shared/schemas'
@@ -10,6 +10,10 @@ import { DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
 import { parseLightBible, parseScript } from '../publish/script'
+import { musicCues, parseScreenplay, runtimeOf } from '../publish/screenplay'
+import { puzzleEntrySchema } from '../../shared/puzzles'
+import type { PuzzleEntry } from '../../shared/puzzles'
+import { puzzlesOf } from '../pipeline/puzzles'
 import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, seriesSummary, serverStatuses, topicSummary } from '../summary'
 import { bookRefs, seriesMembers } from '../store/series'
 import { TOPIC_KINDS } from '../store/topics'
@@ -297,12 +301,13 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'get_script',
     {
       description:
-        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration or a break; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
+        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice, aliases}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration, a break, a puzzle beat of a mystery with puzzles ({type: "clue", puzzle, clue, text} for a CLUE line, {type: "evidence", key, text}, {type: "puzzle", puzzle, kind} and {type: "testimony", witness, statements: [{n, speaker, expression, text}]}; `puzzles` at the top level lists the puzzles of the book from bible/puzzles.md) or a cue ({type: "cue", cue: "cg" | "insert" | "sfx" | "ambience", text}: a picture or sound line, text null for `CG: none`, `END CG` and `AMBIENCE: none`). A speaker or cast name that is one of the aliases of a character comes out as the bible name, with `alias` set on the line or the cast entry; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
       inputSchema: { book: z.string().describe('Book slug'), chapter: z.number().int().positive().optional().describe('Only this chapter') },
       annotations: READ
     },
     run(async ({ book: slug, chapter }: { book: string; chapter?: number }) => {
       const b = await engine.books.read(await needBook(slug))
+      if (b?.data.screenplay === true) fail(`"${slug}" is a screenplay (its format is ${b.data.format}), not a visual novel script: use get_screenplay`)
       if (b?.data.script !== true) fail(`"${slug}" is not a visual novel script (its format is ${b?.data.format}): get_script needs a book with script: true`)
       const bible = parseLightBible(await engine.books.bible(slug))
       const outline = await engine.books.outline(slug)
@@ -328,9 +333,63 @@ export function registerTools(server: McpServer, engine: Engine): void {
               choices: entry?.choices ?? [],
               ending: entry?.ending ?? null,
               ...(entry?.source_chapters ? { sourceChapters: entry.source_chapters } : {}),
-              scenes: parseScript(c.body, names).scenes
+              scenes: parseScript(c.body, names, bible.characters).scenes
             }
-          })
+          }),
+        puzzles: await puzzlesOf(engine, slug)
+      }
+    })
+  )
+
+  server.registerTool(
+    'get_screenplay',
+    {
+      description:
+        'The parsed screenplay of a short film or cartoon book (a screenplay format such as short-film, cartoon or kids-cartoon; any stage, drafts too) as JSON: {slug, title, author, genre, format, aspect ("16:9", or "9:16" when the brief or style says vertical), style, runtimeSeconds, runtimeRange, characters: [{name, looks, voice, aliases}], places: [{name, looks}], music: [{id, description, from, to}] (shot ids), chapters: [{n, title, sourceChapters, scenes: [{id, place, time, background, shots: [{id, framing, move, seconds, continuous, action, cast: [{name, look}], sfx, title, lines: [{speaker, delivery, text, kind}]}]}]}]}. `kind` of a line is dialogue, voice-over or off-screen; ids are ch01.s01.sh02. A shot with no length gets 4 seconds (longer when its lines need it), a spoken line before any shot opens a medium shot. See docs/screenplay.md. Give `chapter` for one chapter (the music cues then only cover it). Refused for a book that is not a screenplay (use get_script for a visual novel).',
+      inputSchema: { book: z.string().describe('Book slug'), chapter: z.number().int().positive().optional().describe('Only this chapter') },
+      annotations: READ
+    },
+    run(async ({ book: slug, chapter }: { book: string; chapter?: number }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.screenplay !== true) {
+        fail(`"${slug}" is not a screenplay (its format is ${b?.data.format}): get_screenplay needs a book of a screenplay format${b?.data.script === true ? '; this one is a visual novel script, use get_script' : ''}`)
+      }
+      const bible = parseLightBible(await engine.books.bible(slug))
+      const outline = await engine.books.outline(slug)
+      const names = bible.characters.map((c) => c.name)
+      const written = await engine.books.chapters(slug)
+      if (chapter && !written.some((c) => c.n === chapter)) fail(`chapter ${chapter} of "${slug}" is not written`)
+      const brief = await engine.books.brief(slug)
+      const vertical = /\b(vertical|portrait|9:16|tiktok|reels|shorts)\b/i.test(`${brief ? briefPromptText(brief) : ''} ${bible.style}`)
+      const chapters = written
+        .filter((c) => !chapter || c.n === chapter)
+        .map((c) => {
+          const entry = outline?.chapters.find((o) => o.n === c.n)
+          return {
+            n: c.n,
+            title: c.title,
+            ...(entry?.source_chapters ? { sourceChapters: entry.source_chapters } : {}),
+            scenes: parseScreenplay(c.body, names, c.n).scenes
+          }
+        })
+      const range = engine.formats.find((f) => f.id === b!.data.format)?.runtime
+      return {
+        slug,
+        title: b!.data.title,
+        author: b!.data.author,
+        genre: b!.data.genre,
+        format: b!.data.format,
+        aspect: vertical ? '9:16' : '16:9',
+        style: bible.style,
+        runtimeSeconds: runtimeOf(chapters),
+        ...(range ? { runtimeRange: range } : {}),
+        characters: bible.characters,
+        places: bible.places,
+        music: musicCues(chapters),
+        chapters: chapters.map((c) => ({
+          ...c,
+          scenes: c.scenes.map((s) => ({ ...s, shots: s.shots.map(({ music: _m, musicStop: _s, ...shot }) => shot) }))
+        }))
       }
     })
   )
@@ -437,11 +496,15 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
         humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),
+        puzzles: z
+          .array(puzzleEntrySchema)
+          .optional()
+          .describe('A mystery with puzzles (format "mystery-puzzle-visual-novel"): the puzzles, each as VN Studio makes them (vno_puzzle_generate): {key, kind: "murdle", title?, core (the whole core), names (item id -> name in the story), text (clue id and "murder" -> the canonical sentence)}; for a testimony also {testimony: {witness, breaks: [{statement, evidence}], evidence: [{key, description}]}}. Scriptorium keeps them as bible/puzzles.md, the outline places each in a chapter and the writers plant the clues (docs/visual-novel.md "Puzzles")'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; puzzles?: PuzzleEntry[]; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -460,6 +523,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.genre ? { genre: a.genre } : {}),
           ...(a.series ? { series: a.series } : {}),
           ...(a.humanize === false ? { humanize: false } : {}),
+          ...(a.puzzles?.length ? { puzzles: a.puzzles } : {}),
           ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
@@ -472,10 +536,10 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'adapt_book',
     {
       description:
-        'The script writer: adapt a published book into a visual novel script that VN Studio can import. Creates a story with source_book set; the factory starts the book at once (it is already published), the architect compresses the book into the format chapters and maps each to the source chapters, and the writers turn those chapters into script scenes. The source must exist and be published. Returns the story slug.',
+        'The script writer: adapt a published book into a visual novel script that VN Studio can import, or into a screenplay for a short film or cartoon (get_screenplay). Creates a story with source_book set; the factory starts the book at once (it is already published), the architect compresses the book into the format chapters and maps each to the source chapters, and the writers turn those chapters into script scenes. The source must exist and be published. Returns the story slug.',
       inputSchema: {
         book: z.string().describe('Slug of the published book to adapt (list_books)'),
-        format: z.string().describe('A visual novel format id: "visual-novel" (linear) or "choice-visual-novel" (choices; the source ending stays one canon path)'),
+        format: z.string().describe('A script format id: "visual-novel" (linear) or "choice-visual-novel" (choices; the source ending stays one canon path) for VN Studio, or a screenplay format: "short-film", "cartoon" or "kids-cartoon" (the source is compressed into its runtime)'),
         title: z.string().optional().describe('Title of the script. Default: the title of the source book'),
         notes: z.string().optional().describe('Notes for the adapter: what to keep, cut or change'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}')

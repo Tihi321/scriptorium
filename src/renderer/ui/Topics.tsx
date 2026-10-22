@@ -12,7 +12,9 @@ const KINDS = [
   ['juvenile-visual-novel', 'Children, visual story'],
   ['interactive-fiction', 'Choose your path'],
   ['juvenile-interactive-fiction', 'Children, choose your path'],
-  ['article', 'Newspaper section']
+  ['article', 'Newspaper section'],
+  ['video', 'Video (short film, cartoon)'],
+  ['juvenile-video', 'Children, cartoon']
 ] as const
 
 /** One line to add your own topic: a row in the "My topics" table of `topics.md`, switched on. */

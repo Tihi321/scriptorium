@@ -3,13 +3,14 @@ import path from 'node:path'
 import { ornamentHtml, ornamentSvg } from './art'
 import { BOOK_CSS } from './epub'
 import { choicesHtml, escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
+import type { PuzzleView } from './xhtml'
 
 export interface ReaderBook {
   title: string
   author: string
   blurb?: string
   year: number
-  chapters: { title: string; body: string; script?: boolean; choices?: { text: string; to: number }[]; ending?: string }[]
+  chapters: { title: string; body: string; script?: boolean; screenplay?: boolean; puzzles?: Record<string, PuzzleView>; choices?: { text: string; to: number }[]; ending?: string }[]
   /** Genre class (`g-fantasy` ...) that picks the chapter ornament. */
   genreClass?: string
   /** Path of cover.png, when it exists. */
@@ -50,7 +51,7 @@ export async function writeReaderDir(dir: string, book: ReaderBook): Promise<voi
     // a story with choices: the choices (or "The End") take the place of the link to the next chapter
     const next = c.choices || c.ending ? choicesHtml(c) + '\n' : i + 1 < book.chapters.length ? `<p class="next"><a href="chapter-${String(i + 2).padStart(2, '0')}.xhtml">Next chapter</a></p>` : ''
     await write(file, xhtmlPage(c.title, `${ornamentHtml()}
-<h2>${escapeXml(single ? book.title : c.title)}</h2>\n${markdownToXhtml(c.body, { script: c.script })}\n${next}<p><a href="index.html">Contents</a></p>`))
+<h2>${escapeXml(single ? book.title : c.title)}</h2>\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles })}\n${next}<p><a href="index.html">Contents</a></p>`))
     links.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)
   }
   await write(

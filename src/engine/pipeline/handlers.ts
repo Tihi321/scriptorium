@@ -35,7 +35,9 @@ import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters,
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
-import { placesBlock, settleScenePlaces } from './scriptPlaces'
+import { cleanCastAliases, scriptBibleLine } from './scriptBible'
+import { PUZZLE_REVIEW_NOTE, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
+import { placesBlock, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
@@ -97,10 +99,14 @@ const enabledFormats = (formats: FormatEntry[]) => formats.filter((f) => f.enabl
 /** A newspaper article format (`article: true`): one chapter, no cover and no EPUB, its own slot limit. */
 export const isArticleFormat = (f: Pick<FormatEntry, 'article'> | undefined | null): boolean => f?.article === true
 
-/** Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics). */
+/**
+ * Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics) and the
+ * screenplay formats (a screenplay is only written when a story fixes the format, or a topic of kind `video` or `juvenile-video` has it), and
+ * the mystery-with-puzzles format (its puzzles come with the story, so only a story that fixes the format gets it).
+ */
 export function formatsForKind(formats: FormatEntry[], kind: string | null): FormatEntry[] {
   const on = enabledFormats(formats)
-  return kind ? on.filter((f) => f.kinds.includes(kind)) : on.filter((f) => !f.article)
+  return kind ? on.filter((f) => f.kinds.includes(kind)) : on.filter((f) => !f.article && !f.screenplay && !f.puzzles)
 }
 
 /** Open slots: a book can start while fewer than `max_books_in_progress` books are open, an article while fewer than `max_articles_in_progress` articles are. */
@@ -172,8 +178,15 @@ export const formatVars = (f: FormatEntry, target: number) => ({
   chapters_min: f.chapters[0],
   chapters_max: f.chapters[1],
   guidance: f.guidance.trim(),
-  target_words: target
+  target_words: target,
+  // a screenplay: the seconds of film the whole book should run (empty for other formats)
+  runtime_min: f.runtime?.[0] ?? '',
+  runtime_max: f.runtime?.[1] ?? ''
 })
+
+/** The seconds of film one chapter (a sequence) of a screenplay should run: the middle of the format's runtime over the planned chapters. Empty for other formats. */
+export const chapterRuntime = (f: FormatEntry, chapters: number): number | '' =>
+  f.runtime ? Math.round((f.runtime[0] + f.runtime[1]) / 2 / Math.max(1, chapters)) : ''
 
 /** A drafted chapter of a long book under this share of its target words gets an expand retry. */
 export const EXPAND_BELOW = 0.8
@@ -274,11 +287,13 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
    * A chapter over 120% of its target gets one more request: cut it to the target. The shorter text is kept when it is between 80% of the
    * target and the length it had. Returns the text, and the reply when the retry was kept.
    */
-  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number): Promise<{ body: string; reply: ChatResult | null }> => {
+  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number, screenplay = false, puzzles = false): Promise<{ body: string; reply: ChatResult | null }> => {
     const words = countWords(body)
     if (words <= target * TRIM_ABOVE) return { body, reply: null }
-    const how = script
-      ? 'Cut narration lines and minor lines, and keep every SCENE, ON SCREEN and plot beat'
+    const how = screenplay
+      ? 'Cut action lines and minor lines, and keep every SCENE, SHOT, ON SCREEN, MUSIC, SFX and TITLE line and every plot beat'
+      : script
+      ? `Cut narration lines and minor lines, and keep every SCENE, ON SCREEN, CG, INSERT, SFX and AMBIENCE line${puzzles ? ', every CLUE, EVIDENCE, PUZZLE and TESTIMONY line and every statement of a testimony' : ''} and every plot beat`
       : 'Tighten it: cut repetition and description, and keep every event, name and line of dialogue that matters'
     try {
       const retry = await run.chat({
@@ -362,6 +377,10 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     let allowed = formatsForKind(formats, topic?.kind ?? null).filter((f) => !idea?.data.source_book || f.script)
     // a story with no topic that fixes an article format is an article of no section
     if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.article && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
+    // the same for a story that fixes a screenplay format (a short film, a cartoon): a screenplay is never picked for a story with no topic otherwise
+    if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.screenplay && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
+    // and for a mystery with puzzles: its puzzles come with the story, so only a story that fixes the format gets it (with a topic too)
+    if (idea?.data.format && formats.some((f) => f.enabled && f.puzzles && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
     const articleStory = allowed.length > 0 && allowed.every((f) => f.article)
     // the owner's story: its title and format are theirs to fix, and the whole brief goes to the editor
     const fromOwner = idea?.data.source === 'user'
@@ -378,7 +397,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
           (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
           (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '') +
-          (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into a visual novel script: keep the book's genre, and take the title from the book if the owner gave none.` : '')
+          (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into ${allowed.every((f) => f.screenplay) && allowed.length > 0 ? 'a screenplay for a short film' : 'a visual novel script'}: keep the book's genre, and take the title from the book if the owner gave none.` : '')
         : 'No idea was picked: choose a fresh premise that fits the topic.',
       topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
       formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
@@ -412,6 +431,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
         ...(fmt.article ? { article: true } : {}),
         ...(fmt.script ? { script: true } : {}),
+        ...(fmt.screenplay ? { screenplay: true } : {}),
+        ...(fmt.puzzles ? { puzzles: true } : {}),
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
         target_words: target,
@@ -528,6 +549,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
     await ensureStoryYearRule(d.dataDir, messages, variant(fmt, 'outline'))
     appendToPrompt(messages, await storyBriefSection(d, slug))
+    if (fmt.puzzles) appendToPrompt(messages, puzzlesOutlineSection(await puzzlesOf(d, slug), fmt.chapters))
     appendToPrompt(messages, await seriesSection(d, slug))
     // an adaptation: the source, the chapter range to compress it into and, with choices, the source's ending as the canon path
     const source = await sourceOf(d, slug)
@@ -543,11 +565,13 @@ Build the outline on these facts: the period, places, jobs, distances and durati
             choices: z.array(z.object({ text: z.string(), to: z.coerce.number() })).default([]),
             ending: z.string().default(''),
             // an adaptation: the chapters of the source book this chapter is made from
-            source_chapters: z.array(z.coerce.number()).default([])
+            source_chapters: z.array(z.coerce.number()).default([]),
+            // a mystery with puzzles: the keys of the puzzles solved in this chapter
+            puzzles: z.array(z.string()).default([])
           })
         )
         .min(1),
-      characters: z.array(z.object({ name: z.string(), description: z.string(), voice: z.string().default('') })).default([]),
+      characters: z.array(z.object({ name: z.string(), description: z.string(), voice: z.string().default(''), aliases: z.array(z.string()).default([]) })).default([]),
       places: z.array(z.object({ name: z.string(), description: z.string() })).default([]),
       threads: z.array(z.string()).default([]),
       setting: z.string().default(''),
@@ -601,13 +625,26 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     if (fmt.choices) numbered = checkBranches(chapters.map((c, i) => ({ n: i + 1, title: c.title.trim(), summary: c.summary.trim(), choices: c.choices, ending: c.ending, ...mapOf(i) })))
     const acts = fmt.long ? splitActs(numbered.length) : undefined
     await writeMd(d.books.file(slug, 'outline.md'), { kind: 'outline', round, chapters: numbered, ...(acts ? { acts } : {}) }, renderOutlineBody(numbered, acts, !!fmt.choices))
+    // a mystery with puzzles: the puzzles of the brief go to bible/puzzles.md, each placed in the chapter the architect named (else spread over the later chapters)
+    if (fmt.puzzles) {
+      const wanted: Record<string, number> = {}
+      chapters.forEach((c, i) => c.puzzles.forEach((k) => (wanted[k] ??= i + 1)))
+      const entries = await puzzlesOf(d, slug)
+      if (!entries.length) ctx.log('this book is a mystery with puzzles, but its story brief has no puzzles: it is written without any')
+      else {
+        const placed = placePuzzles(entries, numbered.length, wanted)
+        await writePuzzles(d, slug, placed)
+        ctx.log(`puzzles placed: ${placed.map((p) => `${p.key} in chapter ${p.chapter}`).join(', ')}`)
+      }
+    }
     // a character the owner described is in the bible, even when the architect left it out
     const briefCharacters = fmt.nonfiction ? r.value.characters : await withBriefCharacters(d, slug, r.value.characters, ctx.log)
     // book N of a series starts from what the earlier books' bibles say about the recurring characters and places
     const carried = fmt.nonfiction ? { characters: briefCharacters, places: r.value.places } : await withSeriesBible(d, slug, briefCharacters, r.value.places, ctx.log)
     // an adaptation: the cast and places of the source book, looks kept (the art reference)
     const seeded = fmt.nonfiction ? carried : await withSourceBible(d, slug, carried.characters, carried.places, ctx.log)
-    const characters = seeded.characters
+    // a script's characters carry the other names the script uses for them, cleaned so that VN Studio reads each person once
+    const characters = fmt.script ? cleanCastAliases(seeded.characters) : seeded.characters
     const places = seeded.places
     if (fmt.nonfiction) {
       // the fact base takes the place of the story bible: argument, audience, style, structure and terms (sources and facts follow per chapter)
@@ -623,7 +660,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
-        (characters.length ? characters.map((c) => `- **${c.name}**: ${c.description}${fmt.script && c.voice ? ` Voice: ${c.voice}` : ''}`).join('\n') : '(see the pitch)') +
+        (characters.length ? characters.map((c) => (fmt.script ? scriptBibleLine(c) : `- **${c.name}**: ${c.description}`)).join('\n') : '(see the pitch)') +
         // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
         (fmt.script && places.length ? `\n\n## Places\n${places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
@@ -690,6 +727,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_title: entry.title,
       chapter_summary: entry.summary,
       chapter_words: perChapter,
+      chapter_runtime: chapterRuntime(fmt, outline.chapters.length),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
@@ -706,6 +744,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     add(await sourceChaptersSection(d, slug, n, 'draft', fmt.name, ctx))
     add(await ownerNotesSection(d, slug, n))
     if (fmt.script) add(placesBlock(lightBibleEntries(await d.books.bible(slug)).filter((e) => e.group === 'places').map((e) => e.name)), true)
+    if (fmt.puzzles) add(puzzlesChapterSection(await puzzlesOf(d, slug), n, outline.chapters.length))
     const forbid = instructionLines(template, appended)
     const maxTokens = Math.max(4000, perChapter * 6)
     let r = await run.chat({ messages, maxTokens, forbid })
@@ -741,7 +780,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     let trimmedFrom: number | null = null
     if (expandedFrom === null) {
       const before = countWords(body)
-      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens)
+      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles)
       if (out.reply) {
         r = out.reply
         body = out.body
@@ -820,6 +859,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       appendToPrompt(messages, await seriesSection(d, slug))
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
+      if (fmt.script) appendToPrompt(messages, fmt.screenplay ? SCREENPLAY_CUES_NOTE : SCRIPT_CUES_NOTE)
+      if (fmt.puzzles) appendToPrompt(messages, PUZZLE_REVIEW_NOTE)
       await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
       appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
@@ -852,7 +893,21 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       const scores: Record<string, number> = {}
       for (const [k, v] of Object.entries(r.value.scores)) scores[k.trim().toLowerCase().replace(/[\s-]+/g, '_')] = clamp(Number(v), 1, 10)
       const lowest = Math.min(...Object.values(scores))
-      const verdict: 'pass' | 'revise' = r.value.verdict === 'revise' && !q.must_pass.includes(role) && lowest >= q.revise_below ? 'pass' : r.value.verdict
+      let verdict: 'pass' | 'revise' = r.value.verdict === 'revise' && !q.must_pass.includes(role) && lowest >= q.revise_below ? 'pass' : r.value.verdict
+      // a mystery with puzzles: the engine's own check (every clue planted before its puzzle, the evidence before its testimony) makes the continuity review say revise
+      let reviewNotes = r.value.notes
+      let reviewProblems = r.value.problems
+      let reviewChapters = r.value.chapters
+      if (fmt.puzzles && role === 'continuity-checker') {
+        const found = puzzleProblems(await d.books.chapters(slug), await puzzlesOf(d, slug))
+        if (found.length) {
+          verdict = 'revise'
+          reviewNotes = `The engine's puzzle check found ${found.length} problem(s) in the puzzle lines (see the problems). ${reviewNotes}`.trim()
+          reviewProblems = [...found.map((p) => p.text), ...reviewProblems]
+          reviewChapters = [...new Set([...reviewChapters, ...found.map((p) => p.chapter).filter((c): c is number => c !== null)])]
+          ctx.log(`puzzle check: ${found.length} problem(s)`)
+        }
+      }
       const missing = dims.filter((x) => !(x in scores))
       if (missing.length) throw new Error(`the review is missing the score(s): ${missing.join(', ')}`)
       const name = actN ? `act-${actN}-${role}-r${round}.md` : `book-${role}-r${round}.md`
@@ -866,15 +921,15 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           verdict,
           verdict_raw: r.value.verdict,
           scores,
-          chapters: r.value.chapters,
+          chapters: reviewChapters,
           ...(researchJobs.length ? { research_jobs: researchJobs } : {}),
           agent: ctx.agent.id,
           model: r.chat.model.ref
         },
-        '\n' + reviewBody(r.value.notes, r.value.problems) + '\n'
+        '\n' + reviewBody(reviewNotes, reviewProblems) + '\n'
       )
       await made(slug, run)
-      return { result: `${verdict}${verdict !== r.value.verdict ? ' (was revise, scores all >= ' + q.revise_below + ')' : ''}: ${JSON.stringify(scores)}`, resultPath: `books/${slug}/reviews/${name}` }
+      return { result: `${verdict}${verdict !== r.value.verdict && r.value.verdict === 'revise' ? ' (was revise, scores all >= ' + q.revise_below + ')' : ''}: ${JSON.stringify(scores)}`, resultPath: `books/${slug}/reviews/${name}` }
     },
     { reviewing: true }
   )
@@ -956,6 +1011,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_text: current.body,
       other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : around.text || '(this is the only chapter)',
       chapter_words: chapterWords,
+      chapter_runtime: chapterRuntime(fmt, outline?.chapters.length ?? chapters.length),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
@@ -977,6 +1033,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     add(await sourceChaptersSection(d, slug, n, 'rewrite', fmt.name, ctx))
     if (!isNote) add(await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
     if (fmt.script) add(placesBlock(lightBibleEntries(await d.books.bible(slug)).filter((e) => e.group === 'places').map((e) => e.name)), true)
+    if (fmt.puzzles) add(puzzlesChapterSection(await puzzlesOf(d, slug), n, outline?.chapters.length ?? chapters.length))
     const forbid = instructionLines(template, appended)
     const maxTokens = Math.max(4000, current.words * 6)
     let r = await run.chat({ messages, maxTokens, forbid })
@@ -998,7 +1055,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const noteLonger = isNote && noteWantsLength(ctx.jobBody)
     if (noteLonger && countWords(body) > target * TRIM_ABOVE) ctx.log(`the note asks for more length: the chapter of ${countWords(body)} words (target ${target}) is not tightened`)
     if (!isLength && !noteLonger) {
-      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens)
+      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles)
       if (out.reply) {
         r = out.reply
         body = stripMarkers(out.body)
@@ -1144,9 +1201,9 @@ export function noteWantsLength(note: string): boolean {
   return /\b(longer|expand|lengthen|more (detail|words|scenes?)|add (a|an|another|more)\b|flesh out)/i.test(note)
 }
 
-/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
-export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean }, task: string): string {
-  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
+/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_sp` for a screenplay, `<task>_vn` for a visual novel script, else `<task>`. */
+export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean; screenplay?: boolean }, task: string): string {
+  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.screenplay ? `${task}_sp` : fmt.script ? `${task}_vn` : task
 }
 
 /** Added to an outline prompt from an older data folder that does not ask for `story_year` (the seed prompts do). */
@@ -1257,7 +1314,7 @@ export async function storyBriefSection(d: { books: BookStore }, slug: string): 
   return `## The owner's story brief\n\nThe owner described this story. Keep its title, its characters (names, roles, looks), its plot points and its setting, and build the story around them. Where the owner's notes (if any) conflict with the brief, the owner's notes win.\n\n${briefPromptText(brief)}`
 }
 
-type OutlineCharacter = { name: string; description: string; voice: string }
+type OutlineCharacter = { name: string; description: string; voice: string; aliases?: string[] }
 
 /** The outline's characters plus every character of the owner's brief that the architect left out (matched by name, ignoring case). */
 export async function withBriefCharacters(d: { books: BookStore }, slug: string, characters: OutlineCharacter[], log: (m: string) => void): Promise<OutlineCharacter[]> {

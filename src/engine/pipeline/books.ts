@@ -12,6 +12,7 @@ import { writeReaderDir } from '../publish/reader'
 import { buildReferences, citedNumbers, FactBase } from '../memory/factbase'
 import { buildArticleHtml, buildArticleMarkdown } from '../publish/article'
 import { endLine, isBranching, renderOutlineBody } from './branches'
+import { puzzlesOf, puzzleViews } from './puzzles'
 import { slugify as slugOf } from '../../shared/slug'
 import type { Choice } from './branches'
 
@@ -394,7 +395,9 @@ export class BookStore {
     const chapters = [...(await this.chapters(slug))]
     const refs = await this.references(slug)
     const script = d.script === true
+    const screenplay = d.screenplay === true
     const links = await this.choiceLinks(slug, chapters)
+    const puzzles = d.puzzles === true ? puzzleViews(await puzzlesOf({ books: this }, slug)) : undefined
     const cover = this.file(slug, 'out', 'cover.png')
     const dir = this.file(slug, 'out', 'reader')
     await writeReaderDir(dir, {
@@ -403,7 +406,7 @@ export class BookStore {
       blurb: typeof d.blurb === 'string' ? d.blurb : undefined,
       year: Number(d.year ?? new Date().getFullYear()),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script, ...links(c) })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script, screenplay, ...(puzzles ? { puzzles } : {}), ...links(c) })), ...(refs ? [refs] : [])],
       coverPngPath: await fs.access(cover).then(() => cover, () => undefined)
     })
     return dir
@@ -476,6 +479,7 @@ export class BookStore {
     const chapters = await this.chapters(slug)
     const refs = await this.references(slug)
     const links = await this.choiceLinks(slug, chapters)
+    const puzzles = d.puzzles === true ? puzzleViews(await puzzlesOf({ books: this }, slug)) : undefined
     let coverPng: Uint8Array | undefined
     try {
       coverPng = await fs.readFile(this.file(slug, 'out', 'cover.png'))
@@ -497,7 +501,7 @@ export class BookStore {
       year: Number(d.year ?? new Date().getFullYear()),
       modified: new Date(),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, ...links(c) })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, screenplay: d.screenplay === true, ...(puzzles ? { puzzles } : {}), ...links(c) })), ...(refs ? [refs] : [])],
       coverPng
     })
     const out = this.file(slug, 'out', `${slug}.epub`)

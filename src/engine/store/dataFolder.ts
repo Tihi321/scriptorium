@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrateClientProvider, migrateClientSearch, migrateFallbacks, migrateHumanizer, migrateNewspaper, migrateSeedPrompts } from './migrations'
+import { migrateClientProvider, migrateClientSearch, migrateFallbacks, migrateHumanizer, migrateNewspaper, migratePuzzles, migrateScreenplay, migrateSeedPrompts } from './migrations'
 
 /** Folders created inside the data folder (see "Shared files" in docs/design.md). */
 export const DATA_LAYOUT = [
@@ -109,6 +109,8 @@ export async function initDataFolder(dataDir: string, seedDir: string | undefine
   const seedOrNone = seedDir && existsSync(seedDir) ? seedDir : undefined
   result.migrated.push(...(await migrateHumanizer(dataDir, seedOrNone)).changes)
   result.migrated.push(...(await migrateNewspaper(dataDir, seedOrNone)).changes)
+  result.migrated.push(...(await migrateScreenplay(dataDir, seedOrNone)).changes)
+  result.migrated.push(...(await migratePuzzles(dataDir, seedOrNone)).changes)
   result.migrated.push(...(await migrateClientSearch(dataDir)).changes)
   result.migrated.push(...(await migrateClientProvider(dataDir, seedOrNone)).changes)
   result.migrated.push(...(await migrateFallbacks(dataDir, seedOrNone)).changes)

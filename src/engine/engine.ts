@@ -783,7 +783,7 @@ export class Engine {
     if (fmt?.article && topic && topic.kind !== ARTICLE_KIND) {
       throw new Error(`"${fmt.id}" is an article format, but "${topic.id}" is a ${topic.kind} topic: articles go in a newspaper section (a topic of kind article, e.g. news-technology; list_topics shows them)`)
     }
-    if (fmt?.article && brief.sourceBook) throw new Error('an article cannot adapt a book (source_book is for visual novel scripts)')
+    if (fmt?.article && brief.sourceBook) throw new Error('an article cannot adapt a book (source_book is for visual novel scripts and screenplays)')
   }
 
   /** Creates a story from a brief. Throws when the brief is empty, or names an article format and a topic that is not a newspaper section (or the other way round). */
@@ -799,18 +799,19 @@ export class Engine {
   }
 
   /**
-   * The script writer: a story that adapts a published book into a visual novel script (`format` is a script format: linear or with choices).
+   * The script writer: a story that adapts a published book into a visual novel script or a screenplay (`format` is an enabled script format: a visual novel, linear or with choices, or a screenplay such as short-film).
    * The story waits until the source is published (it is, here) and a book starts from it like from any story. The title defaults to the source's.
    * Throws when the book does not exist or is not published, the format is not an enabled script format, or the same adaptation is already waiting.
    */
   async adaptBook(input: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }): Promise<IdeaFile> {
     const src = await this.books.read(input.book)
     if (!src) throw new Error(`no book "${input.book}" (list_books shows the slugs)`)
-    if (src.data.article === true) throw new Error(`"${src.data.title}" is a newspaper article: only a book can be adapted into a visual novel`)
+    if (src.data.article === true) throw new Error(`"${src.data.title}" is a newspaper article: only a book can be adapted into a script`)
     if (src.data.stage !== 'published') throw new Error(`"${src.data.title}" is not published yet (stage ${src.data.stage}): only a finished book can be adapted`)
     const fmt = this.formats.find((f) => f.enabled && f.id === input.format)
     if (!fmt?.script) {
-      throw new Error(`"${input.format}" is not a visual novel format. Use one of: ${this.formats.filter((f) => f.enabled && f.script).map((f) => f.id).join(', ') || '(no visual novel format is enabled)'}`)
+      const ids = (screen: boolean) => this.formats.filter((f) => f.enabled && f.script && !!f.screenplay === screen).map((f) => f.id).join(', ') || '(none enabled)'
+      throw new Error(`"${input.format}" is not a script format. Visual novel formats: ${ids(false)}. Screenplay formats: ${ids(true)}`)
     }
     if ((await this.ideas.list()).some((i) => i.data.status === 'open' && i.data.source_book === input.book && i.data.format === fmt.id)) {
       throw new Error(`an adaptation of "${src.data.title}" as ${fmt.id} is already waiting for its book`)
@@ -819,7 +820,7 @@ export class Engine {
     const brief: StoryBrief = {
       ...emptyBrief(),
       title: input.title?.trim() || src.data.title,
-      premise: `A ${fmt.name.toLowerCase()} script adapted from the owner's published book "${src.data.title}". Keep the book's story, characters, setting and ending.`,
+      premise: `A ${fmt.name.toLowerCase()} ${fmt.screenplay ? 'screenplay' : 'script'} adapted from the owner's published book "${src.data.title}". Keep the book's story, characters, setting and ending.`,
       sections: notes ? [{ heading: 'Notes for the adapter', text: notes }] : [],
       format: fmt.id,
       ...(src.data.genre.trim() ? { genre: src.data.genre.trim() } : {}),

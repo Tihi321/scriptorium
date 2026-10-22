@@ -16,20 +16,111 @@ export const CAST = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
 export const LINE = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
 
 /**
+ * A cue line: `CG: ...`, `INSERT: ...`, `SFX: ...`, `AMBIENCE: ...` (Croatian `SLIKA`, `ZVUK`, `ATMOSFERA`); `CG: none` and `END CG` hide the picture.
+ * Copied verbatim from VN Studio, `src/engine/vn/script.ts` (`CUE_RE`, `END_CG_RE`), so both tools read the same lines.
+ */
+export const CUE = /^\**\s*(CG|SLIKA|INSERT|SFX|SOUND|ZVUK|AMBIENCE|ATMOSFERA)\s*:\s*\**\s*(.*?)\s*\**$/iu
+export const END_CG = /^\**\s*(?:END\s+CG|KRAJ\s+SLIKE)\s*\**$/iu
+
+export type CueKind = 'cg' | 'insert' | 'sfx' | 'ambience'
+
+/**
+ * The cue a script line is, or null. `text` is null for `CG: none`, `INSERT: none`, `AMBIENCE: none` and `END CG` (the picture or sound
+ * stops), and empty for a cue with no text (VN Studio ignores it, so callers skip it).
+ */
+export function cueOf(line: string): { cue: CueKind; text: string | null } | null {
+  const t = line.trim()
+  if (END_CG.test(t)) return { cue: 'cg', text: null }
+  const m = CUE.exec(t)
+  if (!m) return null
+  const word = m[1]!.toUpperCase()
+  const cue: CueKind = word === 'CG' || word === 'SLIKA' ? 'cg' : word === 'INSERT' ? 'insert' : word === 'SFX' || word === 'SOUND' || word === 'ZVUK' ? 'sfx' : 'ambience'
+  const text = m[2]!.trim()
+  if (cue !== 'sfx' && /^(none|ni[sš]ta)\.?$/iu.test(text)) return { cue, text: null }
+  return { cue, text }
+}
+
+/**
+ * The cue lines of a screenplay (`screenplay: true` formats, docs/screenplay.md): `SHOT (spec): what we see`, `MUSIC: mood` (or `MUSIC: stop`),
+ * `SFX: sound` and `TITLE: text`. They are checked before `LINE`, which would read `SHOT (wide): ...` as a speaker. A screenplay does not use
+ * the visual novel cues `CG:`, `INSERT:` and `AMBIENCE:`: a line that `cueOf` reads as one of those is action there, and `SFX:` means the same in both.
+ */
+export const SHOT = /^\**\s*SHOT\s*(?:\(([^)]*)\))?\s*:\s*\**\s*(.*?)\s*\**$/i
+export const MUSIC = /^\**\s*MUSIC\s*:\s*\**\s*(.*?)\s*\**$/i
+export const SP_SFX = /^\**\s*SFX\s*:\s*\**\s*(.*?)\s*\**$/i
+export const TITLE = /^\**\s*TITLE\s*:\s*\**\s*(.*?)\s*\**$/i
+
+/**
+ * The puzzle lines of a mystery with puzzles (`puzzles: true` formats, docs/visual-novel.md "Puzzles"). Croatian keywords as for the cue lines. They are
+ * checked right after the cue lines and before `CAST` and `LINE`, which would read `CLUE: ...` as a speaker. None is a picture, sound or screenplay keyword.
+ */
+export const CLUE_RE = /^\**\s*(CLUE|TRAG)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*\/\s*([A-Za-z0-9_-]+)\s*:\s*\**\s*(.*?)\s*\**$/iu
+export const EVIDENCE_RE = /^\**\s*(EVIDENCE|DOKAZ)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*:\s*\**\s*(.*?)\s*\**$/iu
+export const PUZZLE_RE = /^\**\s*(PUZZLE|ZAGONETKA)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*(?:\(\s*([A-Za-z0-9_-]+)\s*\))?\s*\**$/iu
+export const TESTIMONY_RE = /^\**\s*(TESTIMONY|SVJEDOČENJE)\s*:\s*\**\s*(.+?)\s*\**$/iu
+export const END_TESTIMONY_RE = /^\**\s*(?:END\s+TESTIMONY|KRAJ\s+SVJEDOČENJA)\s*\**$/iu
+
+export type PuzzleLine =
+  | { kind: 'clue'; puzzle: string; clue: string; text: string }
+  | { kind: 'evidence'; key: string; text: string }
+  | { kind: 'puzzle'; puzzle: string; puzzleKind: string | null }
+  | { kind: 'testimony'; witness: string }
+  | { kind: 'end-testimony' }
+
+/** The puzzle line a script line is, or null. */
+export function puzzleLineOf(line: string): PuzzleLine | null {
+  const t = line.trim()
+  let m: RegExpExecArray | null
+  if ((m = CLUE_RE.exec(t))) return { kind: 'clue', puzzle: m[2]!, clue: m[3]!, text: m[4]!.trim() }
+  if ((m = EVIDENCE_RE.exec(t))) return { kind: 'evidence', key: m[2]!, text: m[3]!.trim() }
+  if ((m = PUZZLE_RE.exec(t))) return { kind: 'puzzle', puzzle: m[2]!, puzzleKind: m[3]?.toLowerCase() ?? null }
+  if ((m = TESTIMONY_RE.exec(t))) return { kind: 'testimony', witness: m[2]!.trim() }
+  if (END_TESTIMONY_RE.test(t)) return { kind: 'end-testimony' }
+  return null
+}
+
+/** What the layout needs of a puzzle: its title and the canonical text of its clues (from bible/puzzles.md). */
+export interface PuzzleView {
+  title?: string
+  clues: { id: string; text: string }[]
+}
+
+const CUE_LABEL: Record<CueKind, string> = { cg: 'Picture:', insert: 'Close-up:', sfx: 'Sound:', ambience: 'Ambience:' }
+
+/**
  * A visual novel script (formats with `script: true`) to XHTML, one element per line: `SCENE: place, time` opens a scene,
  * `ON SCREEN: Name (look), ...` says who is shown, `NAME (expression): words` is a spoken line, `---` is a scene break,
  * and any other line is narration (what the reader sees or the narrator says).
  */
-export function scriptToXhtml(md: string): string {
+export function scriptToXhtml(md: string, opts: { screenplay?: boolean; puzzles?: Record<string, PuzzleView> } = {}): string {
   const out: string[] = []
   for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trim()
     if (!line) continue
     let m: RegExpExecArray | null
+    let c: ReturnType<typeof cueOf>
+    let pz: PuzzleLine | null
     if (/^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/.test(line)) out.push('<hr class="scene-break"/>')
     else if ((m = /^#{1,6}\s+(.*)$/.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
     else if ((m = SCENE.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
-    else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && (m = SHOT.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Shot${m[1]?.trim() ? ` (${escapeXml(m[1].trim())})` : ''}:</span> ${inline(m[2]!)}</p>`)
+    else if (opts.screenplay && (m = MUSIC.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Music:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && (m = SP_SFX.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Sound:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && (m = TITLE.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Title:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && cueOf(line)) out.push(`<p class="vn-narration">${inline(line)}</p>`)
+    else if (!opts.screenplay && (c = cueOf(line))) {
+      if (c.text) out.push(`<p class="vn-cue"><span class="vn-label">${CUE_LABEL[c.cue]}</span> ${inline(c.text)}</p>`)
+    } else if (!opts.screenplay && (pz = puzzleLineOf(line))) {
+      if (pz.kind === 'clue') out.push(`<p class="vn-clue"><span class="vn-label">Clue:</span> ${inline(pz.text)}</p>`)
+      else if (pz.kind === 'evidence') out.push(`<p class="vn-evidence"><span class="vn-label">Evidence:</span> ${inline(pz.text)}</p>`)
+      else if (pz.kind === 'testimony') out.push(`<p class="vn-testimony"><span class="vn-label">Testimony:</span> ${inline(pz.witness)}</p>`)
+      else if (pz.kind === 'end-testimony') out.push('<p class="vn-testimony vn-testimony-end"><span class="vn-label">End of testimony</span></p>')
+      else {
+        const view = opts.puzzles?.[pz.puzzle]
+        const list = view?.clues.length ? `\n<ul>\n${view.clues.map((k) => `<li>${inline(k.text)}</li>`).join('\n')}\n</ul>` : ''
+        out.push(`<div class="vn-puzzle"><p class="vn-puzzle-title"><span class="vn-label">Puzzle:</span> ${inline(view?.title ?? pz.puzzle)}</p>${list}</div>`)
+      }
+    } else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
     else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
       const how = m[2] ? ` <span class="vn-how">(${inline(m[2])})</span>` : ''
       out.push(`<p class="vn-line"><span class="vn-speaker">${escapeXml(m[1]!.trim())}</span>${how} ${inline(m[3]!)}</p>`)
@@ -39,8 +130,8 @@ export function scriptToXhtml(md: string): string {
 }
 
 /** A small markdown subset for prose (paragraphs, headings, scene breaks, quotes, emphasis) to well-formed XHTML. */
-export function markdownToXhtml(md: string, opts: { script?: boolean } = {}): string {
-  if (opts.script) return scriptToXhtml(md)
+export function markdownToXhtml(md: string, opts: { script?: boolean; screenplay?: boolean; puzzles?: Record<string, PuzzleView> } = {}): string {
+  if (opts.script) return scriptToXhtml(md, { screenplay: opts.screenplay, puzzles: opts.puzzles })
   const blocks = md.replace(/\r\n/g, '\n').trim().split(/\n{2,}/)
   const out: string[] = []
   for (const raw of blocks) {

@@ -187,9 +187,9 @@ export function BookCard() {
               <button disabled={newTitle !== null || drawing} onClick={() => setNewTitle(book.title)} data-testid="card-rename" title="A new title: the cover, EPUB and reader are made again. The folder keeps its name.">
                 Rename
               </button>
-              {!article && !book.sourceBook && book.kind !== 'visual-novel' && (
-                <button onClick={() => setAdapting(true)} data-testid="card-adapt" title="Adapt this book into a visual novel script (linear or with choices)">
-                  Adapt to visual novel
+              {!article && !book.sourceBook && book.kind !== 'visual-novel' && book.kind !== 'video' && book.kind !== 'juvenile-video' && (
+                <button onClick={() => setAdapting(true)} data-testid="card-adapt" title="Adapt this book into a script: a visual novel (linear or with choices) or a screenplay for a short film or cartoon">
+                  Adapt to script
                 </button>
               )}
               {!article && (
