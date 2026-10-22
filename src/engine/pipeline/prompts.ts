@@ -25,8 +25,8 @@ export async function loadPrompt(dataDir: string, role: string, task: string): P
   try {
     raw = await fs.readFile(file, 'utf8')
   } catch {
-    // a non-fiction or visual novel variant (`<task>_nf`, `<task>_vn`) that a role does not have uses the plain template
-    if (/_(nf|vn)$/.test(task)) return loadPrompt(dataDir, role, task.slice(0, -3))
+    // a non-fiction, visual novel or screenplay variant (`<task>_nf`, `<task>_vn`, `<task>_sp`) that a role does not have uses the plain template (an `_sp` never the `_vn` one)
+    if (/_(nf|vn|sp)$/.test(task)) return loadPrompt(dataDir, role, task.slice(0, -3))
     // an article is non-fiction: a role without an `_article` prompt uses its `_nf` one, then the plain one
     if (task.endsWith('_article')) return loadPrompt(dataDir, role, `${task.slice(0, -8)}_nf`)
     throw new Error(`prompt template missing: prompts/${role}/${task}.md`)

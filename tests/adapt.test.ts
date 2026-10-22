@@ -267,8 +267,13 @@ describe('adaptBook (the engine behind adapt_book and the panel)', () => {
     const a = e.engine
     await expect(a.adaptBook({ book: 'nope', format: 'visual-novel' })).rejects.toThrow(/no book "nope"/)
     await expect(a.adaptBook({ book: 'half', format: 'visual-novel' })).rejects.toThrow(/not published yet/)
-    await expect(a.adaptBook({ book: 'moon-lamp', format: 'novel' })).rejects.toThrow(/not a visual novel format/)
-    await expect(a.adaptBook({ book: 'moon-lamp', format: 'no-such-format' })).rejects.toThrow(/not a visual novel format/)
+    await expect(a.adaptBook({ book: 'moon-lamp', format: 'novel' })).rejects.toThrow(/not a script format.*Visual novel formats: visual-novel, choice-visual-novel.*Screenplay formats: short-film, cartoon, kids-cartoon/)
+    await expect(a.adaptBook({ book: 'moon-lamp', format: 'no-such-format' })).rejects.toThrow(/not a script format/)
+    // a screenplay format is a script format: it is adapted like a visual novel, and the premise names the medium
+    const film = await a.adaptBook({ book: 'moon-lamp', format: 'short-film' })
+    expect(film.data).toMatchObject({ source_book: 'moon-lamp', format: 'short-film', status: 'open' })
+    expect(film.body).toContain('short film screenplay adapted from the owner')
+    await expect(a.adaptBook({ book: 'moon-lamp', format: 'short-film' })).rejects.toThrow(/already waiting/)
     const story = await a.adaptBook({ book: 'moon-lamp', format: 'choice-visual-novel', notes: 'Keep the lamp.' })
     expect(story.data).toMatchObject({ source_book: 'moon-lamp', format: 'choice-visual-novel', genre: 'Cosy fantasy', title: 'The Moon Lamp', title_fixed: true, source: 'user', status: 'open' })
     expect(story.data.topic).toBeNull()

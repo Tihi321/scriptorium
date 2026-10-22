@@ -36,7 +36,7 @@ import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible }
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
 import { cleanCastAliases, scriptBibleLine } from './scriptBible'
-import { placesBlock, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
+import { placesBlock, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
@@ -98,10 +98,13 @@ const enabledFormats = (formats: FormatEntry[]) => formats.filter((f) => f.enabl
 /** A newspaper article format (`article: true`): one chapter, no cover and no EPUB, its own slot limit. */
 export const isArticleFormat = (f: Pick<FormatEntry, 'article'> | undefined | null): boolean => f?.article === true
 
-/** Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics). */
+/**
+ * Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics) and the
+ * screenplay formats (a screenplay is only written when a story fixes the format, or a topic of kind `video` or `juvenile-video` has it).
+ */
 export function formatsForKind(formats: FormatEntry[], kind: string | null): FormatEntry[] {
   const on = enabledFormats(formats)
-  return kind ? on.filter((f) => f.kinds.includes(kind)) : on.filter((f) => !f.article)
+  return kind ? on.filter((f) => f.kinds.includes(kind)) : on.filter((f) => !f.article && !f.screenplay)
 }
 
 /** Open slots: a book can start while fewer than `max_books_in_progress` books are open, an article while fewer than `max_articles_in_progress` articles are. */
@@ -173,8 +176,15 @@ export const formatVars = (f: FormatEntry, target: number) => ({
   chapters_min: f.chapters[0],
   chapters_max: f.chapters[1],
   guidance: f.guidance.trim(),
-  target_words: target
+  target_words: target,
+  // a screenplay: the seconds of film the whole book should run (empty for other formats)
+  runtime_min: f.runtime?.[0] ?? '',
+  runtime_max: f.runtime?.[1] ?? ''
 })
+
+/** The seconds of film one chapter (a sequence) of a screenplay should run: the middle of the format's runtime over the planned chapters. Empty for other formats. */
+export const chapterRuntime = (f: FormatEntry, chapters: number): number | '' =>
+  f.runtime ? Math.round((f.runtime[0] + f.runtime[1]) / 2 / Math.max(1, chapters)) : ''
 
 /** A drafted chapter of a long book under this share of its target words gets an expand retry. */
 export const EXPAND_BELOW = 0.8
@@ -275,10 +285,12 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
    * A chapter over 120% of its target gets one more request: cut it to the target. The shorter text is kept when it is between 80% of the
    * target and the length it had. Returns the text, and the reply when the retry was kept.
    */
-  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number): Promise<{ body: string; reply: ChatResult | null }> => {
+  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number, screenplay = false): Promise<{ body: string; reply: ChatResult | null }> => {
     const words = countWords(body)
     if (words <= target * TRIM_ABOVE) return { body, reply: null }
-    const how = script
+    const how = screenplay
+      ? 'Cut action lines and minor lines, and keep every SCENE, SHOT, ON SCREEN, MUSIC, SFX and TITLE line and every plot beat'
+      : script
       ? 'Cut narration lines and minor lines, and keep every SCENE, ON SCREEN, CG, INSERT, SFX and AMBIENCE line and every plot beat'
       : 'Tighten it: cut repetition and description, and keep every event, name and line of dialogue that matters'
     try {
@@ -363,6 +375,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     let allowed = formatsForKind(formats, topic?.kind ?? null).filter((f) => !idea?.data.source_book || f.script)
     // a story with no topic that fixes an article format is an article of no section
     if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.article && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
+    // the same for a story that fixes a screenplay format (a short film, a cartoon): a screenplay is never picked for a story with no topic otherwise
+    if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.screenplay && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
     const articleStory = allowed.length > 0 && allowed.every((f) => f.article)
     // the owner's story: its title and format are theirs to fix, and the whole brief goes to the editor
     const fromOwner = idea?.data.source === 'user'
@@ -379,7 +393,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
           (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
           (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '') +
-          (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into a visual novel script: keep the book's genre, and take the title from the book if the owner gave none.` : '')
+          (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into ${allowed.every((f) => f.screenplay) && allowed.length > 0 ? 'a screenplay for a short film' : 'a visual novel script'}: keep the book's genre, and take the title from the book if the owner gave none.` : '')
         : 'No idea was picked: choose a fresh premise that fits the topic.',
       topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
       formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
@@ -413,6 +427,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(fmt.nonfiction ? { nonfiction: true } : {}),
         ...(fmt.article ? { article: true } : {}),
         ...(fmt.script ? { script: true } : {}),
+        ...(fmt.screenplay ? { screenplay: true } : {}),
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
         target_words: target,
@@ -692,6 +707,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_title: entry.title,
       chapter_summary: entry.summary,
       chapter_words: perChapter,
+      chapter_runtime: chapterRuntime(fmt, outline.chapters.length),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
@@ -743,7 +759,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     let trimmedFrom: number | null = null
     if (expandedFrom === null) {
       const before = countWords(body)
-      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens)
+      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay)
       if (out.reply) {
         r = out.reply
         body = out.body
@@ -822,7 +838,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       appendToPrompt(messages, await seriesSection(d, slug))
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
-      if (fmt.script) appendToPrompt(messages, SCRIPT_CUES_NOTE)
+      if (fmt.script) appendToPrompt(messages, fmt.screenplay ? SCREENPLAY_CUES_NOTE : SCRIPT_CUES_NOTE)
       await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
       appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
@@ -959,6 +975,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_text: current.body,
       other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : around.text || '(this is the only chapter)',
       chapter_words: chapterWords,
+      chapter_runtime: chapterRuntime(fmt, outline?.chapters.length ?? chapters.length),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
@@ -1001,7 +1018,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const noteLonger = isNote && noteWantsLength(ctx.jobBody)
     if (noteLonger && countWords(body) > target * TRIM_ABOVE) ctx.log(`the note asks for more length: the chapter of ${countWords(body)} words (target ${target}) is not tightened`)
     if (!isLength && !noteLonger) {
-      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens)
+      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay)
       if (out.reply) {
         r = out.reply
         body = stripMarkers(out.body)
@@ -1147,9 +1164,9 @@ export function noteWantsLength(note: string): boolean {
   return /\b(longer|expand|lengthen|more (detail|words|scenes?)|add (a|an|another|more)\b|flesh out)/i.test(note)
 }
 
-/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
-export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean }, task: string): string {
-  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
+/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_sp` for a screenplay, `<task>_vn` for a visual novel script, else `<task>`. */
+export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean; screenplay?: boolean }, task: string): string {
+  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.screenplay ? `${task}_sp` : fmt.script ? `${task}_vn` : task
 }
 
 /** Added to an outline prompt from an older data folder that does not ask for `story_year` (the seed prompts do). */

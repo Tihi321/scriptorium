@@ -263,6 +263,72 @@ formats:
       it means). Vivid but accurate, with a clear voice and a thread that pulls the reader on. Every fact comes from the sourced notes and carries the
       number of its source in square brackets, like [2]. Never state a date, number, name, quote or event that the notes do not give. No invented
       quotes, no invented people or scenes. Say plainly what is disputed or unknown.
+  - id: short-film
+    name: Short film
+    enabled: true
+    script: true
+    screenplay: true
+    humanize: false
+    max_rounds: 1
+    kinds: [video]
+    juvenile: false
+    age_band: null
+    words: [400, 2000]
+    chapters: [1, 3]
+    runtime: [60, 180]
+    read_aloud: false
+    reviewers: [continuity-checker, developmental-editor, line-editor, beta-reader]
+    guidance: |
+      A screenplay for a short live-action-style film of one to three minutes, written as shots: each scene opens with where and when it
+      is, and every shot is one continuous camera take of four to ten seconds that one picture can show (who is in frame, what they do,
+      the framing and the camera move). Tell the story in pictures first: a short voice-over or a few short spoken lines (about two and a
+      half words a second) carry what a picture cannot. One to three spoken lines per shot, one name per character everywhere, present
+      tense, concrete visual detail (light, colour, objects, weather). Music cues set the mood at most twice in the whole film; sound
+      effects name what is heard in a shot. The film has an opening image, a turn and an ending image, and fits its runtime.
+  - id: cartoon
+    name: Cartoon
+    enabled: true
+    script: true
+    screenplay: true
+    humanize: false
+    max_rounds: 1
+    kinds: [video]
+    juvenile: false
+    age_band: null
+    words: [400, 2000]
+    chapters: [1, 3]
+    runtime: [60, 180]
+    read_aloud: false
+    reviewers: [continuity-checker, developmental-editor, line-editor, beta-reader]
+    guidance: |
+      A screenplay for a short animated cartoon of one to three minutes, written as shots like a short film, but for an animated look:
+      bold shapes, bright colours, expressive characters and visual gags. Each scene opens with where and when it is, and every shot is
+      one camera take of four to ten seconds that one picture can show. Characters look the same in every shot (the bible gives their
+      looks, in a few concrete words). Humour, rhythm and timing come from the pictures; a short voice-over and a few short spoken lines
+      (about two and a half words a second) carry the rest. One name per character everywhere, present tense. Music cues set the mood at
+      most twice in the whole film. The cartoon has a clear set-up, a gag or a turn, and a payoff that fits its runtime.
+  - id: kids-cartoon
+    name: Cartoon for children
+    enabled: true
+    script: true
+    screenplay: true
+    humanize: false
+    max_rounds: 1
+    kinds: [juvenile-video]
+    juvenile: true
+    age_band: "3-8"
+    words: [300, 1200]
+    chapters: [1, 2]
+    runtime: [45, 120]
+    read_aloud: false
+    reviewers: [continuity-checker, developmental-editor, line-editor, beta-reader, child-safety-reviewer]
+    guidance: |
+      A gentle screenplay for a short animated cartoon for children aged three to eight, one to two minutes long, written as shots:
+      every shot is one camera take of four to ten seconds that one picture can show. Simple, bright, friendly pictures; characters with
+      one or two easy-to-recognise looks (colour, shape, a favourite object) who look the same in every shot. Short sentences and
+      everyday words, a warm narrator voice-over and a few short spoken lines (about two and a half words a second), a little repetition
+      and a refrain a child can join in with. A small, cosy problem, solved kindly: no peril, no villains, nothing scary, no sad endings.
+      Music cues are soft and playful, at most twice in the whole film.
 ---
 # Formats
 
@@ -278,6 +344,8 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `article`: a newspaper article (one chapter, `chapters: [1, 1]`, with `nonfiction: true`). It is researched like a non-fiction book, with the `_article` prompts (`pitch_article.md`, `research_plan_article.md`, `outline_article.md`, `draft_chapter_article.md`, `rewrite_chapter_article.md`, `humanize_chapter_article.md`, `publish_article.md`; roles without an `_article` prompt use their `_nf` one), a search for recent news, and research notes that belong to the article alone (never reused from or added to the shared library notes). It gets no cover, no EPUB and no Kindle: the publisher writes `out/article.html` (a styled page with headline, standfirst, byline, date, text and numbered references) and `out/article.md`. Articles are for topics of kind `article` (the sections of the newspaper, in `topics.md`) and never for another kind, and they have their own limit, `max_articles_in_progress` in `config/factory.md`.
 - `research_prep`: the writer lists research questions before each chapter (one short model call per chapter, answered by the researcher before the chapter is written). `false` by default; books whose genre or topic contains a word of `research_prep_genres` in `config/factory.md` get it too, whatever the format says.
 - `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel formats are for topics of kind `visual-novel` and `juvenile-visual-novel`, so they are never picked for an ordinary fiction topic.
+- `screenplay`: a screenplay for a short film or cartoon (with `script: true`, so it keeps the SCENE places of the bible, the tighten text, adaptation through `adapt_book` and the script layout of the EPUB and the reader). Chapters are sequences of the film, written as shots (`SHOT (framing, move, 6s): what we see`, `ON SCREEN:`, `MUSIC:`, `SFX:`, `TITLE:`, `NARRATOR:` and `NAME (V.O.):` voice-over, `NAME (delivery):` dialogue). The architect, writer and line editor use the `_sp` prompts (`outline_sp.md`, `draft_chapter_sp.md`, `rewrite_chapter_sp.md`, `review_sp.md`; a role without one uses its plain prompt, never the `_vn` one), and `get_screenplay` returns the parsed film. The screenplay formats are for topics of kind `video` and `juvenile-video` (all switched off in `topics.md`) and for a story that fixes the format (`add_story` with `format`, `adapt_book`): they are never picked for a story with no topic. Leave `humanize: false`. See `docs/screenplay.md`.
+- `runtime`: `[min, max]` seconds of film a screenplay format should run. The writers are told the runtime and the chapter's share of it; `get_screenplay` reports the real one.
 - `choices`: a story with choices (a choose-your-path book or a visual novel with choices). The architect plans a map of chapters: some end with two or three choices, each leading to a later chapter, and the story has at least two endings. The writer sees only the chapters that can lead to the one it writes, the reviewers read every path, and the EPUB and the reader end those chapters with links to the chapters the choices lead to ("The End" on an ending). The extra instructions are in `prompts/_choices.md`. The choice formats are for topics of kind `interactive-fiction`, `juvenile-interactive-fiction`, `visual-novel` and `juvenile-visual-novel`. Short formats only (not `long`).
 - `reviewers`: optional list of reviewer roles to override the default set. The default set is continuity, developmental, line, copy, beta reader and originality, plus child safety for juvenile formats and read-aloud for read-aloud formats.
 

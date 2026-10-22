@@ -40,6 +40,16 @@ export function cueOf(line: string): { cue: CueKind; text: string | null } | nul
   return { cue, text }
 }
 
+/**
+ * The cue lines of a screenplay (`screenplay: true` formats, docs/screenplay.md): `SHOT (spec): what we see`, `MUSIC: mood` (or `MUSIC: stop`),
+ * `SFX: sound` and `TITLE: text`. They are checked before `LINE`, which would read `SHOT (wide): ...` as a speaker. A screenplay does not use
+ * the visual novel cues `CG:`, `INSERT:` and `AMBIENCE:`: a line that `cueOf` reads as one of those is action there, and `SFX:` means the same in both.
+ */
+export const SHOT = /^\**\s*SHOT\s*(?:\(([^)]*)\))?\s*:\s*\**\s*(.*?)\s*\**$/i
+export const MUSIC = /^\**\s*MUSIC\s*:\s*\**\s*(.*?)\s*\**$/i
+export const SP_SFX = /^\**\s*SFX\s*:\s*\**\s*(.*?)\s*\**$/i
+export const TITLE = /^\**\s*TITLE\s*:\s*\**\s*(.*?)\s*\**$/i
+
 const CUE_LABEL: Record<CueKind, string> = { cg: 'Picture:', insert: 'Close-up:', sfx: 'Sound:', ambience: 'Ambience:' }
 
 /**
@@ -47,7 +57,7 @@ const CUE_LABEL: Record<CueKind, string> = { cg: 'Picture:', insert: 'Close-up:'
  * `ON SCREEN: Name (look), ...` says who is shown, `NAME (expression): words` is a spoken line, `---` is a scene break,
  * and any other line is narration (what the reader sees or the narrator says).
  */
-export function scriptToXhtml(md: string): string {
+export function scriptToXhtml(md: string, opts: { screenplay?: boolean } = {}): string {
   const out: string[] = []
   for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trim()
@@ -57,7 +67,12 @@ export function scriptToXhtml(md: string): string {
     if (/^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/.test(line)) out.push('<hr class="scene-break"/>')
     else if ((m = /^#{1,6}\s+(.*)$/.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
     else if ((m = SCENE.exec(line))) out.push(`<h3 class="vn-scene">${inline(m[1]!)}</h3>`)
-    else if ((c = cueOf(line))) {
+    else if (opts.screenplay && (m = SHOT.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Shot${m[1]?.trim() ? ` (${escapeXml(m[1].trim())})` : ''}:</span> ${inline(m[2]!)}</p>`)
+    else if (opts.screenplay && (m = MUSIC.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Music:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && (m = SP_SFX.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Sound:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && (m = TITLE.exec(line))) out.push(`<p class="vn-cue"><span class="vn-label">Title:</span> ${inline(m[1]!)}</p>`)
+    else if (opts.screenplay && cueOf(line)) out.push(`<p class="vn-narration">${inline(line)}</p>`)
+    else if (!opts.screenplay && (c = cueOf(line))) {
       if (c.text) out.push(`<p class="vn-cue"><span class="vn-label">${CUE_LABEL[c.cue]}</span> ${inline(c.text)}</p>`)
     } else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
     else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
@@ -69,8 +84,8 @@ export function scriptToXhtml(md: string): string {
 }
 
 /** A small markdown subset for prose (paragraphs, headings, scene breaks, quotes, emphasis) to well-formed XHTML. */
-export function markdownToXhtml(md: string, opts: { script?: boolean } = {}): string {
-  if (opts.script) return scriptToXhtml(md)
+export function markdownToXhtml(md: string, opts: { script?: boolean; screenplay?: boolean } = {}): string {
+  if (opts.script) return scriptToXhtml(md, { screenplay: opts.screenplay })
   const blocks = md.replace(/\r\n/g, '\n').trim().split(/\n{2,}/)
   const out: string[] = []
   for (const raw of blocks) {

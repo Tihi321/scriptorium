@@ -186,6 +186,14 @@ export const formatEntrySchema = z.looseObject({
    */
   script: z.boolean().default(false),
   /**
+   * A screenplay for a short film or cartoon (needs `script: true`): shots, voice-over and music cues instead of a visual novel's
+   * speaker and picture lines. The writer, architect and line editor use the `_sp` prompts, `get_screenplay` returns it as JSON, and the
+   * format is never picked for a story with no topic (only when the story fixes it, or a topic of kind `video` or `juvenile-video` has it).
+   */
+  screenplay: z.boolean().default(false),
+  /** [min, max] seconds of film the whole screenplay should run (screenplay formats). */
+  runtime: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
+  /**
    * A story with choices: some chapters end with two or three choices, each leading to a later chapter, and the
    * story has several endings. The engine adds the matching section of `prompts/_choices.md` to the prompts.
    * For short formats only (not `long`).

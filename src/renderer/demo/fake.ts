@@ -136,6 +136,8 @@ export function installFakeEngine(params: URLSearchParams): void {
     { id: 'short-nonfiction', name: 'Short non-fiction book', kinds: ['nonfiction'] },
     { id: 'visual-novel', name: 'Visual novel', kinds: ['visual-novel'] },
     { id: 'choice-visual-novel', name: 'Visual novel with choices', kinds: ['visual-novel'] },
+    { id: 'short-film', name: 'Short film', kinds: ['video'] },
+    { id: 'cartoon', name: 'Cartoon', kinds: ['video'] },
     { id: 'article', name: 'Newspaper article', kinds: ['article'] },
     { id: 'feature-article', name: 'Feature article', kinds: ['article'] }
   ]
@@ -536,7 +538,7 @@ export function installFakeEngine(params: URLSearchParams): void {
         case 'adaptBook': {
           // the script writer: a story that adapts a published book, and (the source is published) the book starts from it at once
           const source = books.find((x) => x.slug === command.book)
-          if (!source || source.stage !== 'published' || !formats.some((x) => x.id === command.format && x.kinds.includes('visual-novel'))) break
+          if (!source || source.stage !== 'published' || !formats.some((x) => x.id === command.format && (x.kinds.includes('visual-novel') || x.kinds.includes('video')))) break
           const title = command.title?.trim() || source.title
           let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'idea'
           for (let n = 2; books.some((x) => x.slug === slug); n++) slug = `${slug.replace(/-\d+$/, '')}-${n}`

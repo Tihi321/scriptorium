@@ -8,6 +8,7 @@ export const SEED_HISTORY: Record<string, string[]> = {
   "prompts/architect/outline.md": ['8cd5287e94667030', 'b18d2610611331ec'],
   "prompts/architect/outline_article.md": ['643b51a861eafd7f', 'eb5de5e691b05e8a'],
   "prompts/architect/outline_nf.md": ['ca6e814fe99ba2e1', 'f97de5624de8928a'],
+  "prompts/architect/outline_sp.md": ['88d8cdeb4d537528'],
   "prompts/architect/outline_vn.md": ['2e4bbbff25c2a24f', '61b7ca66ed3633e4', 'a666e8dc87d6d970'],
   "prompts/architect/pitch.md": ['4d8ba8d9b442d379'],
   "prompts/architect/pitch_article.md": ['ae9d89a19964468e'],
@@ -39,6 +40,7 @@ export const SEED_HISTORY: Record<string, string[]> = {
   "prompts/idea-generator/generate_ideas.md": ['5938cf90e60c3c5f', '621f16f7a089b070'],
   "prompts/line-editor/review.md": ['664a308168fcdc52', '83fc739a2ba8bd85'],
   "prompts/line-editor/review_nf.md": ['2629b60343f1c43b', 'a8e881aa916544a5'],
+  "prompts/line-editor/review_sp.md": ['2b0a3e682d8ced57'],
   "prompts/line-editor/review_vn.md": ['2e41649e49dc7440', 'b3ebac89d3b8ad07', 'd8efdb39c1563ee5'],
   "prompts/originality-checker/review.md": ['3c306f46c22132e6', '7ecd01aec3fa724e'],
   "prompts/originality-checker/review_nf.md": ['7ce43c12b16fd20b', '811697061a4f508a'],
@@ -53,6 +55,7 @@ export const SEED_HISTORY: Record<string, string[]> = {
   "prompts/writer/draft_chapter.md": ['b71042510067e1d6'],
   "prompts/writer/draft_chapter_article.md": ['89e982ee3b4fbf66'],
   "prompts/writer/draft_chapter_nf.md": ['4efcbeaa0b3c1b9f', 'a5122c7f336af1a3'],
+  "prompts/writer/draft_chapter_sp.md": ['3f55371c99b198ef'],
   "prompts/writer/draft_chapter_vn.md": ['8fb932dcc97aaa84', 'a0f50c77aa3094b1', 'c02a25046552d649'],
   "prompts/writer/research_fix.md": ['3bbcf6d22c0df20f'],
   "prompts/writer/research_prep.md": ['db0f2cfcee795c54'],
@@ -61,6 +64,7 @@ export const SEED_HISTORY: Record<string, string[]> = {
   "prompts/writer/rewrite_chapter.md": ['145414dcdca6e07e', '1689cc9e586d3430'],
   "prompts/writer/rewrite_chapter_article.md": ['d2f206a20a31b5dd'],
   "prompts/writer/rewrite_chapter_nf.md": ['05a7f59c6000b7ec', '0c334afa0e396670', '688dcf435e7fd562'],
+  "prompts/writer/rewrite_chapter_sp.md": ['a4ebf4f9af5647c4'],
   "prompts/writer/rewrite_chapter_vn.md": ['298e9120551c9952', '84aa20f56de0d7ad', 'e72499da78511c1e'],
   "templates/cover.html": ['55b8b0916adda292', 'dac08f12e88f73a2', 'f4c0720a46349fa9']
 }

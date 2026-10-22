@@ -26,14 +26,14 @@ export interface LightBible {
 }
 
 /** `a, b, c` split at the last comma outside brackets: place `a, b`, time `c`. Without a comma the whole text is the place. */
-function placeAndTime(text: string): { place: string; time: string } {
+export function placeAndTime(text: string): { place: string; time: string } {
   const at = text.lastIndexOf(',')
   if (at < 0) return { place: text.trim(), time: '' }
   return { place: text.slice(0, at).trim(), time: text.slice(at + 1).trim() }
 }
 
 /** `Mara (soaked raincoat, worried), Tomas (grinning)`: the commas inside the brackets do not split. */
-function castOf(text: string): { name: string; look: string }[] {
+export function castOf(text: string): { name: string; look: string }[] {
   const parts: string[] = []
   let depth = 0
   let cur = ''

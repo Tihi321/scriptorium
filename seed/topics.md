@@ -10,7 +10,7 @@ How to edit:
 - `target`: how many books you want in this topic. Empty or 0 means no limit.
 - `done` and `in progress`: kept by the engine. Don't edit them. Everything else in the file is kept exactly as written, including the column alignment.
 - Add your own rows anywhere, in any table with the same columns. `id` must be unique.
-- `kind` is `fiction`, `nonfiction`, `juvenile-fiction`, `juvenile-nonfiction`, `visual-novel`, `juvenile-visual-novel`, `interactive-fiction`, `juvenile-interactive-fiction` or `article`. An `article` topic is a section of the newspaper, written as a researched news article. A `visual-novel` topic is written as a visual novel script (scenes, who is on screen, and who says what), in the genre the topic names, either straight through or with choices; `juvenile-visual-novel` is the same for children aged six to nine. An `interactive-fiction` topic is a choose-your-path book: the reader picks what happens at the end of a chapter and the story has several endings; `juvenile-interactive-fiction` is the same for children, with only happy endings.
+- `kind` is `fiction`, `nonfiction`, `juvenile-fiction`, `juvenile-nonfiction`, `visual-novel`, `juvenile-visual-novel`, `interactive-fiction`, `juvenile-interactive-fiction`, `article`, `video` or `juvenile-video`. A `video` topic is written as a screenplay for a short film or cartoon (shots, voice-over, music cues; the formats `short-film` and `cartoon`), `juvenile-video` the same for children (`kids-cartoon`). An `article` topic is a section of the newspaper, written as a researched news article. A `visual-novel` topic is written as a visual novel script (scenes, who is on screen, and who says what), in the genre the topic names, either straight through or with choices; `juvenile-visual-novel` is the same for children aged six to nine. An `interactive-fiction` topic is a choose-your-path book: the reader picks what happens at the end of a chapter and the story has several endings; `juvenile-interactive-fiction` is the same for children, with only happy endings.
 
 This list is our own, written by hand for this project. It is modelled on how libraries and shops group books, but it is not the BISAC list and doesn't copy its wording. Fiction, juvenile fiction, non-fiction and juvenile non-fiction all have a pipeline. Non-fiction topics use the non-fiction variant: research for every chapter, a fact base, a fact-checker that must pass and a references section.
 
@@ -644,3 +644,14 @@ The sections of the newspaper. A topic of kind `article` is written as a researc
 | news-business     | Business             | article | no     |        |      |             |
 | news-sport        | Sport                | article | no     |        |      |             |
 | news-opinion      | Opinion and analysis | article | no     |        |      |             |
+
+
+## Videos
+
+Topics for screenplays of short films and cartoons (the formats `short-film`, `cartoon` and `kids-cartoon`). They start switched off: a screenplay is also written for a single story that fixes the format (`add_story`, `adapt_book`), which needs no topic.
+
+| id                  | topic                    | kind           | active | target | done | in progress |
+| ------------------- | ------------------------ | -------------- | ------ | ------ | ---- | ----------- |
+| vid-short-film      | Short Film               | video          | no     | 5      |      |             |
+| vid-cartoon         | Cartoon                  | video          | no     | 5      |      |             |
+| vid-kids-cartoon    | Cartoon for Children     | juvenile-video | no     | 5      |      |             |

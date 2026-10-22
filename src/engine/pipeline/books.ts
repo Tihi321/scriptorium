@@ -394,6 +394,7 @@ export class BookStore {
     const chapters = [...(await this.chapters(slug))]
     const refs = await this.references(slug)
     const script = d.script === true
+    const screenplay = d.screenplay === true
     const links = await this.choiceLinks(slug, chapters)
     const cover = this.file(slug, 'out', 'cover.png')
     const dir = this.file(slug, 'out', 'reader')
@@ -403,7 +404,7 @@ export class BookStore {
       blurb: typeof d.blurb === 'string' ? d.blurb : undefined,
       year: Number(d.year ?? new Date().getFullYear()),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script, ...links(c) })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script, screenplay, ...links(c) })), ...(refs ? [refs] : [])],
       coverPngPath: await fs.access(cover).then(() => cover, () => undefined)
     })
     return dir
@@ -497,7 +498,7 @@ export class BookStore {
       year: Number(d.year ?? new Date().getFullYear()),
       modified: new Date(),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, ...links(c) })), ...(refs ? [refs] : [])],
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, screenplay: d.screenplay === true, ...links(c) })), ...(refs ? [refs] : [])],
       coverPng
     })
     const out = this.file(slug, 'out', `${slug}.epub`)
