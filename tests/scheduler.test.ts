@@ -6,6 +6,7 @@ import { ProviderError, ServerDownError } from '../src/engine/models/types'
 import { emptyBrief } from '../src/shared/brief'
 import { parseMd } from '../src/shared/md'
 import type { EngineEvent } from '../src/shared/protocol'
+import { writeMd } from '../src/engine/store/atomic'
 import { watchDataFolder } from '../src/engine/store/watcher'
 import { makeEnv, sleep, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
@@ -651,6 +652,93 @@ describe('blocked providers wait visibly', () => {
     await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done on b')
     expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8')).data).toMatchObject({ model: 'b/y', attempts: 0 })
     expect(env.engine.scheduler.blockedJobs()).toEqual([])
+  })
+})
+
+describe('the last resort model (SCP-19)', () => {
+  const threeProviders = () =>
+    makeEnv({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }, { id: 'c', local: true, models: ['z'] }],
+      roles: { writer: ['a/x', 'b/y'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+  const setLastResort = async (e: TestEnv, ref: string) => {
+    const file = path.join(e.dir, 'config', 'settings.md')
+    const doc = parseMd(await readFile(file, 'utf8'))
+    await writeMd(file, { ...doc.data, last_resort_model: ref }, doc.body)
+    await e.engine.loadSettings()
+  }
+  const job = (e: TestEnv) => e.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+  const provider = (e: TestEnv, id: string) => e.engine.registry.providers.get(id)!
+
+  it('every model down or used up: the job runs on the last resort, and the log says why', async () => {
+    env = await threeProviders()
+    registerChat(env)
+    await setLastResort(env, 'c/z')
+    expect(env.engine.registry.lastResort()?.ref).toBe('c/z')
+    env.engine.router.limiter.markDayFull(provider(env, 'a'))
+    provider(env, 'b').down = true
+    await job(env)
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done on the last resort')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8')).data).toMatchObject({ model: 'c/z', attempts: 0 })
+    const line = env.logs.find((l) => l.includes('using the last resort c/z'))
+    expect(line).toMatch(/every model of writer is unusable \(a\/x: used up.*b\/y: down.*\): using the last resort c\/z/)
+  })
+
+  it('a model that is only busy keeps the job waiting: the last resort is not used', async () => {
+    env = await threeProviders()
+    registerChat(env)
+    await setLastResort(env, 'c/z')
+    env.engine.router.limiter.markDayFull(provider(env, 'a'))
+    const b = provider(env, 'b')
+    b.concurrency = 1
+    expect(env.engine.router.limiter.tryAcquire(b)).toBe(true) // the only slot of b is taken
+    await job(env)
+    await waitFor(() => env!.engine.scheduler.blockedJobs().length === 1, 5000, 'the job waits for b')
+    expect(env.engine.scheduler.blockedJobs()[0]!.reason).toContain('b/y: busy')
+    await sleep(300)
+    expect(await jobsIn(env, 'done')).toEqual([])
+    env.engine.router.limiter.release(b)
+    env.engine.scheduler.kick()
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done on b')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8')).data).toMatchObject({ model: 'b/y' })
+    expect(env.logs.some((l) => l.includes('last resort'))).toBe(false)
+  })
+
+  it('without a last resort the job waits as before', async () => {
+    env = await threeProviders()
+    registerChat(env)
+    expect(env.engine.registry.lastResort()).toBeUndefined()
+    env.engine.router.limiter.markDayFull(provider(env, 'a'))
+    provider(env, 'b').down = true
+    await job(env)
+    await waitFor(() => env!.engine.scheduler.blockedJobs().length === 1, 5000, 'the job is blocked')
+    expect(env.engine.scheduler.blockedJobs()[0]!.reason).not.toContain('last resort')
+    await sleep(300)
+    expect(await jobsIn(env, 'done')).toEqual([])
+  })
+
+  it('a last resort that is down too: the job waits and the reason lists it; a last resort that is a candidate is not used twice', async () => {
+    env = await threeProviders()
+    registerChat(env)
+    await setLastResort(env, 'c/z')
+    env.engine.router.limiter.markDayFull(provider(env, 'a'))
+    provider(env, 'b').down = true
+    provider(env, 'c').down = true
+    await job(env)
+    await waitFor(() => env!.engine.scheduler.blockedJobs().length === 1, 5000, 'the job is blocked')
+    expect(env.engine.scheduler.blockedJobs()[0]!.reason).toContain('c/z (last resort): down')
+    await sleep(300)
+    expect(await jobsIn(env, 'done')).toEqual([])
+    // the last resort answers again: the job runs on it
+    provider(env, 'c').down = false
+    env.engine.scheduler.kick()
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done on c')
+    // a last resort that names a role's own model adds nothing: the model is a candidate already
+    await setLastResort(env, 'a/x')
+    expect(env.engine.registry.lastResort()?.ref).toBe('a/x')
+    await setLastResort(env, 'nowhere/m')
+    expect(env.engine.registry.lastResort()).toBeUndefined()
   })
 })
 

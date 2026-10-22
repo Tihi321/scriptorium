@@ -145,6 +145,7 @@ export class Engine {
       router: this.router,
       budget: this.budget,
       logs: this.logs,
+      log: (text) => this.log(text),
       getFactory: () => this.factory,
       emit: this.emit,
       pollMs: opts.pollMs,

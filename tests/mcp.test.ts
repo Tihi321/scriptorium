@@ -742,6 +742,7 @@ describe('MCP: exclusive pins and what blocks the factory', () => {
     const c = await connect(mcp!.url)
     const idle = (await call(c, 'factory_status')).data
     expect(idle.blocked).toEqual([])
+    expect(idle.lastResort).toBeNull()
     expect(idle.providers).toEqual([{ id: 'loc', dayFull: false, resetsAt: null, down: false }])
     expect(idle.embeddings).toBeNull() // the test config has no embedding model
     env.engine.scheduler.register('t', async () => ({ result: 'ok' }))

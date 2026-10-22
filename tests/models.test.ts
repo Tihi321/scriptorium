@@ -65,7 +65,7 @@ describe('seed configs', () => {
     expect(registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp')).toEqual({ parallel: 2, context: 65536, ttlMinutes: 60 })
     expect(registry.loadConfigFor('lmstudio', 'gemma-4-e4b-it-ultra-uncensored-heretic')).toEqual({ parallel: 4, context: 131072, ttlMinutes: 60 })
     // another default in the settings: the roles follow, and an agent override may be an alias too
-    registry.setDefaults({ fallbacks: ['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'], shared: false, lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
+    registry.setDefaults({ fallbacks: ['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'], shared: false, lastResort: '', lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
     await registry.load()
     expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'])
     expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(16384)
@@ -982,7 +982,7 @@ describe('client provider and book models', () => {
       providers: [{ id: 'loc', models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }],
       roles: { writer: ['loc/m1', 'client/claude-code'] }
     })
-    registry.setDefaults({ fallbacks: ['loc/m1'], shared: true, lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    registry.setDefaults({ fallbacks: ['loc/m1'], shared: true, lastResort: '', lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
     await registry.load()
     // loc is a non-local provider here (a paid-group model); the client model still goes first
     expect(registry.roleEntries('writer')).toEqual(['client/claude-code', 'loc/m1'])
@@ -1023,7 +1023,7 @@ describe('fallbacks as an open list (SCP-19)', () => {
 
   it('a kind is an alias for its first row and kind-n for the n-th; an alias with no row names nothing', async () => {
     const { registry } = await registryWith({ providers, roles: { writer: ['paid', 'strata', 'lmstudio'], editor: ['paid-2', 'paid-3', 'lmstudio-2', 'client'] } })
-    registry.setDefaults({ fallbacks: rows, shared: false, lmLoad: lm })
+    registry.setDefaults({ fallbacks: rows, shared: false, lastResort: '', lmLoad: lm })
     expect(registry.kindOf('deepseek/flash')).toBe('paid')
     expect(registry.kindOf('lmstudio/gemma')).toBe('lmstudio')
     expect(registry.kindOf('client/claude-code')).toBe('client')
@@ -1052,7 +1052,7 @@ describe('fallbacks as an open list (SCP-19)', () => {
         clienty: ['deepseek/flash', 'client/claude-code']
       }
     })
-    registry.setDefaults({ fallbacks: rows, shared: true, lmLoad: lm })
+    registry.setDefaults({ fallbacks: rows, shared: true, lastResort: '', lmLoad: lm })
     // editor: its Strata alias has no row, and comes last
     expect(registry.roleModelRefs('editor')).toEqual(['deepseek/flash', 'openrouter/x', 'lmstudio/gemma', 'openrouter/y', 'strata'])
     // a concrete Strata model with no Strata row goes last
@@ -1064,7 +1064,7 @@ describe('fallbacks as an open list (SCP-19)', () => {
     // the client goes first
     expect(registry.roleModelRefs('clienty')[0]).toBe('client/claude-code')
     // with a Strata row, -low takes that row's place
-    registry.setDefaults({ fallbacks: ['deepseek/flash', 'strata/q', 'lmstudio/gemma'], shared: true, lmLoad: lm })
+    registry.setDefaults({ fallbacks: ['deepseek/flash', 'strata/q', 'lmstudio/gemma'], shared: true, lastResort: '', lmLoad: lm })
     expect(registry.roleModelRefs('checker')).toEqual(['deepseek/flash', 'strata/q-low', 'lmstudio/gemma'])
     expect(registry.roleEntries('checker')).toEqual(['deepseek/flash', 'strata/q-low', 'lmstudio/gemma'])
   })
@@ -1073,7 +1073,7 @@ describe('fallbacks as an open list (SCP-19)', () => {
     const registry = new ModelRegistry(dir, { keys: () => undefined })
     await registry.load()
     const three = ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']
-    registry.setDefaults({ fallbacks: three, shared: true, lmLoad: lm })
+    registry.setDefaults({ fallbacks: three, shared: true, lastResort: '', lmLoad: lm })
     expect(registry.roleModelRefs('writer')).toEqual(three)
     expect(registry.roleModelRefs('line-editor')).toEqual(three) // [strata, lmstudio, paid] sorted by the rows
     expect(registry.roleModelRefs('continuity-checker')).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next-low', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'])

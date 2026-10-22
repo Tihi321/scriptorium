@@ -100,6 +100,8 @@ export interface SchedulerDeps {
   router: ModelRouter
   budget: Budget
   logs: LogWriter
+  /** A line for the engine log (the last resort model taking a job). */
+  log?: (text: string) => void
   getFactory: () => FactoryConfig
   emit: (e: EngineEvent) => void
   pollMs?: number
@@ -335,22 +337,44 @@ export class Scheduler {
           continue
         }
         let chosen: ModelInfo | undefined
+        let launchWith = models
         const reasons: string[] = []
+        let unusable = 0 // models skipped because they are down or used up for the day
+        let otherSkips = false // a model skipped for its budget or because it is busy or rate-limited: the job just waits for it
         for (const m of models) {
-          if (isPaidModel(m) && !budget.isExhausted(j.book).ok) continue // paid and over a cap: try the next (local) model
+          if (isPaidModel(m) && !budget.isExhausted(j.book).ok) {
+            otherSkips = true
+            continue // paid and over a cap: try the next (local) model
+          }
           if (!router.usable(m.provider)) {
+            unusable++
             // down or used up for the day: never wait on it, try the next model. When every model is like that the job waits (below)
             // instead of starting on a server that does not answer, which would fail it three times and fail the book.
             reasons.push(`${m.ref}: ${router.blockReason(m.provider)}`)
             continue
           }
           if (!router.limiter.hasCapacity(m.provider)) {
+            otherSkips = true
             reasons.push(`${m.ref}: ${router.blockReason(m.provider)}`)
             break // wait for the preferred provider instead of silently using a paid fallback
           }
           router.limiter.tryAcquire(m.provider)
           chosen = m
           break
+        }
+        // every model of the role is down or used up for the day (none only busy, rate-limited or over budget): the last resort of settings.md
+        const lastResort = !chosen && !otherSkips && unusable === models.length ? router.registry.lastResort() : undefined
+        if (lastResort && !models.some((m) => m.ref === lastResort.ref)) {
+          const p = lastResort.provider
+          if (!router.usable(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
+          else if (isPaidModel(lastResort) && !budget.isExhausted(j.book).ok) reasons.push(`${lastResort.ref} (last resort): over budget`)
+          else if (!router.limiter.hasCapacity(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
+          else {
+            router.limiter.tryAcquire(p)
+            chosen = lastResort
+            launchWith = [lastResort]
+            this.d.log?.(`every model of ${j.role} is unusable (${reasons.join('; ')}): using the last resort ${lastResort.ref}`)
+          }
         }
         if (!chosen) {
           if (reasons.length) {
@@ -372,7 +396,7 @@ export class Scheduler {
           continue
         }
         for (const l of j.locks) this.locks.add(l)
-        this.launch(claimed, agent, models.slice(models.indexOf(chosen)), chosen, bookModel)
+        this.launch(claimed, agent, launchWith.slice(launchWith.indexOf(chosen)), chosen, bookModel)
       }
     }
     this.blocked = blockedJobs

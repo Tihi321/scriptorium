@@ -11,6 +11,7 @@ fallbacks:
   - strata/qwen3.8-flash-next
   - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
 fallback_shared: false
+last_resort_model: ""
 lmstudio_parallel: 4
 lmstudio_context: 131072
 lmstudio_ttl_minutes: 60
@@ -40,6 +41,10 @@ fallbacks:
   - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic   # lmstudio
   - deepseek/deepseek-v4-pro                # paid-3
 ```
+
+## Last resort
+
+- `last_resort_model`: a `provider/model` (or a kind name such as `paid`), empty by default. It is used only when **every** model of a job's role is down or used up for the day (a Strata that is not running and an OpenRouter day that is full, for example). It is not used while a model is only busy or rate-limited (the job waits for it), or when the budget keeps a paid model out. The job runs on this model alone, and the engine logs `every model of <role> is unusable (...): using the last resort <ref>`. If the last resort is busy, down or over budget itself, the job waits, and `factory_status` shows why. A paid model here still goes through the budget caps. A `client` model here means those jobs wait for a Claude Code session to take them (nothing else runs them). Set it here: it has no control in the app.
 
 ## LM Studio loading
 

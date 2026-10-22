@@ -228,6 +228,11 @@ export const settingsSchema = configBase('settings').extend({
   fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']),
   /** One fallback order for every role: the rows top to bottom. False: each role keeps the order of its list in roles.md. */
   fallback_shared: z.boolean().default(false),
+  /**
+   * SCP-19: a model (`provider/model` or an alias) used only when every model of a role is down or used up for the day. Empty: none.
+   * A `client` model here means the jobs wait for a Claude Code session.
+   */
+  last_resort_model: z.string().default(''),
   /** The three fixed default models and `model_order` of before SCP-19. Read so a folder is not refused before the migration; the engine ignores them. */
   default_paid_model: z.string().optional(),
   default_strata_model: z.string().optional(),

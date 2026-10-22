@@ -105,6 +105,8 @@ export interface ModelDefaults {
   fallbacks: string[]
   /** One fallback order for every role (`fallback_shared`). False: each role's list keeps its own order. */
   shared: boolean
+  /** `last_resort_model`: used only when every model of a role is down or used up for the day. Empty: none. */
+  lastResort: string
   lmLoad: { parallel: number; context: number; ttlMinutes: number }
 }
 
@@ -113,6 +115,7 @@ export function modelDefaultsOf(s: SettingsConfig): ModelDefaults {
   return {
     fallbacks: s.fallbacks,
     shared: s.fallback_shared,
+    lastResort: s.last_resort_model.trim(),
     lmLoad: { parallel: s.lmstudio_parallel, context: s.lmstudio_context, ttlMinutes: s.lmstudio_ttl_minutes }
   }
 }
@@ -448,6 +451,14 @@ export class ModelRegistry {
   /** Sets the fallback list and the LM Studio load settings. Call `load()` after it so model context windows follow. */
   setDefaults(d: ModelDefaults): void {
     this.defaults = d
+  }
+
+  /** The last resort model of settings.md: resolved, available, with a client, and a chat model. Undefined when none is set or it can't answer. */
+  lastResort(): ModelInfo | undefined {
+    const ref = this.defaults.lastResort
+    if (!ref) return undefined
+    const m = this.models.get(this.resolve(ref))
+    return m && m.provider.available && m.provider.client && !m.embedding ? m : undefined
   }
 
   /** The fallback list, first row first. */
