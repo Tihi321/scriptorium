@@ -54,6 +54,10 @@ A chapter body is read **line by line**. Empty lines mean nothing. Each line is 
 | Sound effect | `SFX: <description>` (also `SOUND:`) | One sound, played once |
 | Ambience | `AMBIENCE: <description>` | A background sound that loops until the next `AMBIENCE:` or `AMBIENCE: none`; it plays on into the next scenes of the chapter |
 | Stop | `CG: none`, `END CG`, `AMBIENCE: none` | Hides the picture, stops the sound |
+| Clue | `CLUE: <puzzle>/<clue>: <prose>` | A clue of a puzzle is found here (a puzzle book, see [Puzzles](#puzzles-mystery-with-puzzles)) |
+| Evidence | `EVIDENCE: <key>: <prose>` | An item goes into the court record (an `insert` image `cg_<key>`) |
+| Puzzle | `PUZZLE: <key>` or `PUZZLE: <key> (<kind>)` | The player solves puzzle `<key>` here |
+| Testimony | `TESTIMONY: <witness>`, speaker lines, `END TESTIMONY` | The statements of a cross-examination |
 | On screen | `ON SCREEN: Name (look), Name (look), ...` | Who is visible from now on, each with how they look right now (the bracket is optional). Only characters: a thing, a page or a crowd goes to `INSERT:` or narration |
 | Speaker line | `NAME: words` or `NAME (expression): words` | A text box with a name tag. NAME is in capitals |
 | Narration | anything else | A narrator text box (no name tag): what the reader sees, actions, glances. Present tense |
@@ -70,6 +74,8 @@ const END_CG  = /^\**\s*(?:END\s+CG|KRAJ\s+SLIKE)\s*\**$/iu
 ```
 
 The cue lines are checked right after `SCENE` and before `ON SCREEN` and the speaker lines, so `CG:` is never a speaker called "CG". `CG: none`, `INSERT: none`, `AMBIENCE: none` (also `ništa`, `nista`) and `END CG` mean "stop". A cue with no text is ignored.
+
+The four puzzle lines (`CLUE`, `EVIDENCE`, `PUZZLE`, `TESTIMONY` and `END TESTIMONY`) are checked straight after the cue lines above and before `ON SCREEN` and the speaker lines, so `CLUE:` is never a speaker called "CLUE". Their regular expressions are in [Puzzles](#puzzles-mystery-with-puzzles). No puzzle keyword is a picture or sound keyword, and none is a screenplay line (`SHOT`, `MUSIC`, `SFX`, `TITLE`; [screenplay.md](screenplay.md)): a screenplay does not read the puzzle lines, and a visual novel does not read `SHOT`, `MUSIC` or `TITLE`.
 
 Inside any text, `*word*` or `_word_` is emphasis and `**word**` is strong, as in markdown.
 
@@ -118,7 +124,105 @@ The writer is a language model following a prompt, so the app must be lenient:
 - Asked of the model, usually followed, not guaranteed: every scene starts with `SCENE:`, `ON SCREEN:` after every change, names in capitals and the same every time, names that match the bible, the bracket on speaker lines, the picture and sound lines (at most two `CG:`, two `INSERT:` and four `SFX:` per chapter, `AMBIENCE:` once per scene, none of them last in a scene), `ON SCREEN:` naming only characters, and `Aliases:` in the bible's entries (the engine writes that sentence from the outline's `aliases`, cleaned: no full stops, no own name, no other character's name, at most five). The line editor checks the script form in its review, and a book with real problems gets rewritten before it is published, but small slips get through.
 - So: a speaker line without a matching character is still a text box; a scene without `SCENE` keeps the last background; an unknown place is drawn from the SCENE text alone; a line that matches nothing is narration.
 
-## Making the pictures
+## Puzzles (mystery with puzzles)
+
+The format `mystery-puzzle-visual-novel` (`script: true`, `puzzles: true`) is a visual novel with logic puzzles between its scenes. The player reads, finds clues, solves a puzzle (who did it, with what, where), and the story goes on. **Code makes the puzzle, the writer only dresses it**: VN Studio makes the puzzle core with `vno_puzzle_generate` (the solution and the structured clues, proved unique and solvable by deduction), the hub hands it to Scriptorium in the story brief (`add_story {puzzles}`), Scriptorium keeps it as `bible/puzzles.md`, the architect places each puzzle in a chapter, and the writers plant its clues in the story and put the `PUZZLE:` line where the player solves it. Scriptorium has no solver. VN Studio imports the book (VNO-15), reads the lines below, and checks that the prose of every clue still means the constraint of the core.
+
+### The four lines
+
+```text
+CLUE: dinner/c2: The rope was either in the kitchen or the garden, Hartley noted.
+EVIDENCE: pocket_watch: A pocket watch, stopped at 9:10, its glass cracked.
+PUZZLE: dinner (murdle)
+TESTIMONY: Miss Cole
+MISS COLE (calm): I was in the garden all evening.
+MISS COLE: I never touched the poison.
+END TESTIMONY
+```
+
+| Line | Pattern | Meaning |
+| --- | --- | --- |
+| Clue | `CLUE: <puzzle>/<clue>: <prose>` | Clue `<clue>` of puzzle `<puzzle>` is found here. `<prose>` is the clue as the story tells it, in the story's own words (names as in the bible), saying exactly what the core's clue says. One line per clue, before the puzzle's `PUZZLE:` line. It is shown as a line of text |
+| Evidence | `EVIDENCE: <key>: <prose>` | An item the player picks up (a letter, a watch, a photo): it goes into the court record. `<prose>` describes it. It is an `insert` image with the key `cg_<key>` |
+| Puzzle | `PUZZLE: <key>` or `PUZZLE: <key> (<kind>)` | Puzzle `<key>` is played here. `<kind>` is the puzzle's `kind` in `bible/puzzles.md` (`murdle` now; `knights`, `testimony` and `grid` are planned) and may be left out |
+| Testimony | `TESTIMONY: <witness>` | Opens a cross-examination of `<witness>` (a character name or alias of the bible) |
+| (statements) | `NAME: words` or `NAME (expression): words` | The statements of the testimony, in order, as normal speaker lines. Statement 1 is the first speaker line after `TESTIMONY:`. The block lasts until `END TESTIMONY`, or until any line that is not a speaker line |
+| End | `END TESTIMONY` | Closes the testimony |
+
+Ids: `<puzzle>`, `<clue>` and `<key>` are made of `A-Z a-z 0-9 _ -`, no spaces. A clue id is the id of the core (`c1`, `c2`, ...; `murder` is the id of the core's murder note). Which statement breaks, and with which evidence, is never in the text: it is in `bible/puzzles.md` (below).
+
+The regular expressions (`src/engine/publish/xhtml.ts`, JavaScript; Croatian keywords as for the picture and sound lines, so translated books from Book Translator keep working: `TRAG`, `DOKAZ`, `ZAGONETKA`, `SVJEDOČENJE`, `KRAJ SVJEDOČENJA`):
+
+```js
+const CLUE_RE         = /^\**\s*(CLUE|TRAG)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*\/\s*([A-Za-z0-9_-]+)\s*:\s*\**\s*(.*?)\s*\**$/iu
+const EVIDENCE_RE     = /^\**\s*(EVIDENCE|DOKAZ)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*:\s*\**\s*(.*?)\s*\**$/iu
+const PUZZLE_RE       = /^\**\s*(PUZZLE|ZAGONETKA)\s*:\s*\**\s*([A-Za-z0-9_-]+)\s*(?:\(\s*([A-Za-z0-9_-]+)\s*\))?\s*\**$/iu
+const TESTIMONY_RE    = /^\**\s*(TESTIMONY|SVJEDOČENJE)\s*:\s*\**\s*(.+?)\s*\**$/iu
+const END_TESTIMONY_RE = /^\**\s*(?:END\s+TESTIMONY|KRAJ\s+SVJEDOČENJA)\s*\**$/iu
+```
+
+They are checked after `SCENE` and the picture and sound lines (`CUE`, `END_CG`), and before `ON SCREEN` and the speaker line. A line of these keywords that does not fit its pattern (for example `CLUE: no slash`), is not a puzzle line: it falls through to the speaker rule and is read as a speaker line (`CLUE`), as any unknown line is. The prompts never ask for such a line.
+
+How a reader plays them (VN Studio, VNO-15):
+
+- `CLUE:` is shown as a line of text (narration, no name tag). The clue id is recorded as found at that beat (`clueAt`); the puzzle screen lists the clues found so far. A clue that is never found is a book fault (see "What is checked").
+- `EVIDENCE:` is shown as a line of text and adds the item to the court record, with an `insert` picture `cg_<key>` drawn from the prose.
+- `PUZZLE:` is the puzzle beat; the puzzle comes from `bible/puzzles.md` by key.
+- `TESTIMONY:` ... `END TESTIMONY` is one cross-examination beat with its statements.
+- Like a picture cue, none of these lines should be the last line of a scene: there is nothing for it to go with.
+
+### `bible/puzzles.md`
+
+Markdown with YAML frontmatter, written by Scriptorium when the outline is made, from the `puzzles` of the story brief. Every puzzle of the book is one entry:
+
+```yaml
+---
+kind: puzzles
+puzzles:
+  - key: dinner                 # the <puzzle> of the lines
+    kind: murdle                # murdle now; knights, testimony, grid later
+    title: The Dinner Party     # optional
+    chapter: 2                  # the chapter with the PUZZLE: line (set by the outline)
+    core: { ... }               # the puzzle core of VN Studio, as vno_puzzle_generate returns it (format 1): categories, solution, clues, murder, difficulty, steps
+    names: { s1: Colonel Ash, w1: rope, p1: library }   # item id -> the name in the story
+    text:                       # canonical English sentence of each clue and of the murder note
+      c1: Doctor Birch did not have the rope.
+      murder: The body was found in the library.
+    clueAt: { c1: 1, c2: 1, c3: 2 }   # the chapter planned to plant each clue (by the engine)
+  - key: courtroom
+    kind: testimony
+    chapter: 4
+    testimony:
+      witness: Miss Cole
+      breaks: [{ statement: 2, evidence: pocket_watch }]   # statement n (1-based) is broken by presenting evidence <key>
+      evidence: [{ key: pocket_watch, description: A pocket watch, stopped at 9:10 }]
+---
+(the same, as a readable list: the solution in words, the clues with their ids)
+```
+
+`core`, `names`, `text` and `testimony` are the hub's data and are kept exactly as given; `chapter` and `clueAt` are the engine's placement. A reader trusts the `core` for the logic and the lines only for the story: it never decides which clue is true from the prose (VN Studio's read-back check does that).
+
+### What the writer is asked, and what is checked
+
+Asked of the model (in the outline, draft and rewrite prompts of a puzzle book): every puzzle is placed in one chapter; every clue of the core is planted as a `CLUE:` line, in the story, before the puzzle's `PUZZLE:` line, in words that say exactly what the canonical sentence says (no more, no less: a changed name, a dropped option or an added hint changes the puzzle); the names are the core's names; evidence that a testimony needs is planted (`EVIDENCE:`) before it; the story's facts (culprit, weapon, place, who lies) are the core's solution, never contradicted and never stated outright before the puzzle.
+
+Checked by the engine (`puzzleProblems`, in the continuity review of every round): each puzzle of `bible/puzzles.md` has exactly one `PUZZLE:` line; every clue id of its core is in a `CLUE:` line of that chapter or an earlier one, before the `PUZZLE:` line; no `CLUE:` names a clue the core does not have; every `EVIDENCE:` key a testimony needs is planted before its `TESTIMONY:`. A problem makes the review say revise and names the chapter; the writer rewrites. The humanizer is off for the format, and its guard (when an owner switches it on) refuses a version in which a puzzle line changed in any word. **Not checked by Scriptorium**: that the prose of a clue means the core's clue (VN Studio does it at import and the hub sends a rewrite note back), and the puzzle logic.
+
+### In the JSON of `get_script`
+
+The beats (one script line is one beat, like `cue`):
+
+```json
+{ "type": "clue", "puzzle": "dinner", "clue": "c2", "text": "The rope was either in the kitchen or the garden, Hartley noted." }
+{ "type": "evidence", "key": "pocket_watch", "text": "A pocket watch, stopped at 9:10, its glass cracked." }
+{ "type": "puzzle", "puzzle": "dinner", "kind": "murdle" }
+{ "type": "testimony", "witness": "Miss Cole", "statements": [
+    { "n": 1, "speaker": "Miss Cole", "expression": "calm", "text": "I was in the garden all evening." },
+    { "n": 2, "speaker": "Miss Cole", "expression": "", "text": "I never touched the poison." } ] }
+```
+
+`kind` is `null` when the line has none. The `testimony` beat holds its statements (speaker names are written as the bible has them, with `alias` when written under an alias, as for a `line`); there is no separate beat for `END TESTIMONY`. A clue, evidence or puzzle line does not end a scene's `background`. The top level of the JSON gets `puzzles`: the entries of `bible/puzzles.md` as above (empty for a book with none).
+
 
 A suggested pipeline for the app. None of it exists yet.
 
