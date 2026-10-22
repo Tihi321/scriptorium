@@ -538,6 +538,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     run.version = version
     // a story with choices: the architect plans a map of chapters with choices and endings
     if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'outline', { chapters_min: fmt.chapters[0], chapters_max: fmt.chapters[1] }))
+    await ensureStoryYearRule(d.dataDir, messages, variant(fmt, 'outline'))
     appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await seriesSection(d, slug))
     // an adaptation: the source, the chapter range to compress it into and, with choices, the source's ending as the canon path
@@ -1150,6 +1151,13 @@ Build the outline on these facts: the period, places, jobs, distances and durati
 /** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_vn` for a visual novel script, else `<task>`. */
 export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean }, task: string): string {
   return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.script ? `${task}_vn` : task
+}
+
+/** Added to an outline prompt from an older data folder that does not ask for `story_year` (the seed prompts do). */
+export const STORY_YEAR_RULE = `Also give "story_year" in the JSON object: the year the book is set in (or, for an article, the year it is about) as a number such as 2026, or null when it has no fixed year. Reviewers use it to check weekdays and dates.`
+
+export async function ensureStoryYearRule(dataDir: string, messages: ChatMessage[], task: string): Promise<void> {
+  if (!(await loadPrompt(dataDir, 'architect', task)).raw.includes('"story_year"')) appendToPrompt(messages, STORY_YEAR_RULE)
 }
 
 function topicKind(formatId: string, formats: FormatEntry[]): string | null {
