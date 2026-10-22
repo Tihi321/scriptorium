@@ -431,25 +431,30 @@ describe('agent controls and hot reload', () => {
     expect(env.events.some((e) => e.type === 'job.model' && e.model === 'b/y')).toBe(true)
   })
 
-  it('model_order sorts every role list by group (API, Strata, LM Studio), and an empty order keeps each role its own', async () => {
+  it('fallback_shared gives every role the fallback rows in order, and off keeps each role its own', async () => {
     env = await makeEnv({
-      providers: [{ id: 'api', price: 1, models: ['p'] }, { id: 'strata', local: true, models: ['s'] }, { id: 'lmstudio', local: true, models: ['l'] }],
+      providers: [{ id: 'api', price: 1, models: ['p', 'q'] }, { id: 'strata', local: true, models: ['s'] }, { id: 'lmstudio', local: true, models: ['l'] }],
       roles: { 'line-editor': ['strata/s', 'lmstudio/l', 'api/p'], writer: ['api/p', 'strata/s'] },
       agents: []
     })
-    const save = (modelOrder: ('paid' | 'strata' | 'lmstudio')[]) =>
-      env!.engine.handleCommand({ type: 'saveSettings', kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, modelOrder })
+    const save = (fallbacks: string[], fallbackShared: boolean) =>
+      env!.engine.handleCommand({ type: 'saveSettings', kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks, fallbackShared })
     expect(env.engine.registry.roleModelRefs('line-editor')).toEqual(['strata/s', 'lmstudio/l', 'api/p'])
 
-    await save(['paid', 'lmstudio', 'strata'])
-    expect(parseMd(await readFile(path.join(env.dir, 'config', 'settings.md'), 'utf8')).data.model_order).toEqual(['paid', 'lmstudio', 'strata'])
+    await save(['api/q', 'lmstudio/l', 'strata/s'], true)
+    const saved = parseMd(await readFile(path.join(env.dir, 'config', 'settings.md'), 'utf8')).data
+    expect(saved.fallbacks).toEqual(['api/q', 'lmstudio/l', 'strata/s'])
+    expect(saved.fallback_shared).toBe(true)
+    // api/p takes the first API row's place; the rows keep their order
     expect(env.engine.registry.roleModelRefs('line-editor')).toEqual(['api/p', 'lmstudio/l', 'strata/s'])
-    expect(env.engine.registry.roleModelRefs('writer')).toEqual(['api/p', 'strata/s'])
+    expect(env.engine.registry.roleModelRefs('writer')).toEqual(['api/p', 'lmstudio/l', 'strata/s'])
     const snap = await env.engine.snapshot()
     expect(snap.roleDefaults['line-editor']).toBe('api/p')
-    expect(snap.settings.modelOrder).toEqual(['paid', 'lmstudio', 'strata'])
+    expect(snap.settings).toMatchObject({ fallbacks: ['api/q', 'lmstudio/l', 'strata/s'], fallbackShared: true })
+    expect(snap.models.find((m) => m.ref === 'api/p')?.kind).toBe('paid')
+    expect(snap.models.find((m) => m.ref === 'lmstudio/l')?.kind).toBe('lmstudio')
 
-    await save([])
+    await save(['api/q', 'lmstudio/l', 'strata/s'], false)
     expect(env.engine.registry.roleModelRefs('line-editor')).toEqual(['strata/s', 'lmstudio/l', 'api/p'])
   })
 

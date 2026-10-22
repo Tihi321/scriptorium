@@ -35,6 +35,8 @@ export interface ModelSummary {
   model: string
   family: string
   local: boolean
+  /** The kind a fallback row with this model has: `paid` for an API model, otherwise its provider's id (`strata`, `lmstudio`, `client` ...). */
+  kind: string
   /** True when the provider is switched on and usable (has a key, or is local). */
   enabled: boolean
   /** The pickers offer it: not hidden in the Models dialog (config/models.md). */
@@ -247,12 +249,10 @@ export interface SettingsSummary {
   smtpPort: number
   smtpUser: string
   smtpSecure: boolean
-  /** `provider/model` behind the role aliases `paid`, `strata` and `lmstudio`. */
-  defaultPaidModel: string
-  defaultStrataModel: string
-  defaultLmstudioModel: string
-  /** `model_order` in settings.md: the groups `paid`, `strata`, `lmstudio` in the order every role tries them. Empty: each role's own order. */
-  modelOrder: ModelGroup[]
+  /** `fallbacks` in settings.md: `provider/model` refs, first row first. A kind name (`paid`, `strata` ...) stands for the first row of that kind, `<kind>-<n>` for the n-th. */
+  fallbacks: string[]
+  /** `fallback_shared`: every role tries the rows top to bottom. False: each role keeps its own list from roles.md. */
+  fallbackShared: boolean
   /** How the engine loads LM Studio models: requests at once, context window, idle minutes before unloading. */
   lmstudioParallel: number
   lmstudioContext: number
@@ -261,9 +261,7 @@ export interface SettingsSummary {
   maxBooksInProgress: number
 }
 
-export type ModelGroup = 'paid' | 'strata' | 'lmstudio'
-
-export type ModelSettingKey = 'defaultPaidModel' | 'defaultStrataModel' | 'defaultLmstudioModel' | 'modelOrder' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
+export type ModelSettingKey = 'fallbacks' | 'fallbackShared' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
 
 export interface SnapshotEvent {
   type: 'snapshot'

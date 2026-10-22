@@ -6,10 +6,11 @@ smtp_host: ""
 smtp_port: 587
 smtp_user: ""
 smtp_secure: false
-default_paid_model: deepseek/deepseek-flash
-default_strata_model: strata/qwen3.8-flash-next
-default_lmstudio_model: lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
-model_order: []
+fallbacks:
+  - deepseek/deepseek-flash
+  - strata/qwen3.8-flash-next
+  - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
+fallback_shared: false
 lmstudio_parallel: 4
 lmstudio_context: 131072
 lmstudio_ttl_minutes: 60
@@ -25,12 +26,20 @@ Sending books to your Kindle by email.
 
 ## Default models
 
-The role lists in `roles.md` can name these aliases instead of a model: `paid`, `strata` and `lmstudio`. Change a default here (or in the app's Models panel) and every role that uses the alias follows. An agent's own model, picked in the app, still goes first.
+`fallbacks` is the list of models the factory falls back through, first row first. It can have any length, and a kind may repeat: for example API, API, LM Studio, API. Each row is one `provider/model`. Its **kind** comes from the model's provider, so a row can't disagree with its model: an API provider (free or paid) is `paid`, any other provider is named by its id (`strata`, `lmstudio`, `client` ...). Edit the list here or in the app's Models panel (a kind, then its model, with add, remove, up and down). A change applies at once, to running jobs too.
 
-- `default_paid_model`: the API model behind `paid` (DeepSeek V4.1 Flash). It can be a free one, such as an OpenRouter `:free` model.
-- `default_strata_model`: the Strata model behind `strata`.
-- `default_lmstudio_model`: the LM Studio model behind `lmstudio`.
-- `model_order`: one fallback order for every role, for example `[paid, lmstudio, strata]`. The groups are `paid` (every API model, free or paid), `strata` and `lmstudio`. Each role's list is sorted by group and keeps its own order inside a group, so a role that names Strata's `-low` model still uses that one when Strata's turn comes. A group left out goes last. `[]` keeps each role's own order from `roles.md`. Set it in the Models panel (One fallback order for every role, and the up and down buttons) or here. A change applies at once, to running jobs too.
+The role lists in `roles.md`, an agent's `model` and a book's `role_models` can name a kind instead of a model: `paid` is the first API row, `paid-2` the second, `strata` the first Strata row, `lmstudio-2` the second LM Studio row, `client` the first client row. A name with no matching row is skipped (the engine logs it once). An agent's own model, picked in the app, still goes first.
+
+- `fallbacks`: the rows, for example the three below. At least one.
+- `fallback_shared`: `true` gives every role the rows top to bottom (the Models panel's "One fallback order for every role"). A role's own concrete model of the same kind takes the place of the first row of that kind not taken yet (the checks name Strata's `-low` model, so it takes the Strata row's place). A model with no row of its kind, such as that one without a Strata row, comes after the rows. A role gets every row, even for a kind its own list leaves out. `false` keeps each role's own order from `roles.md`, and the rows only say what `paid`, `strata`, `lmstudio` ... stand for.
+
+```yaml
+fallbacks:
+  - deepseek/deepseek-flash                 # paid
+  - openrouter/google/gemma-4-31b-it:free   # paid-2
+  - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic   # lmstudio
+  - deepseek/deepseek-v4-pro                # paid-3
+```
 
 ## LM Studio loading
 

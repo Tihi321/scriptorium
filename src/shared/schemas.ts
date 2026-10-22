@@ -220,12 +220,19 @@ export const settingsSchema = configBase('settings').extend({
   smtp_port: z.number().int().default(587),
   smtp_user: z.string().default(''),
   smtp_secure: z.boolean().default(false),
-  /** What the role aliases in roles.md stand for: `paid`, `strata` and `lmstudio` (each a `provider/model`). */
-  default_paid_model: z.string().default('deepseek/deepseek-flash'),
-  default_strata_model: z.string().default('strata/qwen3.8-flash-next'),
-  default_lmstudio_model: z.string().default('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'),
-  /** One fallback order for every role: the groups `paid` (any API model), `strata` and `lmstudio`, first one first. Empty: each role keeps the order of its list in roles.md. */
-  model_order: z.array(z.enum(['paid', 'strata', 'lmstudio'])).default([]),
+  /**
+   * The fallback list (SCP-19): `provider/model` refs, first row first, at least one. A row's kind comes from its provider (`paid` for an API
+   * provider, otherwise the provider's id). A kind name in roles.md (`paid`, `strata`, `lmstudio`, `client` ...) stands for the first row of
+   * that kind, `<kind>-<n>` for the n-th.
+   */
+  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']),
+  /** One fallback order for every role: the rows top to bottom. False: each role keeps the order of its list in roles.md. */
+  fallback_shared: z.boolean().default(false),
+  /** The three fixed default models and `model_order` of before SCP-19. Read so a folder is not refused before the migration; the engine ignores them. */
+  default_paid_model: z.string().optional(),
+  default_strata_model: z.string().optional(),
+  default_lmstudio_model: z.string().optional(),
+  model_order: z.array(z.string()).optional(),
   /** How the engine loads LM Studio models that aren't loaded yet: requests at once, context window, idle minutes before LM Studio unloads it. */
   lmstudio_parallel: z.number().int().min(1).max(16).default(4),
   lmstudio_context: z.number().int().min(2048).default(131072),

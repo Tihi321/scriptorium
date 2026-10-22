@@ -99,19 +99,20 @@ export function computeCost(m: Pick<ModelInfo, 'priceIn' | 'priceOut' | 'priceCa
   return (uncached * m.priceIn + u.cachedInputTokens * m.priceCachedIn + u.outputTokens * m.priceOut) / 1_000_000
 }
 
-/** Role aliases (`paid`, `strata`, `lmstudio`) -> `provider/model`, and how LM Studio models are loaded. From config/settings.md. */
+/** The fallback list of config/settings.md (SCP-19: an open list), and how LM Studio models are loaded. */
 export interface ModelDefaults {
-  aliases: Record<string, string>
-  /** The groups `paid`, `strata`, `lmstudio` in the order every role tries them. Empty: each role's list keeps its own order. */
-  order?: string[]
+  /** `provider/model` refs, first row first. A kind name (`paid`, `strata`, `lmstudio`, `client` ...) stands for the first row of that kind, `<kind>-<n>` for the n-th. */
+  fallbacks: string[]
+  /** One fallback order for every role (`fallback_shared`). False: each role's list keeps its own order. */
+  shared: boolean
   lmLoad: { parallel: number; context: number; ttlMinutes: number }
 }
 
-/** The aliases and LM Studio load settings of a settings.md. */
+/** The fallback list and LM Studio load settings of a settings.md. */
 export function modelDefaultsOf(s: SettingsConfig): ModelDefaults {
   return {
-    aliases: { paid: s.default_paid_model, strata: s.default_strata_model, lmstudio: s.default_lmstudio_model },
-    order: s.model_order,
+    fallbacks: s.fallbacks,
+    shared: s.fallback_shared,
     lmLoad: { parallel: s.lmstudio_parallel, context: s.lmstudio_context, ttlMinutes: s.lmstudio_ttl_minutes }
   }
 }
@@ -444,14 +445,52 @@ export class ModelRegistry {
     return { parallel: m?.loadParallel ?? d.parallel, context: m?.loadContext ?? d.context, ttlMinutes: d.ttlMinutes }
   }
 
-  /** Sets the role aliases and the LM Studio load settings. Call `load()` after it so model context windows follow. */
+  /** Sets the fallback list and the LM Studio load settings. Call `load()` after it so model context windows follow. */
   setDefaults(d: ModelDefaults): void {
     this.defaults = d
   }
 
-  /** A `provider/model`, or an alias (`paid`, `strata`, `lmstudio`) resolved to its default. */
+  /** The fallback list, first row first. */
+  fallbackRefs(): string[] {
+    return this.defaults.fallbacks
+  }
+
+  /** The kind of a row or model, by its provider: the provider's id for a local one (a client too), `paid` for an API provider or one that providers.md does not have. */
+  private kindOfRef(ref: string): string {
+    const p = this.providers.get(ref.split('/')[0]!)
+    return p?.local ? p.id : 'paid'
+  }
+
+  /** The kind of an alias or a `provider/model`: `paid` for every API model, otherwise the provider's id. */
+  kindOf(ref: string): string {
+    return this.kindOfRef(this.resolve(ref))
+  }
+
+  /** What each alias stands for: a kind name is its first row, `<kind>-<n>` its n-th. */
+  aliasMap(): Map<string, string> {
+    const map = new Map<string, string>()
+    const count = new Map<string, number>()
+    for (const ref of this.defaults.fallbacks) {
+      const kind = this.kindOfRef(ref)
+      const n = (count.get(kind) ?? 0) + 1
+      count.set(kind, n)
+      if (n === 1) map.set(kind, ref)
+      map.set(`${kind}-${n}`, ref)
+    }
+    return map
+  }
+
+  /** A `provider/model`, or an alias (`paid`, `paid-2`, `strata`, `lmstudio` ...) resolved to its row. An alias with no row stays as it is. */
   resolve(ref: string): string {
-    return ref.includes('/') ? ref : (this.defaults.aliases[ref] ?? ref)
+    return ref.includes('/') ? ref : (this.aliasMap().get(ref) ?? ref)
+  }
+
+  /** The aliases roles.md uses that name no row of the fallback list. */
+  unresolvedAliases(): string[] {
+    const map = this.aliasMap()
+    const out = new Set<string>()
+    for (const r of Object.values(this.roles.roles)) for (const e of r.models) if (!e.includes('/') && !map.has(e)) out.add(e)
+    return [...out]
   }
 
   /** Model refs in the roles file for a role, in order, with aliases resolved. */
@@ -460,29 +499,41 @@ export class ModelRegistry {
   }
 
   /**
-   * A role's list as roles.md writes it (aliases kept). With a `model_order`, the list is sorted by group (`paid` is every API
-   * model, `strata`, `lmstudio`), keeping the role's own order inside a group; a model in no group (Ollama) goes last.
+   * A role's list. Without `fallback_shared` it is roles.md's, aliases kept. With it, every row of the fallback list in its order, except that
+   * a concrete model the role names takes the place of the first row of its kind not taken yet (a model that is itself a row keeps it; an alias
+   * of the row it replaced is dropped); a model with no row of its kind, and the other aliases, follow in the role's own order, duplicates dropped. A client model the role names goes first.
    */
   roleEntries(role: string): string[] {
     const list = this.roles.roles[role]?.models ?? []
-    const order = this.defaults.order ?? []
-    if (order.length === 0) return list
-    const rank = (ref: string) => {
-      // a client model (Claude Code answers) goes first: whoever listed it chose it
-      if (this.providers.get(this.resolve(ref).split('/')[0]!)?.kind === 'client') return -1
-      const g = this.groupOf(ref)
-      const i = g ? order.indexOf(g) : -1
-      return i < 0 ? order.length : i
+    if (!this.defaults.shared) return list
+    const rows = [...this.defaults.fallbacks]
+    const taken = new Set<number>()
+    const isClient = (ref: string) => this.providers.get(this.resolve(ref).split('/')[0]!)?.kind === 'client'
+    const placed = new Set<string>()
+    const replaced = new Set<string>() // rows a role's own model took the place of
+    for (const c of list) {
+      if (!c.includes('/') || isClient(c)) continue
+      const same = rows.findIndex((r, i) => r === c && !taken.has(i))
+      const kind = this.kindOfRef(c)
+      const at = same >= 0 ? same : rows.findIndex((r, i) => !taken.has(i) && this.kindOfRef(r) === kind)
+      if (at < 0) continue
+      if (rows[at] !== c) replaced.add(rows[at]!)
+      rows[at] = c
+      taken.add(at)
+      placed.add(c)
     }
-    return list.map((ref, i) => ({ ref, i, r: rank(ref) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.ref)
-  }
-
-  /** The group of an alias or a `provider/model`: `strata`, `lmstudio`, `paid` for an API provider, undefined for another local one. */
-  groupOf(ref: string): string | undefined {
-    const provider = this.resolve(ref).split('/')[0]!
-    if (provider === 'strata' || provider === 'lmstudio') return provider
-    const p = this.providers.get(provider)
-    return p && !p.local ? 'paid' : undefined
+    const out: string[] = []
+    const seen = new Set<string>()
+    const add = (ref: string) => {
+      const r = this.resolve(ref)
+      if (seen.has(r)) return
+      seen.add(r)
+      out.push(r)
+    }
+    for (const c of list) if (isClient(c)) add(c)
+    for (const r of rows) add(r)
+    for (const c of list) if (!placed.has(c) && !replaced.has(this.resolve(c))) add(c)
+    return out
   }
 
   embeddingModel(): ModelInfo | undefined {

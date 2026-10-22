@@ -157,7 +157,7 @@ export function RoleDefaults() {
   const agents = useAgentList()
   const known = useOffice((s) => s.models)
   const defaults = useOffice((s) => s.roleDefaults)
-  const order = useOffice((s) => s.settings?.modelOrder ?? [])
+  const shared = useOffice((s) => s.settings?.fallbackShared ?? false)
   const roles = [...new Set([...agents.map((a) => a.role)])]
   const [role, setRole] = useState('')
   const current = role || roles[0] || ''
@@ -193,7 +193,7 @@ export function RoleDefaults() {
         </select>
         <span className="dim">
           Running jobs of the role switch at once. The engine writes config/roles.md.
-          {order.length > 0 ? ' With one fallback order for every role (Models panel), the model goes first within its group.' : ''}
+          {shared ? ' With one fallback order for every role (Models panel), the model takes the place of the first fallback row of its kind.' : ''}
         </span>
       </div>
     </div>
