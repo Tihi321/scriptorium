@@ -2,6 +2,8 @@
 
 This document describes how Scriptorium writes a visual novel and what the files look like, so a separate app can turn a finished book into a playable visual novel: pictures for every scene (from ComfyUI, or drawn by a model with a pixel-art tool) with the text shown on top.
 
+A film is not a visual novel: books of the screenplay formats (`short-film`, `cartoon`, `kids-cartoon`, `screenplay: true`) are written as shots and read with `get_screenplay` (see [screenplay.md](screenplay.md)); `get_script` refuses them, and VN Studio never lists them.
+
 Scriptorium only writes the text. It never makes images for a visual novel. Everything below is plain markdown in the data folder, so the other app reads the files and needs nothing from the engine.
 
 ## What kind of visual novel

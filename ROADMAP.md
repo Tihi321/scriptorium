@@ -1,6 +1,6 @@
 # Roadmap
 
-What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-16 VN media lines, SCP-19 this roadmap's own items) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
+What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-16 VN media lines, SCP-17 the screenplay writer, SCP-19 this roadmap's own items) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
 
 ## Where it stands (2026-10-22, branch SCP-19_roadmap-tasks)
 
@@ -17,7 +17,7 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
   - HUB-04 (SCP-14 live check).
   - HUB-06 (VN media lines, `SCP-16`): **done in code** on `SCP-16-18_hub-roadmap` (2026-10-22), not merged: the VN prompts, the outline `aliases`, the cue lines in `get_script`, EPUB and the humanizer guard (details in `.claude/tickets/SCP-16-vn-media-lines/changelog.md`). Open: the live run with VN Studio (hub step H2), which the user plays.
   - HUB-10 (puzzle-mystery format, later phase, `SCP-18`).
-  - HUB-11 (screenplay writer, `SCP-17`).
+  - HUB-11 (screenplay writer, `SCP-17`): **done in code** on `SCP-16-18_hub-roadmap` (2026-10-22), not merged: the formats `short-film`, `cartoon` and `kids-cartoon`, the `_sp` prompts, `get_screenplay`, `adapt_book` into a screenplay (contract in `docs/screenplay.md`, details in `.claude/tickets/SCP-17-screenplay-writer/changelog.md`). Open: the first screenplay written by a real model, and the video production in the hub (phases 2 and 3).
 
 ## Models
 
