@@ -99,6 +99,7 @@ export class AgentStore {
       model: input.model ?? null,
       focus: input.focus ?? [],
       pin: input.pin ?? null,
+      pin_exclusive: false,
       max_parallel: 1,
       paused: false
     }

@@ -9,6 +9,7 @@ import { ROLES } from '../../shared/schemas'
 import { DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
+import { parseLightBible, parseScript } from '../publish/script'
 import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, seriesSummary, serverStatuses, topicSummary } from '../summary'
 import { bookRefs, seriesMembers } from '../store/series'
 import { TOPIC_KINDS } from '../store/topics'
@@ -24,10 +25,10 @@ const text = (x: unknown) => ({ content: [{ type: 'text' as const, text: typeof 
 
 /** Runs a tool: the result is JSON text, any error comes back as an MCP tool error (never a crash). */
 const run =
-  <A>(fn: (args: A) => Promise<unknown>) =>
-  async (args: A) => {
+  <A>(fn: (args: A, extra: { signal?: AbortSignal }) => Promise<unknown>) =>
+  async (args: A, extra: { signal?: AbortSignal } = {}) => {
     try {
-      return text(await fn(args))
+      return text(await fn(args, extra))
     } catch (err) {
       return { ...text(err instanceof Error ? err.message : String(err)), isError: true }
     }
@@ -99,6 +100,22 @@ export function registerTools(server: McpServer, engine: Engine): void {
     const s = await bookSummary(engine.books, slug, await topics())
     return s ? { ...slim(s), roleModels: (await engine.books.read(slug))?.data.role_models ?? {} } : null
   }
+  /** A path below the data folder as an absolute one (native separators), or null when there is nothing there. */
+  const abs = (rel: string | null | undefined) => (rel ? path.join(engine.dataDir, ...rel.split('/')) : null)
+  const bookPaths = async (slug: string, s: BookSummary) => {
+    const dir = engine.books.dir(slug)
+    const there = (...p: string[]) => fs.stat(path.join(dir, ...p)).then(() => path.join(dir, ...p), () => null)
+    return {
+      dataDir: engine.dataDir,
+      folder: dir,
+      epub: abs(s.epub),
+      coverPng: abs(s.coverPng),
+      readerDir: abs(s.readerDir),
+      articlePage: abs(s.articlePage),
+      articleMarkdown: await there('out', 'article.md'),
+      chapters: await there('chapters')
+    }
+  }
   const agent = (id: string) => {
     const def = engine.agents.get(id)
     return def ? agentSummary(def, engine.scheduler, engine.router) : null
@@ -109,7 +126,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: paused or not, spend against the caps, local model servers, running jobs, books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
+      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -121,6 +138,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       const agents = allAgents()
       const busy = agents.filter((a) => a.state === 'working' || a.state === 'reviewing' || a.state === 'waiting-provider' || a.state === 'waiting-research')
       return {
+        dataDir: engine.dataDir,
         paused: engine.factory.paused,
         uptimeMs: engine.uptimeMs,
         spend: engine.budget.snapshot(),
@@ -131,6 +149,18 @@ export function registerTools(server: McpServer, engine: Engine): void {
         maxArticlesInProgress: engine.factory.max_articles_in_progress,
         openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
         clientTasks: engine.clientQueue.counts(),
+        // queued jobs that no model can take now (a server down, a day used up, a rate limit, every slot busy), and the providers behind it
+        blocked: engine.scheduler.blockedJobs(),
+        providers: [...engine.registry.providers.values()]
+          .filter((p) => p.kind !== 'search' && p.kind !== 'client' && p.available)
+          .map((p) => {
+            const dayFull = engine.router.limiter.dayFull(p)
+            return { id: p.id, dayFull, resetsAt: dayFull ? new Date(engine.router.limiter.dayResetsAt()).toISOString() : null, down: p.down }
+          }),
+        embeddings: (() => {
+          const m = engine.registry.embeddingModel()
+          return m ? { model: m.ref, provider: m.provider.id, down: m.provider.down } : null
+        })(),
         agents: { total: agents.length, busy: busy.length, idle: agents.filter((a) => a.state === 'idle').length, paused: agents.filter((a) => a.paused).length },
         busyAgents: busy.map((a) => ({ id: a.id, state: a.state, task: a.task, book: a.book }))
       }
@@ -150,7 +180,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       for (const slug of await engine.books.slugs()) {
         const b = await bookSummary(engine.books, slug, all)
         if (!b || (stage && b.stage !== stage) || (medium && b.medium !== medium)) continue
-        rows.push({ slug, title: b.title, medium: b.medium, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused, ...(b.sourceBook ? { sourceBook: b.sourceBook.slug } : {}) })
+        rows.push({ slug, folder: engine.books.dir(slug), title: b.title, medium: b.medium, stage: b.stage, format: b.format, chaptersWritten: b.chaptersWritten, chaptersPlanned: b.chaptersPlanned, words: b.words, targetWords: b.targetWords, score: b.score, paused: b.paused, ...(b.sourceBook ? { sourceBook: b.sourceBook.slug } : {}) })
       }
       return rows
     })
@@ -160,7 +190,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'list_articles',
     {
       description:
-        'The newspaper: the published articles, newest first, one compact row each (slug, headline, standfirst, section, byline, date, words, score, and the path of the page: books/<slug>/out/article.html, with out/article.md beside it). Optionally only one section (a topic id like news-technology, or its name) and only articles published on or after a date. stage "all" lists the articles in progress too.',
+        'The newspaper: the published articles, newest first, one compact row each (slug, headline, standfirst, section, byline, date, words, score, and the page: `page` is books/<slug>/out/article.html relative to the data folder, `pagePath` the absolute path, with out/article.md beside it). Optionally only one section (a topic id like news-technology, or its name) and only articles published on or after a date. stage "all" lists the articles in progress too.',
       inputSchema: {
         section: z.string().optional().describe('A newspaper section: the topic id (news-technology) or its name (Technology)'),
         since: z.string().optional().describe('Only articles published on or after this date (YYYY-MM-DD, or a full ISO time)'),
@@ -185,7 +215,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         if (from && (!b.publishedAt || Date.parse(b.publishedAt) < from)) continue
         rows.push({
           publishedAt: b.publishedAt,
-          row: { slug, headline: b.headline ?? b.title, standfirst: b.standfirst, section: b.topic?.name ?? null, sectionId: b.topic?.id ?? null, byline: b.author, publishedAt: b.publishedAt, stage: b.stage, words: b.words, score: b.score, page: b.articlePage }
+          row: { slug, headline: b.headline ?? b.title, standfirst: b.standfirst, section: b.topic?.name ?? null, sectionId: b.topic?.id ?? null, byline: b.author, publishedAt: b.publishedAt, stage: b.stage, words: b.words, score: b.score, page: b.articlePage, pagePath: abs(b.articlePage) }
         })
       }
       return rows.sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')).map((r) => r.row)
@@ -194,11 +224,125 @@ export function registerTools(server: McpServer, engine: Engine): void {
 
   server.registerTool(
     'get_book',
-    { description: 'One book in full: stage, chapters, words, score, team, last steps, cover and EPUB state, and the owner story brief it was made from (if any).', inputSchema: { book: z.string().describe('Book slug') }, annotations: READ },
+    { description: 'One book in full: stage, chapters, words, score, team, last steps, cover and EPUB state, `paths` (absolute paths of the folder, EPUB, cover, reader, article page and chapters, null when not there; the relative fields stay), and the owner story brief it was made from (if any).', inputSchema: { book: z.string().describe('Book slug') }, annotations: READ },
     run(async ({ book: slug }: { book: string }) => {
       await needBook(slug)
-      return { ...(await book(slug)), brief: await engine.books.brief(slug) }
+      const summary = (await bookSummary(engine.books, slug, await topics()))!
+      return { ...(await book(slug)), paths: await bookPaths(slug, summary), brief: await engine.books.brief(slug) }
     })
+  )
+
+  server.registerTool(
+    'wait_for_book',
+    {
+      description:
+        'Long tool: waits until a book is published, rejected or failed, or until a model request of the book waits for you (stop_on_client_task, default true), or timeout_seconds (default 60, at most 900) passes, and then reports where the book is. `slug` is a story slug or a book slug (a story with no book yet is waited on until its book starts). Call it again after `timeout`; answer the client tasks (get_client_task, submit_client_task) when it returns `client-task`. Returns {done, reason: published, rejected, failed, client-task or timeout, story, book, title, stage, chaptersWritten, chaptersPlanned, words, targetWords, score, clientTasks, folder, epub, articlePage (absolute paths), waitedMs} and `reasons` for a rejected or failed book.',
+      inputSchema: {
+        slug: z.string().describe('A story slug or a book slug'),
+        timeout_seconds: z.number().int().min(1).max(900).optional().describe('Default 60'),
+        stop_on_client_task: z.boolean().optional().describe('Return as soon as a model request of this book waits for you (default true)')
+      },
+      annotations: READ
+    },
+    run(async ({ slug, timeout_seconds, stop_on_client_task }: { slug: string; timeout_seconds?: number; stop_on_client_task?: boolean }, extra) => {
+      if (!validSlug(slug)) fail(`no book or story "${slug}"`)
+      const started = Date.now()
+      const deadline = started + (timeout_seconds ?? 60) * 1000
+      const stopOnTask = stop_on_client_task !== false
+      let story: string | null = null
+      if (!(await engine.books.read(slug))) {
+        story = (await engine.ideas.list()).find((i) => i.slug === slug)?.slug ?? fail(`no book or story "${slug}" (list_books and list_stories show the slugs)`)
+      }
+      for (;;) {
+        // a story's book appears when the factory starts it
+        let bookSlug: string | null = story ? ((await engine.ideas.list()).find((i) => i.slug === story)?.data.book ?? null) : slug
+        if (bookSlug && !(await engine.books.read(bookSlug))) bookSlug = null
+        const summary = bookSlug ? await bookSummary(engine.books, bookSlug, await topics()) : null
+        const tasks = engine.clientQueue.list()
+        const mine = (t: { book: string }) => !!bookSlug && t.book === bookSlug
+        const startTask = (t: { role: string; task: string }) => !bookSlug && t.role === 'editor-in-chief' && t.task === 'start_book'
+        const waiting = tasks.filter((t) => t.state === 'waiting' && (mine(t) || startTask(t))).length
+        let reason: string | null = null
+        if (summary && TERMINAL_BOOK_STAGES.has(summary.stage)) reason = summary.stage
+        else if (stopOnTask && waiting > 0) reason = 'client-task'
+        else if (Date.now() >= deadline || extra.signal?.aborted) reason = 'timeout'
+        if (reason) {
+          return {
+            done: summary ? TERMINAL_BOOK_STAGES.has(summary.stage) : false,
+            reason,
+            story,
+            book: bookSlug,
+            title: summary?.title ?? null,
+            stage: summary?.stage ?? null,
+            chaptersWritten: summary?.chaptersWritten ?? 0,
+            chaptersPlanned: summary?.chaptersPlanned ?? null,
+            words: summary?.words ?? 0,
+            targetWords: summary?.targetWords ?? null,
+            score: summary?.score ?? null,
+            ...(summary && (summary.stage === 'rejected' || summary.stage === 'failed') ? { reasons: summary.reasons } : {}),
+            clientTasks: { waiting, leased: tasks.filter((t) => t.state === 'leased' && mine(t)).length },
+            folder: bookSlug ? engine.books.dir(bookSlug) : null,
+            epub: summary ? abs(summary.epub) : null,
+            articlePage: summary ? abs(summary.articlePage) : null,
+            waitedMs: Date.now() - started
+          }
+        }
+        await new Promise((r) => setTimeout(r, 1000))
+      }
+    })
+  )
+
+  server.registerTool(
+    'get_script',
+    {
+      description:
+        'The parsed script of a visual novel book (a script format, any stage, drafts too) as JSON: {slug, title, author, genre, format, style, characters: [{name, looks, voice}], places: [{name, looks}], chapters: [{n, title, choices, ending, sourceChapters, scenes: [{place, time, background, beats}]}]}. A beat is a cast list, a line (speaker, expression, text), narration or a break; see docs/visual-novel.md. Give `chapter` for one chapter. Refused for a book that is not a script.',
+      inputSchema: { book: z.string().describe('Book slug'), chapter: z.number().int().positive().optional().describe('Only this chapter') },
+      annotations: READ
+    },
+    run(async ({ book: slug, chapter }: { book: string; chapter?: number }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.script !== true) fail(`"${slug}" is not a visual novel script (its format is ${b?.data.format}): get_script needs a book with script: true`)
+      const bible = parseLightBible(await engine.books.bible(slug))
+      const outline = await engine.books.outline(slug)
+      const names = bible.characters.map((c) => c.name)
+      const written = await engine.books.chapters(slug)
+      if (chapter && !written.some((c) => c.n === chapter)) fail(`chapter ${chapter} of "${slug}" is not written`)
+      return {
+        slug,
+        title: b!.data.title,
+        author: b!.data.author,
+        genre: b!.data.genre,
+        format: b!.data.format,
+        style: bible.style,
+        characters: bible.characters,
+        places: bible.places,
+        chapters: written
+          .filter((c) => !chapter || c.n === chapter)
+          .map((c) => {
+            const entry = outline?.chapters.find((o) => o.n === c.n)
+            return {
+              n: c.n,
+              title: c.title,
+              choices: entry?.choices ?? [],
+              ending: entry?.ending ?? null,
+              ...(entry?.source_chapters ? { sourceChapters: entry.source_chapters } : {}),
+              scenes: parseScript(c.body, names).scenes
+            }
+          })
+      }
+    })
+  )
+
+  server.registerTool(
+    'refresh_factbase',
+    {
+      description:
+        'Merge the research notes a non-fiction book or article has gathered since its fact base was made (its unmerged notes) into the fact base now, at any stage, a published book too. Returns {queued: the job id or null, unmerged: how many notes}. The published text and references do not change: reopen_book to have the writers use the new facts. A fiction book is refused.',
+      inputSchema: { book: z.string().describe('Book slug') },
+      annotations: WRITE
+    },
+    run(async ({ book: slug }: { book: string }) => engine.refreshFactbase(await needBook(slug)).catch((err: Error) => fail(err.message)))
   )
 
   server.registerTool(
@@ -583,13 +727,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'set_book_model',
     {
       description:
-        'Set the model ONE book uses for a role (model null removes it). Its jobs of that role try this model first, before any model set on the agent, and any agent of the role may take them; the role list stays the fallback. Use it to put one book on client/claude-code without touching the others. Running jobs of the book switch at once. Works on books in progress and on rejected ones (so it can be set before reopen_book).',
+        'Set the model ONE book uses for a role (model null removes it). Its jobs of that role try this model first, before any model set on the agent, and any agent of the role may take them; the role list stays the fallback. Use it to put one book on client/claude-code without touching the others. Running jobs of the book switch at once. Works at any stage, so a model can be set on a failed or published book before retry_book or reopen_book; null always works.',
       inputSchema: { book: z.string(), role: z.string(), model: z.string().nullable().describe('A provider/model ref from list_models, or null to remove') },
       annotations: WRITE
     },
     run(async ({ book: slug, role, model }: { book: string; role: string; model: string | null }) => {
-      const b = await engine.books.read(await needBook(slug))
-      if (!b || (TERMINAL_BOOK_STAGES.has(b.data.stage) && b.data.stage !== 'rejected')) fail(`"${slug}" is ${b?.data.stage}: a book model can be set on a book in progress or a rejected one`)
+      await needBook(slug)
       needRole(role)
       if (model !== null) needModel(model)
       await engine.handleCommand({ type: 'setBookModel', book: slug, role, model })
@@ -601,7 +744,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'reopen_book',
     {
       description:
-        'Give a REJECTED book one more round (retry_book is for failed books). mode "rewrite": the chapters (the ones you give, or the ones the reviews of the last round name) are rewritten, then reviewed again. mode "review": the book is reviewed again with no rewrite. Either way the publisher then decides again (publish or reject). It counts toward max_books_in_progress again. Agents assigned to the book were freed when it was rejected: assign them again.',
+        'Give a REJECTED or PUBLISHED book one more round (retry_book is for failed books). mode "rewrite": the chapters (the ones you give, or the ones the reviews of the last round name) are rewritten, then reviewed again. A published book needs the chapters when its last reviews named none. mode "review": the book is reviewed again with no rewrite. Either way the publisher then decides again (publish or reject); the old EPUB or article page stays until it publishes again, and a reopened book that is rejected stays rejected like any other. It counts toward max_books_in_progress again. Agents assigned to the book were freed when it was rejected or published: assign them again.',
       inputSchema: {
         book: z.string(),
         mode: z.enum(['rewrite', 'review']),
@@ -611,16 +754,15 @@ export function registerTools(server: McpServer, engine: Engine): void {
     },
     run(async ({ book: slug, mode, chapters }: { book: string; mode: 'rewrite' | 'review'; chapters?: number[] }) => {
       const b = await engine.books.read(await needBook(slug))
-      if (b?.data.stage !== 'rejected') fail(`"${slug}" is not a rejected book (stage: ${b?.data.stage}): only rejected books can be reopened (retry_book is for failed ones)`)
+      if (b?.data.stage !== 'rejected' && b?.data.stage !== 'published') fail(`"${slug}" is not a rejected or published book (stage: ${b?.data.stage}): only those can be reopened (retry_book is for failed ones)`)
       if (chapters?.length && mode !== 'rewrite') fail('chapters only apply to mode rewrite')
       if (chapters?.length) {
         const written = new Set((await engine.books.chapters(slug)).map((c) => c.n))
         const missing = chapters.filter((n) => !written.has(n))
         if (missing.length) fail(`chapter ${missing.join(', ')} of "${slug}" is not written`)
       }
-      await engine.handleCommand({ type: 'reopenBook', book: slug, mode, chapters })
-      const after = await engine.books.read(slug)
-      if (after?.data.stage === 'rejected') fail(`"${slug}" could not be reopened (see the engine log)`)
+      const error = await engine.reopenBook(slug, mode, chapters)
+      if (error) fail(error)
       return book(slug)
     })
   )
@@ -673,20 +815,24 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'get_client_task',
     {
       description:
-        'Take the oldest waiting model request (optionally of one role, book or task; `role: "searcher"` takes the web searches the researcher waits for, see docs/mcp.md "Do the web research yourself") and hold it for 30 minutes. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
+        'Take the oldest waiting model request (optionally of one role, book or task; `role: "searcher"` takes the web searches the researcher waits for, see docs/mcp.md "Do the web research yourself") and hold it for 30 minutes. `system` holds the instructions and `user` is the turn to answer; `messages` (the conversation without the system turns) is there only when there is more than one turn, for example a repair round. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
       inputSchema: { role: z.string().optional(), book: z.string().optional().describe('Book slug'), task: z.string().optional().describe('Job task, e.g. draft_chapter, review, outline') },
       annotations: WRITE
     },
     run(async (f: { role?: string; book?: string; task?: string }) => {
       const t = engine.clientQueue.lease(f, DEFAULT_LEASE_MS)
       if (!t) return { none: true, waiting: engine.clientQueue.counts().waiting }
-      const rest = t.messages.filter((m) => m.role !== 'system')
+      // `user` is the turn to answer. A plain task (one user turn, nothing said before) has no `messages`: sending the prompt in
+      // both fields put every task in the client's context twice. A repair or follow-up round has the whole conversation there.
+      const turns = t.messages.filter((m) => m.role !== 'system')
+      const plain = turns.length === 1 && turns[0]!.role === 'user'
+      const lastUser = [...turns].reverse().find((m) => m.role === 'user') ?? turns.at(-1)
       return {
         taskId: t.id,
         meta: { job: t.job, call: t.call, role: t.role, task: t.task, book: t.book, agent: t.agent, unit: t.unit },
         system: t.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
-        user: rest.map((m) => m.content).join('\n\n'),
-        ...(t.messages.length > 1 ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
+        user: lastUser?.content ?? '',
+        ...(plain ? {} : { messages: turns.map((m) => ({ role: m.role, content: m.content })) }),
         ...(t.schema ? { schema: t.schema } : {}),
         ...(t.maxTokens ? { maxTokens: t.maxTokens } : {}),
         output:
@@ -820,17 +966,18 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'assign_agent',
     {
-      description: 'Assign an agent to one book in progress (it then only takes that book\'s jobs; a writer becomes the book\'s writer), or free it with book null.',
-      inputSchema: { agent: z.string(), book: z.string().nullable() },
+      description:
+        'Assign an agent to one book in progress (it then only takes that book\'s jobs; a writer becomes the book\'s writer), or free it with book null. exclusive: only the agents assigned to this book (exclusively) take its jobs, and a job waits for them even while they are busy or paused; without it the assigned agent prefers the book and the other agents of the role still help.',
+      inputSchema: { agent: z.string(), book: z.string().nullable(), exclusive: z.boolean().optional().describe('Only the agents assigned this way work on the book') },
       annotations: WRITE
     },
-    run(async ({ agent: id, book: slug }: { agent: string; book: string | null }) => {
+    run(async ({ agent: id, book: slug, exclusive }: { agent: string; book: string | null; exclusive?: boolean }) => {
       needAgent(id)
       if (slug !== null) {
         const b = await engine.books.read(await needBook(slug))
         if (!b || TERMINAL_BOOK_STAGES.has(b.data.stage)) fail(`"${slug}" is not a book in progress (stage: ${b?.data.stage})`)
       }
-      await engine.handleCommand({ type: 'assignBook', agent: id, book: slug })
+      await engine.handleCommand({ type: 'assignBook', agent: id, book: slug, exclusive })
       return agent(id)
     })
   )

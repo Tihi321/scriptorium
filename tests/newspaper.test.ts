@@ -303,7 +303,8 @@ describe('an article on the mock providers', () => {
 
     // research: the searches asked for recent news, and the notes are the article's own, none in the shared library
     expect(env.counters.searches.length).toBeGreaterThan(0)
-    expect(env.counters.searchOptions.every((o) => o.news === true)).toBe(true) // the idea search (3 days) and the research searches (7 days)
+    // the question about this week's announcement is a news search (7 days); the chapter's own background question is not (SCP-14)
+    expect(env!.counters.searches.map((q, i) => [q, env!.counters.searchOptions[i]!.news === true && env!.counters.searchOptions[i]!.days === 7]).filter(([q]) => /announce/.test(q as string))).toEqual([['What did the ministry announce this week?', true]])
     expect(env.counters.searchOptions.some((o) => o.days === 7)).toBe(true)
     expect((await readdir(dirOf('research'))).filter((f) => f.endsWith('.md')).length).toBeGreaterThan(0)
     expect(existsSync(path.join(env.dir, 'research')) ? (await readdir(path.join(env.dir, 'research'))).filter((f) => f.endsWith('.md')) : []).toEqual([])

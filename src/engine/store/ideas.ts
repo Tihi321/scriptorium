@@ -4,6 +4,7 @@ import { briefLabel, isEmptyBrief, renderBrief } from '../../shared/brief'
 import type { StoryBrief } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
 import { ideaSchema } from '../../shared/schemas'
+import { slugify as slugOf } from '../../shared/slug'
 import type { IdeaFrontmatter } from '../../shared/schemas'
 import { writeMd } from './atomic'
 
@@ -27,6 +28,9 @@ export const slugify = (s: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'idea'
+
+/** A story's file name: at most 40 characters and 6 words, never cut inside a word (SCP-14). Existing stories keep their slugs. (`slugify` stays for series and topics.) */
+export const storySlug = (s: string) => slugOf(s, { max: 40, maxWords: 6, fallback: 'idea' })
 
 /** The frontmatter fields of a brief (format, topic and genre are left out when empty). */
 const briefFields = (b: StoryBrief) => ({
@@ -90,7 +94,7 @@ export class IdeaStore {
   async create(input: { title: string; pitch: string; topic?: string | null; format?: string | null; source: 'user' | 'generated' }): Promise<IdeaFile> {
     await fs.mkdir(this.dir, { recursive: true })
     const taken = new Set((await fs.readdir(this.dir)).map((f) => f.replace(/\.md$/, '')))
-    const base = slugify(input.title)
+    const base = storySlug(input.title)
     let slug = base
     for (let i = 2; taken.has(slug); i++) slug = `${base}-${i}`
     const file = path.join(this.dir, `${slug}.md`)
@@ -114,7 +118,7 @@ export class IdeaStore {
     const taken = new Set((await fs.readdir(this.dir)).map((f) => f.replace(/\.md$/, '')))
     const fixed = !!brief.title.trim()
     const title = fixed ? brief.title.trim() : briefLabel(brief) || 'Untitled story'
-    const base = slugify(title)
+    const base = storySlug(title)
     let slug = base
     for (let i = 2; taken.has(slug); i++) slug = `${base}-${i}`
     const file = path.join(this.dir, `${slug}.md`)

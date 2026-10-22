@@ -70,12 +70,13 @@ export async function chatJson<T>(
   ctx: JobContext,
   messages: ChatMessage[],
   schema: ZodType<T>,
-  opts: { maxTokens?: number; temperature?: number } = {}
+  opts: { maxTokens?: number; temperature?: number; /** Reshapes the parsed JSON before the schema checks it (see `normalizeReviewJson`). */ normalize?: (raw: unknown) => unknown } = {}
 ): Promise<JsonResult<T>> {
+  const { normalize, ...chatOpts } = opts
   let cost = 0
   const jsonSchema = jsonSchemaOf(schema)
   const ask = async (msgs: ChatMessage[], withSchema: boolean): Promise<ChatResult> => {
-    const r = await ctx.chat({ messages: msgs, schema: withSchema ? jsonSchema : undefined, ...opts })
+    const r = await ctx.chat({ messages: msgs, schema: withSchema ? jsonSchema : undefined, ...chatOpts })
     cost += r.costUsd
     return r
   }
@@ -88,7 +89,8 @@ export async function chatJson<T>(
   }
   const tryParse = (text: string): { ok: true; value: T } | { ok: false; error: string } => {
     try {
-      const parsed = schema.safeParse(extractJson(text))
+      const json = extractJson(text)
+      const parsed = schema.safeParse(normalize ? normalize(json) : json)
       return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ') }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -101,7 +103,7 @@ export async function chatJson<T>(
     { role: 'assistant', content: reply.text.slice(0, 6000) },
     {
       role: 'user',
-      content: `Your reply could not be used: ${parsed.error}.\nReply again with only one valid JSON object that matches the requested format. No explanations, no code fences.`
+      content: `Your reply could not be used: ${parsed.error}.\nReply again with only one valid JSON object that matches the requested format. Keep everything your first reply said (every finding, quote and fix); change only the format. No explanations, no code fences.`
     }
   ]
   const second = await ask(repair, false)

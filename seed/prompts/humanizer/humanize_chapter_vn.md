@@ -24,6 +24,8 @@ What to do
 
 - Do not add, remove, merge, split or reorder SCENE lines, ON SCREEN lines or speaker lines. The number of each, and who speaks in which order, must stay the same. You change the words inside the lines, not the skeleton. Keep every name, every expression tag and every look that ON SCREEN lines give, unless the line itself says it changes.
 - Never use an em dash (the long dash). Not one. Use a full stop, a comma, a colon or brackets, or rewrite the sentence. A script counts them and refuses a version that has more than the original.
+- Vary the length, but keep whole sentences: every sentence has a subject and a verb. Do not break a sentence into a string of verbless fragments ("Eighty-four years old, widow of a judge, second floor.") and do not add one-word sentences. A script counts them and refuses a version with more than the original.
+- Write in English, as the original is. Keep every line of dialogue in the language it is in; never translate it.
 - Keep every concrete fact exactly as it is: each object, where it is, who holds it, every number, date and year, every name. Do not move a thing to another place ("under the third flowerpot" stays under the third flowerpot), do not change a count, do not invent a name or a figure. A script compares the numbers and the names with the original and refuses a version that differs.
 - Keep each speaker's register. A formal speaker stays formal: no contractions, no slang, no softening added. A rough speaker stays rough. Change the rhythm and the words around the speech, not who talks how.
 - Keep the story, the facts, what each character knows, and every name.

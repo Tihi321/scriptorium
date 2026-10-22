@@ -17,7 +17,7 @@ Write the facts that answer the question:
 - Numbers, dates, durations, names and amounts are valuable. Keep them exact.
 - Say which page each fact comes from with its number ("source": 1 for page 1).
 - Use only what the pages say. Do not add facts from memory. If the pages do not answer the question, return an empty list.
-- Between 3 and 12 facts, the most useful first.
+- Between 3 and 16 facts, the most useful first. Every figure, date, deadline and named event on the pages that bears on the question must be one of your facts.
 
 Reply with one JSON object like this:
 {"facts": [{"fact": "...", "source": 1}]}

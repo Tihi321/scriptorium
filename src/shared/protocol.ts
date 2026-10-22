@@ -102,6 +102,8 @@ export interface AgentSummary {
   resolvedModel: string | null
   /** The book the agent is assigned to (`pin` in its file): it only takes that book's jobs. Null when it takes any job. */
   pin: string | null
+  /** Only the agents assigned to the book exclusively take its jobs (`pin_exclusive`). */
+  pinExclusive: boolean
   paused: boolean
   state: AgentState
   /** What it is doing now, when it has a job. */
@@ -165,6 +167,10 @@ export interface BookSummary {
   /** The reader's pages in reading order (cover, title page, chapters ...); its `index.html` is the contents. */
   readerPages: { file: string; title: string }[]
   publishedAt: string | null
+  /** The length gate (`length_gate` in book.md): the draft was far from the format's range or the target and chapters were rewritten to fit. Missing or null: it did not run (yet). */
+  lengthGate?: { status: string; words?: number; min?: number; max?: number; wordsBefore?: number } | null
+  /** The book was published over the format's ceiling (`length_over` in book.md). */
+  lengthOver?: boolean
 }
 
 export interface TopicSummary {
@@ -360,7 +366,7 @@ export type Command =
   | { type: 'resume'; agent: string }
   | { type: 'stop'; agent: string }
   /** Assigns an agent to one book in progress (`pin` in its file), or frees it with `book: null`. A writer also becomes the book's writer. */
-  | { type: 'assignBook'; agent: string; book: string | null }
+  | { type: 'assignBook'; agent: string; book: string | null; exclusive?: boolean }
   | { type: 'pauseAll' }
   | { type: 'resumeAll' }
   | { type: 'stopNow' }

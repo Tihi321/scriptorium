@@ -9,7 +9,8 @@ import { parseMd } from '../../shared/md'
 import { genreClass, writeCoverHtml } from '../publish/cover'
 import type { ModelInfo } from '../models/registry'
 import type { JobStore } from '../queue/jobs'
-import type { ChatOptions, JobContext, Scheduler } from '../queue/scheduler'
+import type { ChatOptions, ChatResult, JobContext, Scheduler } from '../queue/scheduler'
+import type { ChatMessage } from '../models/types'
 import { writeMd } from '../store/atomic'
 import type { IdeaFile, IdeaStore } from '../store/ideas'
 import { bookRefs, waitingStories } from '../store/series'
@@ -31,10 +32,15 @@ import type { ResearchService, SearchService } from '../research/service'
 import { bibleFor, nonfictionContext } from './nfcontext'
 import { chatJson, cleanProse } from './llm'
 import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
-import { earlierSeriesBooks, seriesSection, withSeriesBible } from './series'
+import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
+import { instructionLines, stripTrailingLeak } from './leak'
+import { chapterNotes, otherChapters } from './rewriteContext'
+import { addPlacesToBible, canonicalScenes, placeDescriptions, placesBlock } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
+import { calendarFor } from './calendar'
+import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
 import { ARTICLE_IDEAS_RULE, newsHeadlines } from './newspaper'
-import { ancestors, chapterPlace, checkBranches, endLine } from './branches'
+import { ancestors, chapterPlace, CHOICES_RULE, checkBranches, endLine, renderOutlineBody, splitChoicesBlock } from './branches'
 import type { BranchChapter } from './branches'
 import { decide, dimensionsFor } from './scoring'
 import type { ReviewResult } from './scoring'
@@ -118,8 +124,9 @@ export interface NextPick {
 /**
  * Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic.
  * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
+ * `prefer` is the slug of the story a start job was queued for (its models were chosen for that story): it is picked when it can still start.
  */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }): NextPick | null {
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
   const waiting = waitingStories(ideas, books)
   const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug))
@@ -128,6 +135,11 @@ export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatE
   const ok = (topic?: TopicRow, idea?: IdeaFile) => {
     const article = isArticleStory(idea, topic, formats)
     return slot(article) && (formatsForKind(formats, topic?.kind ?? null).length > 0 || (!topic && article))
+  }
+  const wanted = prefer ? open.find((x) => x.slug === prefer) : undefined
+  if (wanted) {
+    const topic = wanted.data.topic ? byId.get(wanted.data.topic) : undefined
+    if (wanted.data.source === 'user' ? ok(topic, wanted) : !!topic && topic.active && hasRoom(topic) && ok(topic, wanted)) return { idea: wanted, topic }
   }
   for (const i of open.filter((x) => x.data.source === 'user')) {
     const topic = i.data.topic ? byId.get(i.data.topic) : undefined
@@ -166,6 +178,19 @@ export const formatVars = (f: FormatEntry, target: number) => ({
 /** A drafted chapter of a long book under this share of its target words gets an expand retry. */
 export const EXPAND_BELOW = 0.8
 
+/** A chapter over this share of its target words gets one tighten retry (every format, drafts and round rewrites). */
+export const TRIM_ABOVE = 1.2
+
+/**
+ * The words one chapter should have: the book's target over the chapters its outline plans (the chapters written so far when there is no
+ * outline entry count yet), never over the chapters written so far while the outline is longer.
+ */
+export const perChapterTarget = (book: { target_words: number }, outline: { chapters: unknown[] } | null | undefined, written: number): number =>
+  Math.round(book.target_words / Math.max(1, outline?.chapters.length || written || 1))
+
+/** The first two paragraphs of an appended section (its heading and its instruction): what a leak of it would repeat. */
+const sectionHead = (section: string): string => section.split(/\n\n/).slice(0, 2).join('\n\n')
+
 /** At most this many [RESEARCH: ...] markers of a chapter become research jobs. */
 export const MAX_MARKERS_PER_CHAPTER = 3
 
@@ -189,7 +214,9 @@ export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 's
   const window = d.contextTokens(role)
   if (window) budgetTokens = Math.max(2500, Math.min(budgetTokens, Math.floor(window * 0.45)))
   let index = null
-  if (d.memory.available()) {
+  if (!d.memory.ready() && d.memory.available()) {
+    d.log('search skipped: the embeddings server is down; the chapter is written from the bible and the summaries')
+  } else if (d.memory.available()) {
     try {
       index = d.memory.getIndex()
     } catch (err) {
@@ -200,7 +227,7 @@ export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 's
   const entry = (await d.books.outline(slug))?.chapters.find((c) => c.n === n)
   const research = entry ? await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4) : []
   const seriesBooks = await earlierSeriesBooks(d, slug)
-  return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research, seriesBooks })
+  return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research, seriesBooks, log: d.log })
 }
 
 /** Writes the book's record of this job (books/<slug>/made.md and the summary in book.md). */
@@ -234,6 +261,64 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
   const made = (slug: string, run: Run) => recordMade(d, slug, run)
 
   // ---- idea generator ----
+  /** The writer's answer as chapter text: no reasoning, no heading, and the task instructions a model repeated at the end cut off. A leak in the middle fails the job (it is asked again). */
+  const chapterAnswer = (ctx: JobContext, forbid: string[], text: string): string => {
+    const body = stripLeadingHeading(cleanProse(text))
+    const leak = stripTrailingLeak(body, forbid)
+    if (!leak) throw new Error('the answer repeats the task instructions')
+    if (leak.cut) ctx.log('the answer ended with the task instructions: cut off')
+    return leak.text
+  }
+
+  /**
+   * A chapter over 120% of its target gets one more request: cut it to the target. The shorter text is kept when it is between 80% of the
+   * target and the length it had. Returns the text, and the reply when the retry was kept.
+   */
+  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number): Promise<{ body: string; reply: ChatResult | null }> => {
+    const words = countWords(body)
+    if (words <= target * TRIM_ABOVE) return { body, reply: null }
+    const how = script
+      ? 'Cut narration lines and minor lines, and keep every SCENE, ON SCREEN and plot beat'
+      : 'Tighten it: cut repetition and description, and keep every event, name and line of dialogue that matters'
+    try {
+      const retry = await run.chat({
+        messages: [
+          ...messages,
+          { role: 'assistant', content: body },
+          { role: 'user', content: `This chapter has ${words} words, but it should have about ${target}. Cut it to about ${target} words. ${how}. Write the whole chapter again, as plain ${script ? 'script' : 'prose'} only, with no title or notes.` }
+        ],
+        maxTokens,
+        forbid
+      })
+      const shorter = chapterAnswer(ctx, forbid, retry.text)
+      const now = countWords(shorter)
+      if (now >= target * 0.8 && now < words) {
+        ctx.log(`chapter was ${words} words (target ${target}); trimmed to ${now}`)
+        return { body: shorter, reply: retry }
+      }
+      ctx.log(`the tighten retry gave ${now} words (target ${target}): keeping the first answer of ${words}`)
+    } catch (err) {
+      if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
+      ctx.log(`the tighten retry failed (${(err as Error).message}): keeping the first answer of ${words} words`)
+    }
+    return { body, reply: null }
+  }
+
+  /** A visual novel script: its SCENE places are the bible's names, and the places the bible lacks are added to it (see scriptPlaces.ts). */
+  const settlePlaces = async (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => {
+    const bible = await d.books.bible(slug)
+    if (!bible) return body // a structured bible keeps its places in files: the script is left as it is
+    const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)
+    const out = canonicalScenes(body, places)
+    for (const r of out.renamed) ctx.log(`SCENE place "${r.from}" written as the bible's "${r.to}"`)
+    if (out.unknown.length) {
+      const text = placeDescriptions(out.body, out.unknown)
+      await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + addPlacesToBible(bible, out.unknown.map((p) => ({ place: p, text: text.get(p) ?? '' })), n))
+      ctx.log(`new place(s) added to the bible: ${out.unknown.join(', ')}`)
+    }
+    return out.body
+  }
+
   sched.register('generate_ideas', async (ctx) => {
     const run = new Run(ctx)
     const formats = d.getFormats()
@@ -281,7 +366,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const open = await countInProgress(d.books)
     const room: SlotRoom = { books: open.books < d.getFactory().max_books_in_progress, articles: open.articles < d.getFactory().max_articles_in_progress }
     if (!room.books && !room.articles) return { result: 'enough books in progress already' }
-    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books), room)
+    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books), room, ctx.job.idea)
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it
@@ -378,7 +463,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const brief = await d.books.brief(slug)
     const ideaText = brief ? briefPromptText(brief) : typeof book.idea === 'string' ? ((await d.ideas.list()).find((i) => i.slug === book.idea)?.body ?? '') : ''
     // the library's pitch index is for books: an article is not checked against it and is not added to it
-    const mem = d.memory.available() && !fmt.article ? d.memory : null
+    const mem = d.memory.ready() && !fmt.article ? d.memory : null
     // the source of an adaptation (and other adaptations of it) is meant to be close: the similarity check leaves them out
     const family = await adaptationFamily(d, slug)
     let similarityNote = ''
@@ -478,6 +563,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       threads: z.array(z.string()).default([]),
       setting: z.string().default(''),
       style: z.string().default(''),
+      // the year the story is set in (a number), or null for no fixed year: the reviewers get the calendar of that year
+      story_year: z.union([z.number(), z.string(), z.null()]).default(null),
       // non-fiction: the argument, the audience and the terms of the fact base
       thesis: z.string().default(''),
       audience: z.string().default(''),
@@ -524,15 +611,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     // a story with choices: bad choices are dropped, and a map a reader can't get through fails the job (it is planned again)
     if (fmt.choices) numbered = checkBranches(chapters.map((c, i) => ({ n: i + 1, title: c.title.trim(), summary: c.summary.trim(), choices: c.choices, ending: c.ending, ...mapOf(i) })))
     const acts = fmt.long ? splitActs(numbered.length) : undefined
-    await writeMd(
-      d.books.file(slug, 'outline.md'),
-      { kind: 'outline', round, chapters: numbered, ...(acts ? { acts } : {}) },
-      '\n' +
-        (acts
-          ? acts.map((a) => `## ${a.title}\n\n${a.chapters.map((n) => `${n}. **${numbered[n - 1]!.title}**: ${numbered[n - 1]!.summary}`).join('\n')}`).join('\n\n')
-          : numbered.map((c) => `${c.n}. **${c.title}**: ${c.summary}${c.source_chapters?.length ? ` (from source chapter ${c.source_chapters.join(', ')})` : ''}${fmt.choices ? `\n   - ${endLine(c)}` : ''}`).join('\n')) +
-        '\n'
-    )
+    await writeMd(d.books.file(slug, 'outline.md'), { kind: 'outline', round, chapters: numbered, ...(acts ? { acts } : {}) }, renderOutlineBody(numbered, acts, !!fmt.choices))
     // a character the owner described is in the bible, even when the architect left it out
     const briefCharacters = fmt.nonfiction ? r.value.characters : await withBriefCharacters(d, slug, r.value.characters, ctx.log)
     // book N of a series starts from what the earlier books' bibles say about the recurring characters and places
@@ -561,6 +640,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
+    const year = Math.round(Number(r.value.story_year))
+    if (Number.isInteger(year) && year >= 1000 && year <= 2999 && book.story_year === undefined) await d.books.update(slug, () => ({ story_year: year }))
     if (fmt.article) {
       // the headline and the standfirst of the article, kept in book.md (the publisher makes them final)
       const headline = r.value.headline.replace(/^["'“”]+|["'“”]+$/g, '').replace(/\s+/g, ' ').trim()
@@ -582,7 +663,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const outline = (await d.books.outline(slug))!
     const entry = outline.chapters.find((c) => c.n === n)
     if (!entry) throw new Error(`no outline entry for chapter ${n}`)
-    const perChapter = Math.round(book.target_words / outline.chapters.length)
+    const perChapter = perChapterTarget(book, outline, 0)
     let storySoFar: string
     if (fmt.nonfiction) {
       // non-fiction: the context comes from the fact base (key facts and numbered sources of this chapter, the notes, the chapters before)
@@ -612,7 +693,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         ...research.map((r) => ({ name: r.name, tokens: Math.round(r.text.length / 4) }))
       ])
     }
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'draft_chapter'), {
+    const { messages, version, template } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'draft_chapter'), {
       title: book.title,
       story_so_far: storySoFar,
       chapter_n: n,
@@ -623,13 +704,23 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
-    if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'draft', chapterPlace(outline.chapters, n)))
-    appendToPrompt(messages, await storyBriefSection(d, slug))
-    appendToPrompt(messages, await seriesSection(d, slug))
-    appendToPrompt(messages, await sourceChaptersSection(d, slug, n, 'draft', fmt.name, ctx))
-    appendToPrompt(messages, await ownerNotesSection(d, slug, n))
-    let r = await run.chat({ messages, maxTokens: Math.max(4000, perChapter * 6) })
-    let body = stripLeadingHeading(cleanProse(r.text))
+    // what was added to the prompt, so the answer can be checked for repeating it (the client queue refuses such an answer up front)
+    const appended: string[] = []
+    const add = (text: string, whole = false) => {
+      if (!text) return
+      appendToPrompt(messages, text)
+      appended.push(whole ? text : sectionHead(text))
+    }
+    if (fmt.choices) add(await loadChoicesSection(d.dataDir, 'draft', chapterPlace(outline.chapters, n)), true)
+    add(await storyBriefSection(d, slug))
+    add(await seriesSection(d, slug))
+    add(await sourceChaptersSection(d, slug, n, 'draft', fmt.name, ctx))
+    add(await ownerNotesSection(d, slug, n))
+    if (fmt.script) add(placesBlock(lightBibleEntries(await d.books.bible(slug)).filter((e) => e.group === 'places').map((e) => e.name)), true)
+    const forbid = instructionLines(template, appended)
+    const maxTokens = Math.max(4000, perChapter * 6)
+    let r = await run.chat({ messages, maxTokens, forbid })
+    let body = chapterAnswer(ctx, forbid, r.text)
     if (countWords(body) < 20) throw new Error(`chapter ${n} came back too short (${countWords(body)} words, ${r.usage.outputTokens} tokens used: a thinking model may have run out of tokens)`)
     // long books: models write 10-50% less than asked. A chapter under 80% of its target gets one expand retry before the checks.
     let expandedFrom: number | null = null
@@ -644,9 +735,10 @@ Build the outline on these facts: the period, places, jobs, distances and durati
             content: `This chapter has ${before} words, but it should have about ${perChapter}. Expand this chapter to about ${perChapter} words. Keep every event, name and fact as they are, and keep the same voice. Add what is missing: scene detail, the characters' thoughts and reactions, dialogue, the senses, the pauses between actions. Do not add new plot and do not repeat yourself. Write the whole chapter again, as plain prose only, with no title or notes.`
           }
         ],
-        maxTokens: Math.max(4000, perChapter * 6)
+        maxTokens,
+        forbid
       })
-      const longer = stripLeadingHeading(cleanProse(retry.text))
+      const longer = chapterAnswer(ctx, forbid, retry.text)
       if (countWords(longer) > before) {
         r = retry
         body = longer
@@ -656,6 +748,19 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       }
       if (expandedFrom !== null) ctx.log(`chapter ${n} was ${before} words (target ${perChapter}); expanded to ${countWords(body)}`)
     }
+    // a chapter far over its target (a model that does not stop): one request to cut it, for every format
+    let trimmedFrom: number | null = null
+    if (expandedFrom === null) {
+      const before = countWords(body)
+      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens)
+      if (out.reply) {
+        r = out.reply
+        body = out.body
+        trimmedFrom = before
+      }
+    }
+    // a script: the SCENE places are the bible's names, and a new place is added to the bible
+    if (fmt.script) body = await settlePlaces(ctx, slug, n, body)
     // [RESEARCH: question] markers (any model can write them): each becomes a research job. A fix-up job replaces the sentences when the notes are in.
     const asked: string[] = []
     for (const m of findMarkers(body).slice(0, MAX_MARKERS_PER_CHAPTER)) {
@@ -669,7 +774,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     }
     await d.books.writeChapter(slug, { n, title: entry.title, round: 0, body, agent: ctx.agent.id, model: r.model.ref })
     await made(slug, run)
-    return { result: `chapter ${n}: ${countWords(body)} words${expandedFrom !== null ? ` (expanded from ${expandedFrom})` : ''}`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
+    return { result: `chapter ${n}: ${countWords(body)} words${expandedFrom !== null ? ` (expanded from ${expandedFrom})` : ''}${trimmedFrom !== null ? ` (trimmed from ${trimmedFrom})` : ''}`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
   })
 
   // ---- reviewers ----
@@ -726,6 +831,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       appendToPrompt(messages, await seriesSection(d, slug))
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
+      await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
+      appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
       // the schema names this reviewer's dimensions, so structured output and the repair retry both insist on them
       const schema = z.object({
@@ -733,16 +840,28 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         scores: z.object(Object.fromEntries(dims.map((x) => [x, z.number()]))),
         notes: z.string(),
         chapters: z.array(z.number()).default([]),
+        // every finding as a line: where, what is wrong, what to change (kept in the review file, so the rewrite gets all of them)
+        problems: z.array(z.string()).default([]),
         research_questions: z.array(z.string()).default([])
       })
-      const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2 })
+      const q = d.getQuality()
+      // a revise that comes with only good scores (and from a reviewer that isn't a must-pass gate) is a pass
+      const verdictOf = (v: z.infer<typeof schema>): 'pass' | 'revise' =>
+        v.verdict === 'revise' && !q.must_pass.includes(role) && Math.min(...Object.values(v.scores).map((x) => clamp(Number(x), 1, 10))) >= q.revise_below ? 'pass' : v.verdict
+      const first = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+      // a revise that says nothing usable is asked again; a book never fails over it (the last attempt keeps what there is)
+      const r = await withUsableNotes(ctx, messages, schema, first, {
+        effective: verdictOf,
+        notes: (v) => v.notes,
+        problems: (v) => v.problems,
+        retryLeft: ctx.job.attempts + 1 < (ctx.job.max_attempts ?? d.getFactory().max_attempts),
+        maxTokens: 6000
+      })
       run.addJson(r.cost, r.chat.model)
       // a claim that looks wrong and may not be in the notes: the researcher checks (and looks in the notes first)
       const researchJobs = await askFromReview(d, ctx.agent.id, slug, `the ${role.replace(/-/g, ' ')} doubts a claim in ${actN ? `act ${actN}` : 'the book'}`, r.value.research_questions)
       const scores: Record<string, number> = {}
       for (const [k, v] of Object.entries(r.value.scores)) scores[k.trim().toLowerCase().replace(/[\s-]+/g, '_')] = clamp(Number(v), 1, 10)
-      // a revise that comes with only good scores (and from a reviewer that isn't a must-pass gate) is a pass
-      const q = d.getQuality()
       const lowest = Math.min(...Object.values(scores))
       const verdict: 'pass' | 'revise' = r.value.verdict === 'revise' && !q.must_pass.includes(role) && lowest >= q.revise_below ? 'pass' : r.value.verdict
       const missing = dims.filter((x) => !(x in scores))
@@ -763,7 +882,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           agent: ctx.agent.id,
           model: r.chat.model.ref
         },
-        '\n' + r.value.notes.trim() + '\n'
+        '\n' + reviewBody(r.value.notes, r.value.problems) + '\n'
       )
       await made(slug, run)
       return { result: `${verdict}${verdict !== r.value.verdict ? ' (was revise, scores all >= ' + q.revise_below + ')' : ''}: ${JSON.stringify(scores)}`, resultPath: `books/${slug}/reviews/${name}` }
@@ -788,22 +907,24 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const isNote = /--note\d+$/.test(ctx.job.id)
     const checkNotes = isCheck ? await d.books.readText(slug, 'reviews', `ch-${String(n).padStart(2, '0')}-check.md`) : null
     const reviews = isLength || isCheck || isNote ? [] : await loadReviews(d, slug, round - 1)
+    const outline = await d.books.outline(slug)
+    const acts = fmt.long ? await d.books.acts(slug) : []
+    // the editors' notes that concern this chapter (the items that name other chapters are left out), not the notes on the whole book
+    const mine = chapterNotes(reviews.filter((r) => !(r.role === 'fact-checker' && fmt.nonfiction)), n, acts)
     const notes = isLength
       ? ctx.jobBody.trim()
       : isNote
         ? `From the book's owner, who read the draft (this comes first): ${ctx.jobBody.trim()}`
       : isCheck
         ? `From the continuity checker: ${checkNotes ? parseMd(checkNotes).body.trim() : '(no notes)'}`
-        : reviews
-          .filter((r) => r.verdict === 'revise')
-          .map((r) => (r.role === 'fact-checker' && fmt.nonfiction ? null : `- From the ${r.role.replace(/-/g, ' ')}: ${r.notes.trim()}`))
-          .filter((x): x is string => x !== null)
-          .join('\n')
+        : mine.text
     // a chapter in a flat tension stretch is rewritten to raise the tension (the developmental editor's tension report)
     const flat = !isLength && !isCheck && !isNote && Array.isArray(book.tension_rewrite) && (book.tension_rewrite as unknown[]).map(Number).includes(n)
     const tensionNote = flat ? `- Raise tension: this chapter is part of a flat stretch in the tension report (the developmental editor scored it ${(await readTensionOf(d, slug, n)) ?? 'low'} out of 10). Raise the stakes: add a sharper problem, a ticking clock, a loss or a hard choice, and end the chapter on a turn.` : ''
     const claimNote = fmt.nonfiction && !isLength && !isCheck && !isNote ? await factClaimNote(d, slug, round - 1, n) : ''
     const allNotes = [claimNote, notes, tensionNote].filter(Boolean).join('\n')
+    // a note about a weekday, a date or an earlier book may be wrong: the writer checks it against the calendar and keeps correct text
+    const calendarNote = `Notes about weekdays, dates, counts of years, or facts from earlier books of the series are open to judgement: check them against the calendar below and the series section; if the text is right, keep it.\n\n${await calendarFor(d, slug, current.body)}`
     let bibleText: string
     let researchText: string
     if (fmt.nonfiction) {
@@ -817,17 +938,25 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       bibleText = await d.books.bible(slug)
       researchText = researchBlock(researchItems)
     }
-    // a story with choices: the chapters that lead here and the ones its choices lead to, each with where it goes next
-    const branches = fmt.choices ? (await d.books.outline(slug))?.chapters ?? null : null
-    const near = branches ? new Set([...ancestors(branches, n), ...(branches.find((c) => c.n === n)?.choices ?? []).map((ch) => ch.to)]) : null
-    const otherChapters = chapters
-      .filter((c) => c.n !== n && (!near || near.has(c.n)))
-      .map((c) => {
-        const o = branches?.find((x) => x.n === c.n)
-        return `### Chapter ${c.n}: ${c.title}\n\n${c.body}${o ? `\n\n[${endLine(o)}]` : ''}`
-      })
-      .join('\n\n')
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'rewrite_chapter'), {
+    // the chapters right before and after in full (a story with choices: the ones that lead here and the ones its choices lead to), the others as summaries
+    const branches = fmt.choices ? outline?.chapters ?? null : null
+    const summaries = new Map<number, string>()
+    for (const c of chapters) {
+      if (c.n === n) continue
+      const file = fmt.long ? await d.books.readText(slug, 'summaries', `ch-${String(c.n).padStart(2, '0')}.md`) : null
+      summaries.set(c.n, (file ? parseMd(file).body.trim() : '') || outline?.chapters.find((o) => o.n === c.n)?.summary || '')
+    }
+    const around = otherChapters({ chapters, n, branches, summaryOf: (k) => summaries.get(k) ?? '', windowTokens: d.contextTokens('writer') })
+    ctx.context([
+      { name: `${around.full.length} neighbouring chapter(s) in full`, tokens: Math.round(chapters.filter((c) => around.full.includes(c.n)).reduce((s, c) => s + c.body.length, 0) / 4) },
+      { name: `${around.summaries} chapter summaries`, tokens: Math.round([...summaries.entries()].filter(([k]) => !around.full.includes(k)).reduce((s, [, t]) => s + t.length, 0) / 4) },
+      { name: `notes for this chapter (${mine.kept} of ${mine.total} items)`, tokens: Math.round(notes.length / 4) }
+    ])
+    // the words this chapter should have: its share of the book's target over the planned chapters (a length rewrite says its own number)
+    const target = perChapterTarget(book, outline, chapters.length)
+    const lengthWords = isLength ? Number(/about (\d+) words/.exec(ctx.jobBody)?.[1]) : NaN
+    const chapterWords = Number.isFinite(lengthWords) && lengthWords > 0 ? lengthWords : Math.round(clamp(current.words, 0.85 * target, 1.15 * target))
+    const { messages, version, template } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'rewrite_chapter'), {
       title: book.title,
       pitch: (await d.books.pitch(slug)) ?? '',
       bible: bibleText,
@@ -836,19 +965,54 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_n: n,
       chapter_title: current.title,
       chapter_text: current.body,
-      other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : otherChapters || '(this is the only chapter)',
-      chapter_words: Math.round(book.target_words / Math.max(1, chapters.length)),
+      other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : around.text || '(this is the only chapter)',
+      chapter_words: chapterWords,
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
-    if (branches) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n)))
-    appendToPrompt(messages, await storyBriefSection(d, slug))
-    appendToPrompt(messages, await seriesSection(d, slug))
-    appendToPrompt(messages, await sourceChaptersSection(d, slug, n, 'rewrite', fmt.name, ctx))
-    if (!isNote) appendToPrompt(messages, await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
-    const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6) })
-    const body = stripMarkers(stripLeadingHeading(cleanProse(r.text)))
+    const appended: string[] = []
+    const add = (text: string, whole = false) => {
+      if (!text) return
+      appendToPrompt(messages, text)
+      appended.push(whole ? text : sectionHead(text))
+    }
+    if (branches) {
+      const section = await loadChoicesSection(d.dataDir, 'rewrite', chapterPlace(branches, n))
+      add(section, true)
+      // a data folder whose _choices.md predates the reworded choices still gets the rule
+      if (!section.includes('CHOICES:')) add(CHOICES_RULE, true)
+    }
+    add(await storyBriefSection(d, slug))
+    add(await seriesSection(d, slug))
+    appendToPrompt(messages, calendarNote)
+    add(await sourceChaptersSection(d, slug, n, 'rewrite', fmt.name, ctx))
+    if (!isNote) add(await ownerNotesSection(d, slug, n)) // a note rewrite has the note as its notes already
+    if (fmt.script) add(placesBlock(lightBibleEntries(await d.books.bible(slug)).filter((e) => e.group === 'places').map((e) => e.name)), true)
+    const forbid = instructionLines(template, appended)
+    const maxTokens = Math.max(4000, current.words * 6)
+    let r = await run.chat({ messages, maxTokens, forbid })
+    let body = stripMarkers(chapterAnswer(ctx, forbid, r.text))
+    // a story with choices: the rewrite may end with reworded choices (`CHOICES:`). They are used when they keep the count and where each one leads.
+    if (branches) {
+      const split = splitChoicesBlock(body)
+      body = split.body
+      if (split.choices) {
+        const old = branches.find((c) => c.n === n)?.choices ?? []
+        const ok = split.choices.length === old.length && split.choices.every((c, i) => c.to === old[i]!.to && c.text.length >= 3 && c.text.length <= 120)
+        if (ok && (await d.books.setChoiceTexts(slug, n, split.choices.map((c) => c.text)))) ctx.log(`the choices of chapter ${n} were reworded: ${split.choices.map((c) => `"${c.text}"`).join(', ')}`)
+        else ctx.log(`the rewrite sent choices for chapter ${n} that change their number or where they lead (or are too short or long): ignored`)
+      }
+    }
     if (countWords(body) < 20) throw new Error(`the rewrite of chapter ${n} came back too short`)
+    // a round rewrite far over the target gets one request to cut it (a length rewrite says its own number, a note of the owner is their choice)
+    if (!isLength && !isNote) {
+      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens)
+      if (out.reply) {
+        r = out.reply
+        body = stripMarkers(out.body)
+      }
+    }
+    if (fmt.script) body = await settlePlaces(ctx, slug, n, body)
     await d.books.writeChapter(slug, { n, title: current.title, round, body, agent: ctx.agent.id, model: r.model.ref, fixes: isLength ? [...current.fixes, 'len'] : isCheck ? [...current.fixes, 'chk'] : current.fixes })
     await made(slug, run)
     return { result: `chapter ${n} rewritten (round ${round}): ${countWords(body)} words`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
@@ -963,7 +1127,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     }))
     await writeCoverHtml(d.dataDir, slug, { title, author: book.author ?? 'Unknown', genre: book.topic_name ?? book.genre, year, genreClass: cls })
     await made(slug, run)
-    if (d.memory.available()) {
+    if (d.memory.ready()) {
       try {
         await d.memory.getIndex().upsert({ file: `books/${slug}/book.md#blurb`, book: slug, kind: 'blurb', ref: 'blurb', text: r.value.blurb.trim() })
       } catch (err) {
@@ -973,7 +1137,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const epub = await d.books.buildEpubFile(slug)
     await d.requestCover(slug)
     if (book.topic) await d.topics.adjust(book.topic, { done: 1, inProgress: -1 })
-    await d.books.update(slug, () => ({ stage: 'published', published: new Date().toISOString() }))
+    // a book that is still over the format's ceiling when the publisher publishes it is marked, so the owner sees it
+    const wordTotal = (await d.books.chapters(slug)).reduce((s, c) => s + c.words, 0)
+    const over = wordTotal > fmt.words[1]
+    if (over) ctx.log(`warning: the book has ${wordTotal} words, over the format's ceiling of ${fmt.words[1]}; published anyway (length_over in book.md)`)
+    await d.books.update(slug, () => ({ stage: 'published', published: new Date().toISOString(), ...(over ? { length_over: true } : {}) }))
     d.emit({ type: 'book.stage', book: slug, stage: 'published' })
     return { result: `published "${title}" (score ${decision.score})`, resultPath: path.relative(d.dataDir, epub).split(path.sep).join('/') }
   })

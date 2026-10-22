@@ -25,6 +25,8 @@ export interface AgentView {
   override: string | null
   /** The book it is assigned to (only takes that book's jobs), or null. */
   pin: string | null
+  /** The assignment is exclusive: only agents assigned to the book this way take its jobs. */
+  pinExclusive: boolean
   state: AgentState
   paused: boolean
   task?: string

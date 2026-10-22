@@ -74,6 +74,44 @@ export function waysIn(chapters: BranchChapter[], n: number): { from: number; te
   return chapters.flatMap((c) => (c.choices ?? []).filter((ch) => ch.to === n).map((ch) => ({ from: c.n, text: ch.text })))
 }
 
+/** Added to a story-with-choices rewrite prompt whose data folder has no `CHOICES:` rule in `_choices.md` (the seed has it). */
+export const CHOICES_RULE =
+  'If the notes ask you to change what a choice says, end your answer with a line `CHOICES:` and then one line per choice, in the same order: `- <new wording> -> <chapter number>`. Keep where each choice leads. Write nothing after it.'
+
+/**
+ * A rewritten chapter of a story with choices may end with a `CHOICES:` line and one line per choice, `- <new wording> -> <chapter>`:
+ * the editors asked for the choice to be worded differently. Returns the text without that block, and the choices it held (null when
+ * there was no block, or when it holds no readable line). The block is always cut off the text.
+ */
+export function splitChoicesBlock(text: string): { body: string; choices: Choice[] | null } {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  let at = -1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^\s*[*_#> ]*CHOICES\s*:[*_ ]*$/i.test(lines[i]!)) {
+      at = i
+      break
+    }
+  }
+  if (at < 0) return { body: text, choices: null }
+  const choices: Choice[] = []
+  for (const line of lines.slice(at + 1)) {
+    const m = /^\s*(?:[-*\u2022]|\d+[.)])?\s*(.+?)\s*(?:->|\u2192|=>)\s*(?:chapter\s*)?(\d+)\s*\.?\s*$/i.exec(line)
+    if (m) choices.push({ text: m[1]!.replace(/^["'\u201c]+|["'\u201d]+$/g, '').replace(/\s+/g, ' ').trim(), to: Number(m[2]) })
+  }
+  return { body: lines.slice(0, at).join('\n').replace(/\s+$/, ''), choices: choices.length ? choices : null }
+}
+
+/** The body of outline.md under its frontmatter: the chapters (with their choices, for a story with choices), in acts for a long book. */
+export function renderOutlineBody(chapters: BranchChapter[], acts: { title: string; chapters: number[] }[] | undefined, withChoices: boolean): string {
+  return (
+    '\n' +
+    (acts
+      ? acts.map((a) => `## ${a.title}\n\n${a.chapters.map((n) => `${n}. **${chapters[n - 1]!.title}**: ${chapters[n - 1]!.summary}`).join('\n')}`).join('\n\n')
+      : chapters.map((c) => `${c.n}. **${c.title}**: ${c.summary}${c.source_chapters?.length ? ` (from source chapter ${c.source_chapters.join(', ')})` : ''}${withChoices ? `\n   - ${endLine(c)}` : ''}`).join('\n')) +
+    '\n'
+  )
+}
+
 /** One line on how a chapter ends: its choices, or that it is an ending. For outlines and the text reviewers read. */
 export function endLine(c: Pick<BranchChapter, 'choices' | 'ending'>): string {
   return c.choices?.length ? `Choices: ${c.choices.map((ch) => `"${ch.text}" (to chapter ${ch.to})`).join('; ')}` : `An ending: ${c.ending || 'the story ends here'}`

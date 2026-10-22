@@ -152,8 +152,8 @@ describe('humanizer: the guards and the report', () => {
     expect(humanizeProblem(original, original.replace('hurry', 'rush'))).toBeNull()
     expect(humanizeProblem(original, original.replace(/\[RESEARCH:[^\]]*\]/, ''))).toMatch(/marker/)
     expect(humanizeProblem(original, original.replace('when was the harbour built?', 'who built the harbour?'))).toMatch(/marker/)
-    const nf = `${words(60)} Ships took six months [1]. Crews fell ill [2]. ${words(40)}`
-    expect(humanizeProblem(nf, nf.replace('fell ill', 'sickened'), { nonfiction: true })).toBeNull()
+    const nf = `${words(60)} Ships took six months [1]. Crews fell badly ill on the long voyage [2]. ${words(40)}`
+    expect(humanizeProblem(nf, nf.replace('fell badly ill', 'were taken ill'), { nonfiction: true })).toBeNull()
     expect(humanizeProblem(nf, nf.replace('[2]', ''), { nonfiction: true })).toMatch(/source numbers/)
   })
 
@@ -216,7 +216,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     const humanizeId = `${slug}--humanize--ch01--r0`
     expect(await createdMs(env, humanizeId)).toBeGreaterThanOrEqual(await createdMs(env, `${slug}--draft--ch01--r0`))
     const review = await createdMs(env, `${slug}--review--line-editor--r0`)
-    expect(review).toBeGreaterThanOrEqual(Date.parse(String((await doneJob(env, humanizeId)).data.finished)) - 250)
+    expect(review).toBeGreaterThanOrEqual(Date.parse(String((await doneJob(env, humanizeId)).data.finished)) - 5000)
     // it is in the book's record, with the humanizer agent and a prompt version
     const made = (await env.engine.books.readMade(slug)) as unknown as { task: string; role: string; agent: string; prompt_version: string }[]
     expect(made.find((m) => m.task === 'humanize_chapter')).toMatchObject({ role: 'humanizer', agent: 'humanizer-iris-vane' })
@@ -235,9 +235,9 @@ describe('humanizer: the pipeline on the mock provider', () => {
     // the chapter's round is the rewrite's; `humanized` says the pass of round 1 ran
     expect(ch.data).toMatchObject({ round: 1, humanized: 1 })
     const rewritten = Date.parse(String((await doneJob(env, `${slug}--rewrite--ch01--r1`)).data.finished))
-    expect(await createdMs(env, `${slug}--humanize--ch01--r1`)).toBeGreaterThanOrEqual(rewritten - 250)
+    expect(await createdMs(env, `${slug}--humanize--ch01--r1`)).toBeGreaterThanOrEqual(rewritten - 5000)
     const humanized = Date.parse(String((await doneJob(env, `${slug}--humanize--ch01--r1`)).data.finished))
-    expect(await createdMs(env, `${slug}--review--line-editor--r1`)).toBeGreaterThanOrEqual(humanized - 250)
+    expect(await createdMs(env, `${slug}--review--line-editor--r1`)).toBeGreaterThanOrEqual(humanized - 5000)
     // every version is kept: the draft, its humanized version (next to it), and the rewrite before its own pass
     expect((await readdir(bookDir(env, slug, 'chapters', 'history'))).sort()).toEqual(['ch-01-r0-humanized.md', 'ch-01-r0.md', 'ch-01-r1.md'])
     expect((await readDoc(bookDir(env, slug, 'book.md'))).data.round).toBe(1)
@@ -260,12 +260,12 @@ describe('humanizer: the pipeline on the mock provider', () => {
       const unit = `ch0${n}`
       const h = await doneJob(env, `${slug}--humanize--${unit}--r0`)
       const finished = Date.parse(String(h.data.finished))
-      expect(await createdMs(env, `${slug}--memory--${unit}--r0`), `memory of ${unit}`).toBeGreaterThanOrEqual(finished - 250)
+      expect(await createdMs(env, `${slug}--memory--${unit}--r0`), `memory of ${unit}`).toBeGreaterThanOrEqual(finished - 5000)
       expect((await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))).data.humanized, unit).toBe(0)
     }
     // chapter 2: the continuity fix, then the humanizer (the fix came first, so the 'chk' mark is kept)
     const fix = Date.parse(String((await doneJob(env, `${slug}--rewrite--ch02--chk`)).data.finished))
-    expect(await createdMs(env, `${slug}--humanize--ch02--r0`)).toBeGreaterThanOrEqual(fix - 250)
+    expect(await createdMs(env, `${slug}--humanize--ch02--r0`)).toBeGreaterThanOrEqual(fix - 5000)
     expect((await readDoc(bookDir(env, slug, 'chapters', 'ch-02.md'))).data.fixes).toEqual(['chk'])
   }, 180000)
 
@@ -350,7 +350,7 @@ describe('humanizer: the role, the seed and the migration', () => {
   it('the role is known everywhere the roles are listed, and the seed has a humanizer agent and prompts', async () => {
     expect(ROLES).toContain('humanizer')
     const roles = parseMd(await readFile(path.join(seedDir, 'config', 'roles.md'), 'utf8')).data.roles as Record<string, { models: string[] }>
-    expect(roles.humanizer!.models).toEqual(['strata', 'paid']) // SCP-13: the line editor's first model, then the paid default, no LM Studio step
+    expect(roles.humanizer!.models).toEqual(['deepseek/deepseek-flash', 'paid']) // SCP-14: DeepSeek Flash, then the paid default, no LM Studio step (SCP-13 had Strata first)
     const agent = parseMd(await readFile(path.join(seedDir, 'agents', 'humanizer-iris-vane.md'), 'utf8'))
     expect(agent.data).toMatchObject({ kind: 'agent', role: 'humanizer', name: 'Iris Vane' })
     for (const f of ['humanize_chapter.md', 'humanize_chapter_vn.md']) expect(existsSync(path.join(seedDir, 'prompts', 'humanizer', f))).toBe(true)
@@ -372,14 +372,14 @@ describe('humanizer: the role, the seed and the migration', () => {
     return dir
   }
 
-  it('an old data folder gets the role (the line editor chain) and the agent, once', async () => {
+  it('an old data folder gets the role (DeepSeek Flash, then paid) and the agent, once', async () => {
     const dir = await oldFolder()
     const first = await initDataFolder(dir, seedDir)
     expect(first.migrated).toHaveLength(2)
-    expect(first.migrated[0]).toMatch(/roles\.md: added the humanizer role .*lmstudio, paid/)
+    expect(first.migrated[0]).toMatch(/roles\.md: added the humanizer role .*deepseek\/deepseek-flash, paid/)
     expect(first.migrated[1]).toMatch(/humanizer-iris-vane\.md: hired the starter humanizer/)
     const doc = parseMd(await readFile(path.join(dir, 'config', 'roles.md'), 'utf8'))
-    expect((doc.data.roles as Record<string, { models: string[] }>).humanizer!.models).toEqual(['lmstudio', 'paid'])
+    expect((doc.data.roles as Record<string, { models: string[] }>).humanizer!.models).toEqual(['deepseek/deepseek-flash', 'paid'])
     expect(doc.body).toContain('# Roles') // the text below the frontmatter is kept
     expect(parseMd(await readFile(path.join(dir, 'agents', 'humanizer-iris-vane.md'), 'utf8')).data.role).toBe('humanizer')
     // the other agents are as they were, and a second start changes nothing

@@ -173,6 +173,8 @@ Suggested, so the parser and the image steps agree on one structure:
 
 `SCENE: <place>, <time>`: the text before the last comma is the place, the rest the time. If there is no comma, the whole text is the place.
 
+The MCP tool `get_script {book, chapter?}` returns this JSON for a script book at any stage (`parseScript` and `parseLightBible` in `src/engine/publish/script.ts`). A `## heading` also opens a scene, the narration right after a `SCENE:` line up to the first cast or speaker line is the scene's `background`, a `---` is a `break` beat, and speaker names are written as the bible has them when one matches (else as they were written, in capitals).
+
 ## Adapting a book
 
 Scriptorium can turn a published prose book into a visual novel script (the script writer). In the library, open a published book's card and press **Adapt to visual novel**; the Script writer panel asks for the kind (linear, or with choices), an optional title and notes for the adapter. The same from MCP: `adapt_book {book, format, title?, notes?, models?}`. The owner picks linear or choices for every book.
@@ -185,6 +187,7 @@ Scriptorium can turn a published prose book into a visual novel script (the scri
 - The writer gets the full text of the source chapters of the chapter it writes (cut from the middle when it would not fit the model's window), and writes it as script scenes: the events, order, names and places stay, inner monologue and long description go.
 - With choices, the source's ending stays as one canon path through the map (`prompts/_choices.md`, section `adapt`); the other paths branch off it.
 - The humanizer runs on the script like on any visual novel. The book card and the whiteboard show "Adapted from <title>".
+- `SCENE:` places use the bible's names: the writer is given the bible's places, a place written differently is renamed to the bible's name after the answer, and a new place is added to the bible's `## Places` (with the first narration line of its scene), so every scene maps to a place at import.
 
 ## In Scriptorium
 

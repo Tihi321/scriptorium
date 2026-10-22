@@ -13,6 +13,7 @@ import type { KeyResolver } from './keys'
 import { MockProvider } from './mock'
 import { OpenAiCompatClient } from './openaiCompat'
 import type { ListedModel } from './openaiCompat'
+import { ProviderError, ServerDownError } from './types'
 import type { ProviderClient } from './types'
 
 export interface ProviderInfo {
@@ -494,9 +495,18 @@ export class ModelRegistry {
     if (!m) throw new Error('no embedding model in config/roles.md')
     const client = m.provider.client
     if (!client) throw new Error(`provider ${m.provider.id} is not available: ${m.provider.unavailableReason}`)
-    if (client instanceof OpenAiCompatClient && /nomic/i.test(m.id)) return client.embedWithPrefix(m.id, texts, kind, signal)
-    if (!client.embed) throw new Error(`provider ${m.provider.id} cannot embed`)
-    return client.embed(m.id, texts, signal)
+    try {
+      if (client instanceof OpenAiCompatClient && /nomic/i.test(m.id)) return await client.embedWithPrefix(m.id, texts, kind, signal)
+      if (!client.embed) throw new Error(`provider ${m.provider.id} cannot embed`)
+      return await client.embed(m.id, texts, signal)
+    } catch (err) {
+      // the server is not running: down for every job until it answers again (the engine checks it every 10 seconds)
+      if (err instanceof ProviderError && err.unreachable) {
+        this.markDown(m.provider)
+        throw new ServerDownError(`the embeddings server ${m.provider.id} is not running (${m.provider.baseUrl ?? 'no address'})`, m.provider.id)
+      }
+      throw err
+    }
   }
 }
 

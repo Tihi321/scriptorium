@@ -11,21 +11,16 @@ import { buildEpub } from '../publish/epub'
 import { writeReaderDir } from '../publish/reader'
 import { buildReferences, citedNumbers, FactBase } from '../memory/factbase'
 import { buildArticleHtml, buildArticleMarkdown } from '../publish/article'
-import { endLine, isBranching } from './branches'
+import { endLine, isBranching, renderOutlineBody } from './branches'
+import { slugify as slugOf } from '../../shared/slug'
 import type { Choice } from './branches'
 
 export const MADE_COLUMNS = ['job', 'task', 'role', 'unit', 'round', 'agent', 'model', 'prompt_version', 'cost_usd', 'ms']
 
 export const pad2 = (n: number) => String(n).padStart(2, '0')
 
-export const slugify = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'untitled'
+/** A book's folder name: at most 40 characters and 8 words, never cut inside a word (SCP-14). Existing books keep their slugs. */
+export const slugify = (s: string) => slugOf(s, { max: 40, maxWords: 8, fallback: 'untitled' })
 
 /** Stages in which a book needs no more work. */
 export const TERMINAL_BOOK_STAGES = new Set(['published', 'rejected', 'failed'])
@@ -257,6 +252,26 @@ export class BookStore {
       ...(Array.isArray(c.source_chapters) && c.source_chapters.length ? { source_chapters: (c.source_chapters as unknown[]).map(Number).filter((x) => Number.isInteger(x) && x > 0) } : {})
     }))
     return { chapters, body: doc.body }
+  }
+
+  /**
+   * Rewords the choices at the end of chapter `n` in outline.md (a rewrite asked for it): the same number of choices, each leading where it led,
+   * with new texts. The outline's body is written again from the frontmatter. Returns false when the chapter has other choices than these.
+   */
+  async setChoiceTexts(slug: string, n: number, texts: string[]): Promise<boolean> {
+    const file = this.file(slug, 'outline.md')
+    const raw = await this.readText(slug, 'outline.md')
+    if (raw === null) return false
+    const doc = parseMd(raw)
+    const chapters = Array.isArray(doc.data.chapters) ? (doc.data.chapters as Record<string, unknown>[]) : []
+    const entry = chapters.find((c, i) => Number(c.n ?? i + 1) === n)
+    const choices = Array.isArray(entry?.choices) ? (entry!.choices as Record<string, unknown>[]) : []
+    if (!entry || choices.length === 0 || choices.length !== texts.length) return false
+    choices.forEach((c, i) => (c.text = texts[i]))
+    await writeMd(file, doc.data, doc.body)
+    const outline = await this.outline(slug)
+    await writeMd(file, doc.data, renderOutlineBody(outline?.chapters ?? [], Array.isArray(doc.data.acts) ? (doc.data.acts as { title: string; chapters: number[] }[]) : undefined, true))
+    return true
   }
 
   async bible(slug: string): Promise<string> {

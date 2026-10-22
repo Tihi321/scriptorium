@@ -4,13 +4,19 @@ import type { Scheduler } from '../queue/scheduler'
 import { CAST, LINE, SCENE } from '../publish/xhtml'
 import { pad2, countWords } from './books'
 import { cleanProse } from './llm'
+import { instructionLines, stripTrailingLeak } from './leak'
 import { buildMessages } from './prompts'
 import { bibleFor } from './nfcontext'
+import { lightBibleEntries } from './series'
+import { canonicalScenes } from './scriptPlaces'
 import { formatVars, recordMade, Run, stripLeadingHeading, storyBriefSection, unitNumber, variant } from './handlers'
 import type { PipelineDeps } from './handlers'
 
 /** The humanized chapter may differ from the original by this share of its words (either way), else the original is kept. */
 export const HUMANIZE_WORD_TOLERANCE = 0.1
+
+/** The humanized chapter is refused when its share of verbless fragments rose by more than this, and by half again or more. */
+export const FRAGMENT_RISE = 0.08
 
 /** Phrases and habits that make prose read as machine-written. `min`: how often it has to occur in one chapter to be worth a mention. */
 const TELLS: { label: string; re: RegExp; min: number }[] = [
@@ -96,6 +102,9 @@ export function numberTokens(text: string): Set<string> {
 
 const NAME_WORD = /\p{Lu}[\p{L}\p{M}'’-]*/gu
 
+/** Units and abbreviations that are written with a capital and are not names ("50 Hz", "3 GHz", "12 MW"). */
+const UNITS = new Set(['Hz', 'MHz', 'GHz', 'THz', 'MW', 'GW', 'TW', 'Wh', 'Ah', 'Pa', 'MPa', 'GPa', 'GB', 'MB', 'KB', 'TB', 'Mbps', 'Gbps', 'Kbps'])
+
 const nameKey = (w: string) => w.toLowerCase().replace(/['’]s$/, '').replace(/^['’-]+|['’-]+$/g, '')
 
 /**
@@ -114,10 +123,83 @@ export function newNames(text: string, known: string): string[] {
     if (lead) continue
     const w = m[0]
     if (w.length < 2) continue // "I"
+    // a unit or an abbreviation next to a number is not a name ("50 Hz", "the hum at 50 Hz")
+    if (UNITS.has(w) || /\d[\d.,]*\s*$/.test(before)) continue
     const key = nameKey(w)
     if (key && !have.has(key) && !out.includes(w)) out.push(w)
   }
   return out
+}
+
+const AUXILIARIES = new Set(
+  'is are was were be been being am has have had do does did can could will would shall should may might must'.split(' ')
+)
+/** Irregular past tenses and common verbs that carry a sentence without an `-ed` ending. */
+const COMMON_VERBS = new Set(
+  'said ran went saw took came made knew felt found heard left held told thought stood sat got gave kept began fell grew lay met put rose slept spoke swam threw woke wrote brought caught drew drove flew hid hung lost paid rode rang sang sent shook shut sank spent struck taught tore understood won'.split(' ')
+)
+
+/** The sentence has a verb cue: an auxiliary or a modal, a past tense, a pronoun followed by a word, or a name followed by a word ending in -s. */
+function hasVerbCue(sentence: string): boolean {
+  const words = sentence.toLowerCase().match(/[\p{L}']+/gu) ?? []
+  if (words.some((w) => AUXILIARIES.has(w) || COMMON_VERBS.has(w) || (w.length > 3 && w.endsWith('ed')))) return true
+  if (/\b(?:i|you|he|she|it|we|they)\s+[\p{L}']+/iu.test(sentence)) return true
+  return /\b\p{Lu}[\p{Ll}]+\s+[\p{Ll}]{2,}s\b/u.test(sentence)
+}
+
+/**
+ * The share of the narration's sentences that are fragments: three words or fewer, or with no verb cue. Speech inside quotes is left out,
+ * and so are the SCENE, ON SCREEN and speaker lines of a script (only its narration lines count).
+ */
+export function fragmentShare(text: string, script = false): number {
+  let narration = text.replace(/\r\n/g, '\n')
+  if (script) {
+    narration = narration
+      .split('\n')
+      .filter((l) => {
+        const line = l.trim()
+        if (!line || /^#{1,6}\s/.test(line) || /^(\*\s*){3,}$|^-{3,}$/.test(line) || SCENE.test(line) || CAST.test(line)) return false
+        const m = LINE.exec(line)
+        return !(m && !/^(scene|on screen)$/i.test(m[1]!.trim()))
+      })
+      .join('\n')
+  } else {
+    narration = narration.replace(/"[^"\n]*"|\u201c[^\u201d]*\u201d/g, ' ')
+  }
+  const sentences = narration
+    .split(/(?<=[.!?\u2026])["\u201d')\]]*\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => /[\p{L}\p{N}]/u.test(s))
+  if (sentences.length === 0) return 0
+  const fragments = sentences.filter((s) => (s.match(/[\p{L}\p{N}']+/gu) ?? []).length <= 3 || !hasVerbCue(s)).length
+  return fragments / sentences.length
+}
+
+const ENGLISH_WORDS = new Set(
+  ('the and of to a in is was he she it you that not for on with as his her had have but they at be this from or by are were we i what when there all would their said an so if out up one about who them then no will my me him could into just over than been do did does its your more some how now only can like back down off after before where why which here still even too very because through while again never our us these those any much own other both each every such until though during without between against under around once away must should might may am has'
+  ).split(' ')
+)
+const FOREIGN_WORDS = new Set(
+  'le la les des est je vous pas que et une dans pour avec nous elle el los las es y por con para pero del der die das und ist nicht ich ein eine mit von auf il che non di per sono della nel'.split(' ')
+)
+
+/** The share of English function words among the words of a text (0 for a text with no words). */
+export function englishShare(text: string): number {
+  const words = text.toLowerCase().match(/[\p{L}']+/gu) ?? []
+  return words.length ? words.filter((w) => ENGLISH_WORDS.has(w)).length / words.length : 0
+}
+
+/** The lines of six or more words that are not English: almost no English function word, and two or more French, Spanish, German or Italian ones. */
+export function foreignLines(text: string): number {
+  let n = 0
+  for (const line of text.split('\n')) {
+    const words = line.toLowerCase().match(/[\p{L}']+/gu) ?? []
+    if (words.length < 6) continue
+    const english = words.filter((w) => ENGLISH_WORDS.has(w)).length / words.length
+    const foreign = words.filter((w) => FOREIGN_WORDS.has(w)).length
+    if (english < 0.1 && foreign >= 2) n++
+  }
+  return n
 }
 
 /**
@@ -143,6 +225,14 @@ export function humanizeProblem(original: string, revised: string, opts: { scrip
   if (lost.length || added.length) return `the numbers changed (${[...lost.map((x) => `lost ${x}`), ...added.map((x) => `added ${x}`)].slice(0, 6).join(', ')})`
   const fresh = newNames(revised, `${original}\n${opts.bible ?? ''}`)
   if (fresh.length) return `it brought in a name that is not in the chapter or the bible (${fresh.slice(0, 5).join(', ')})`
+  // SCP-14: a version that broke sentences into verbless fragments, or changed the language of lines, is not livelier, only worse
+  const frag0 = fragmentShare(original, opts.script)
+  const frag1 = fragmentShare(revised, opts.script)
+  if (frag1 - frag0 > FRAGMENT_RISE && frag1 > frag0 * 1.5) return `it broke sentences into fragments (${Math.round(frag0 * 100)}% before, ${Math.round(frag1 * 100)}% after)`
+  const foreign0 = foreignLines(original)
+  const foreign1 = foreignLines(revised)
+  const english0 = englishShare(original)
+  if (foreign1 > foreign0 || (english0 > 0 && englishShare(revised) < english0 * 0.7)) return `it changed the language of ${Math.max(1, foreign1 - foreign0)} line(s)`
   if (opts.script) {
     const a = scriptStructure(original)
     const b = scriptStructure(revised)
@@ -189,15 +279,31 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
       previous_ending: previousEnding ? `How the previous chapter ended (for the voice only, do not write it again):\n${previousEnding}` : '',
       ...formatVars(fmt, book.target_words)
     }
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'humanizer', variant(fmt, 'humanize_chapter'), vars)
+    const { messages, version, template } = await buildMessages(d.dataDir, ctx, 'humanizer', variant(fmt, 'humanize_chapter'), vars)
     run.version = version
     const owner = await storyBriefSection(d, slug)
     if (owner) messages[messages.length - 1]!.content += `\n\n${owner}`
     const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6), temperature: 0.8 })
-    const revised = stripLeadingHeading(cleanProse(r.text))
-    const problem = humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
+    let revised = stripLeadingHeading(cleanProse(r.text))
+    // a model that ends with the instructions it was given: the tail is cut, a leak in the middle refuses the version
+    const forbid = instructionLines(template)
+    const leak = stripTrailingLeak(revised, forbid)
+    let leakProblem: string | null = null
+    if (!leak) leakProblem = 'it repeats the task instructions in the middle of the text'
+    else if (leak.cut) {
+      ctx.log(`humanizer: the answer ended with the task instructions: cut off`)
+      revised = leak.text
+    }
+    const problem = leakProblem ?? humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
     if (problem) ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
-    const body = problem ? current.body : revised
+    let body = problem ? current.body : revised
+    // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently)
+    if (!problem && fmt.script) {
+      const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)
+      const canon = canonicalScenes(body, places)
+      for (const r of canon.renamed) ctx.log(`humanizer: SCENE place "${r.from}" written as the bible's "${r.to}"`)
+      body = canon.body
+    }
     // the round is the chapter's own (it stays), `humanized` says in which book round the pass ran: a pass that was refused counts too, so it is not asked again
     await d.books.writeChapter(slug, {
       n,

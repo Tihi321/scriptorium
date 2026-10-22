@@ -12,6 +12,8 @@ export interface RequestMeta {
   book?: string
   agent?: string
   unit?: string
+  /** Instruction lines of the prompt that an answer must not repeat (see pipeline/leak.ts): the client queue refuses a prose answer that does. */
+  forbid?: string[]
 }
 
 export interface ChatRequest {
@@ -57,6 +59,20 @@ export class ProviderError extends Error {
   ) {
     super(message)
     this.name = 'ProviderError'
+  }
+}
+
+/**
+ * A local server a job needs is not running (connection refused). Not a failure of the job: the scheduler requeues it for later
+ * without counting an attempt, and the server is marked down for every job until it answers again.
+ */
+export class ServerDownError extends Error {
+  constructor(
+    message: string,
+    readonly provider: string
+  ) {
+    super(message)
+    this.name = 'ServerDownError'
   }
 }
 

@@ -18,7 +18,7 @@ Tension so far (1 = flat, 10 = peak): {{tension_so_far}}
 Act {{act_n}} in full:
 {{act_text}}
 
-Say what works, and what the writer should do in the next act (raise the stakes, close a thread, vary the scenes, avoid repeating a device). For every chapter of this act give a tension score from 1 to 10. Say "revise" only for a serious structural problem. Score structure from 1 to 10.
+Say what works, and what the writer should do in the next act (raise the stakes, close a thread, vary the scenes, avoid repeating a device). For every chapter of this act give a tension score from 1 to 10. Say "revise" only for a serious structural problem. Score structure from 1 to 10. "chapters" holds chapter numbers only, as plain numbers. For a "revise", give every problem as one string in "problems": where it is (the chapter), what is wrong, and what to change.
 
 Reply with one JSON object like this:
-{"verdict": "pass", "scores": {"structure": 8}, "notes": "...", "chapters": [], "tension": [{"chapter": 1, "score": 5}]}
+{"verdict": "pass", "scores": {"structure": 8}, "notes": "...", "chapters": [], "problems": [], "tension": [{"chapter": 1, "score": 5}]}

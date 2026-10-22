@@ -1,6 +1,6 @@
 import { briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
-import { entryKey } from '../memory/bible'
+import { entryKey, sameName } from '../memory/bible'
 import type { Bible, BibleEntry } from '../memory/bible'
 import { bookRefs } from '../store/series'
 import type { BookRef, SeriesFile, SeriesStore } from '../store/series'
@@ -25,16 +25,7 @@ export const headTail = (text: string, head: number, tail: number): string => {
   return t.length <= head + tail ? t : `${t.slice(0, head).trimEnd()} [...] ${t.slice(-tail).trimStart()}`
 }
 
-const words = (name: string) => new Set(entryKey(name).split('-').filter(Boolean))
-
-/** Two names are the same person or place when one has all the words of the other ("Dec Hartley", "Declan 'Dec' Hartley"). */
-export function sameName(a: string, b: string): boolean {
-  const x = words(a)
-  const y = words(b)
-  if (!x.size || !y.size) return false
-  const [small, big] = x.size <= y.size ? [x, y] : [y, x]
-  return [...small].every((w) => big.has(w))
-}
+export { sameName }
 
 export interface SeriesPlace {
   series: SeriesFile
@@ -64,8 +55,11 @@ export async function earlierSeriesBooks(d: Deps, slug: string): Promise<string[
 export async function bibleEntriesOf(d: { books: BookStore; bible: Bible }, slug: string): Promise<BibleEntry[]> {
   const long = await d.bible.entries(slug)
   if (long.length) return long
-  // a light bible is one file: "- **Name**: description" lines under Characters (and Places, for a visual novel)
-  const text = await d.books.bible(slug)
+  return lightBibleEntries(await d.books.bible(slug))
+}
+
+/** The entries of a light bible's text: "- **Name**: description" lines under Characters (and Places, for a visual novel). */
+export function lightBibleEntries(text: string): BibleEntry[] {
   const out: BibleEntry[] = []
   let group: 'characters' | 'places' = 'characters'
   for (const line of text.split('\n')) {
@@ -75,7 +69,7 @@ export async function bibleEntriesOf(d: { books: BookStore; bible: Bible }, slug
       continue
     }
     const m = /^- \*\*(.+?)\*\*: (.*)$/.exec(line)
-    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', text: m[2]!.trim() })
+    if (m) out.push({ group, slug: entryKey(m[1]!), name: m[1]!.trim(), voice: '', aliases: [], text: m[2]!.trim() })
   }
   return out
 }

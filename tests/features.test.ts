@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile, rm } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import nodemailer from 'nodemailer'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -25,6 +25,9 @@ beforeAll(async () => {
       return t
     }
   })
+  // one book only: the factory would start the next one when this one is published, and its jobs would race with the tests below
+  await waitFor(async () => (await readdir(path.join(env.dir, 'books'))).length > 0, 30000, 'the first book')
+  await env.engine.handleCommand({ type: 'setTopicActive', id: 'jfic-bedtime-and-dreams', active: false })
   slug = (await waitFor(async () => {
     const b = (await env.engine.snapshot()).books.find((x) => x.stage === 'published')
     return b?.slug ?? null
@@ -81,7 +84,7 @@ describe('snapshot', () => {
     expect(book.score).toBeGreaterThanOrEqual(7)
     expect(book.scores.age_fit).toBe(8)
     expect(book.publishedAt).toBeTruthy()
-    expect(snap.topics.find((t) => t.id === 'jfic-bedtime-and-dreams')).toMatchObject({ active: true, done: 1, inProgress: 0, section: 'Juvenile Fiction', kind: 'juvenile-fiction' })
+    expect(snap.topics.find((t) => t.id === 'jfic-bedtime-and-dreams')).toMatchObject({ active: false, done: 1, inProgress: 0, section: 'Juvenile Fiction', kind: 'juvenile-fiction' })
     expect(snap.settings).toMatchObject({ smtpPort: 587, smtpSecure: false })
     expect(snap.secretsSet).not.toContain('nothing')
   })

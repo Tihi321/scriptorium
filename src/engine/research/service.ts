@@ -123,6 +123,8 @@ export interface AskInput {
   askedBy: string
   /** Why it is asked, for the researcher's terminal ("chapter 3 of the draft"). */
   purpose?: string
+  /** An article's question about what happened in the last days or weeks: the search asks for news (the last 7 days). Left out: the researcher decides from the words of the question. */
+  news?: boolean
 }
 
 export type AskStatus = 'created' | 'exists' | 'limit' | 'empty' | 'no-researcher'
@@ -197,7 +199,8 @@ export class ResearchService {
         label: question.length > 100 ? question.slice(0, 97) + '...' : question,
         question,
         purpose: i.purpose ?? '',
-        ...(i.idea ? { idea: i.idea } : {})
+        ...(i.idea ? { idea: i.idea } : {}),
+        ...(i.news !== undefined ? { news: i.news } : {})
       } as Parameters<JobStore['enqueue']>[0],
       `Question: ${question}\n\nAsked by: ${i.askedBy}${i.purpose ? `\nWhy: ${i.purpose}` : ''}\nFor: ${book ? `the book ${book}` : i.idea ? `the idea ${i.idea}` : 'the whole library (shared notes)'}\n`
     )

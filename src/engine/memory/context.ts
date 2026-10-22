@@ -76,6 +76,8 @@ export interface DraftContextInput {
   research?: { name: string; text: string }[]
   /** The earlier books of the book's series: passages of their chapters and summaries are searched too (after the book's own). */
   seriesBooks?: string[]
+  /** Where to say that a search was skipped. */
+  log?: (message: string) => void
 }
 
 /**
@@ -125,8 +127,15 @@ export async function buildDraftContext(i: DraftContextInput): Promise<PackedCon
     if (t) items.push({ name: `summary of chapter ${c}`, text: `### Chapter ${c}\n${t.replace(/^---[\s\S]*?---\s*/, '').trim()}`, priority: 4 + (n - c) * 0.01, order: 6 })
   }
 
+  // a search that fails (the embeddings server is down) only leaves the passages out: the chapter is written from the bible and the summaries
+  let skipped = ''
   if (i.index && entry) {
-    const hits = await i.index.search(`${entry.title}. ${entry.summary}`, { book: slug, kinds: ['chapter', 'summary'], k: 12 })
+    let hits: Awaited<ReturnType<MemoryIndex['search']>> = []
+    try {
+      hits = await i.index.search(`${entry.title}. ${entry.summary}`, { book: slug, kinds: ['chapter', 'summary'], k: 12 })
+    } catch (err) {
+      skipped = (err as Error).message
+    }
     let rank = 0
     for (const h of hits) {
       const m = /ch-(\d+)/.exec(h.file)
@@ -137,10 +146,17 @@ export async function buildDraftContext(i: DraftContextInput): Promise<PackedCon
     }
   }
 
-  if (i.index && entry && i.seriesBooks?.length) {
-    const hits = await i.index.search(`${entry.title}. ${entry.summary}`, { books: i.seriesBooks, kinds: ['chapter', 'summary'], k: 8 })
+  if (i.index && entry && i.seriesBooks?.length && !skipped) {
+    let hits: Awaited<ReturnType<MemoryIndex['search']>> = []
+    try {
+      hits = await i.index.search(`${entry.title}. ${entry.summary}`, { books: i.seriesBooks, kinds: ['chapter', 'summary'], k: 8 })
+    } catch (err) {
+      skipped = (err as Error).message
+    }
     hits.slice(0, 4).forEach((h, rank) => items.push({ name: `series passage: ${h.book} ${h.ref} #${h.idx}`, text: `(${h.book}, ${h.ref})\n${h.text}`, priority: 3.5 + rank * 0.01, order: 7.5 }))
   }
+
+  if (skipped) i.log?.(`search skipped: ${skipped}; the chapter is written from the bible and the summaries`)
 
   if (n > 1) {
     const prev = (await books.chapters(slug)).find((c) => c.n === n - 1)

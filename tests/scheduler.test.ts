@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ProviderError } from '../src/engine/models/types'
+import { ProviderError, ServerDownError } from '../src/engine/models/types'
+import { emptyBrief } from '../src/shared/brief'
 import { parseMd } from '../src/shared/md'
 import type { EngineEvent } from '../src/shared/protocol'
 import { watchDataFolder } from '../src/engine/store/watcher'
@@ -596,5 +597,151 @@ describe('book models in the scheduler', () => {
     expect((await env.engine.books.read('b1'))!.data.role_models).toEqual({})
     await waitFor(() => q.counts().waiting === 0, 5000, 'the client task dropped')
     await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 8000, 'job done on the mock')
+  })
+})
+
+describe('blocked providers wait visibly', () => {
+  const twoProviders = (roles: string[]) =>
+    makeEnv({ providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }], roles: { writer: roles }, agents: [{ role: 'writer', name: 'Ann' }] })
+  const queuedJob = async (e: TestEnv, id: string) => parseMd(await readFile(path.join(e.dir, 'jobs', 'queued', `${id}.md`), 'utf8')).data
+
+  it('a day-full provider is skipped at once while another model of the role can take the job', async () => {
+    env = await twoProviders(['a/x', 'b/y'])
+    registerChat(env)
+    env.engine.router.limiter.markDayFull(env.engine.registry.providers.get('a')!)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8')).data).toMatchObject({ model: 'b/y', attempts: 0 })
+  })
+
+  it('when the only model used up its day the job waits, with the reason, and no attempt is spent', async () => {
+    env = await twoProviders(['a/x'])
+    registerChat(env)
+    env.engine.router.limiter.markDayFull(env.engine.registry.providers.get('a')!)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(() => env!.engine.scheduler.agentInfo('writer-ann').state === 'waiting-provider', 5000, 'the agent waits for the provider')
+    expect(env.engine.scheduler.agentInfo('writer-ann').task).toMatch(/a\/x: used up its requests for today \(resets \d\d:\d\d UTC\)/)
+    expect(env.engine.scheduler.blockedJobs()).toMatchObject([{ job: 'b1--t--u1--r0', role: 'writer', agent: 'writer-ann', reason: expect.stringContaining('used up') }])
+    await sleep(300)
+    expect(await jobsIn(env, 'running')).toEqual([])
+    expect((await queuedJob(env, 'b1--t--u1--r0')).attempts).toBe(0)
+  })
+
+  it('a used-up provider and a server that is down: the job waits with both reasons, then runs on the server when it answers', async () => {
+    env = await twoProviders(['a/x', 'b/y'])
+    registerChat(env)
+    const b = env.engine.registry.providers.get('b')!
+    env.engine.router.limiter.markDayFull(env.engine.registry.providers.get('a')!)
+    b.down = true
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(() => env!.engine.scheduler.blockedJobs().length === 1, 5000, 'the job is blocked')
+    const reason = env.engine.scheduler.blockedJobs()[0]!.reason
+    expect(reason).toContain('a/x: used up')
+    expect(reason).toContain('b/y: down')
+    await sleep(300)
+    expect(await jobsIn(env, 'done')).toEqual([])
+    expect((await queuedJob(env, 'b1--t--u1--r0')).attempts).toBe(0)
+    b.down = false
+    env.engine.scheduler.kick()
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done on b')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8')).data).toMatchObject({ model: 'b/y', attempts: 0 })
+    expect(env.engine.scheduler.blockedJobs()).toEqual([])
+  })
+})
+
+describe('a server that is down is not a job failure', () => {
+  it('a handler that throws ServerDownError is requeued for later with no attempt counted, and the agent waits for the provider', async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    let calls = 0
+    env.engine.scheduler.register('t', async () => {
+      if (++calls === 1) throw new ServerDownError('the embeddings server loc is not running (http://x)', 'loc')
+      return { result: 'ok' }
+    })
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const queued = await waitFor(async () => {
+      const f = path.join(env!.dir, 'jobs', 'queued', 'b1--t--u1--r0.md')
+      if (calls !== 1 || !existsSync(f)) return null
+      const data = parseMd(await readFile(f, 'utf8')).data
+      return data.not_before ? data : null
+    }, 5000, 'the job back in the queue')
+    expect(queued.attempts).toBe(0)
+    expect(Date.parse(queued.not_before as string) - Date.now()).toBeGreaterThan(20_000)
+    expect(env.engine.scheduler.agentInfo('writer-ann')).toMatchObject({ state: 'waiting-provider', task: expect.stringContaining('embeddings server loc is not running') })
+    expect(env.events.some((e) => e.type === 'job.done' && e.ok === false && /embeddings server/.test(e.error ?? ''))).toBe(true)
+    expect(await jobsIn(env, 'failed')).toEqual([])
+  })
+})
+
+describe('exclusive pins', () => {
+  const gate = () => {
+    let open!: () => void
+    const wait = new Promise<void>((r) => (open = r))
+    return { open, wait }
+  }
+  const twoWriters = async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }, { role: 'writer', name: 'Bob' }] })
+    await env.engine.books.create('b1', { title: 'B1', stage: 'drafting', format: 'novel', target_words: 5000 }, '')
+    const who: Record<string, string> = {}
+    const g = gate()
+    env.engine.scheduler.register('t', async (ctx) => {
+      who[ctx.job.id] = ctx.agent.id
+      if (ctx.job.id === 'b1--t--hold--r0') await g.wait
+      return { result: 'ok' }
+    })
+    return { who, g }
+  }
+
+  it('only the agent assigned exclusively takes the book\'s jobs: they wait for it, never go to the other writer', async () => {
+    const { who, g } = await twoWriters()
+    await env!.engine.assignBook('writer-ann', 'b1', true)
+    expect(env!.engine.agents.get('writer-ann')?.data).toMatchObject({ pin: 'b1', pin_exclusive: true })
+    await env!.engine.jobs.enqueue({ id: 'b1--t--hold--r0', task: 't', role: 'writer', book: 'b1', unit: 'hold', requested_by: 'engine' })
+    await waitFor(() => who['b1--t--hold--r0'] === 'writer-ann', 5000, 'ann holds')
+    await env!.engine.jobs.enqueue({ id: 'b1--t--next--r0', task: 't', role: 'writer', book: 'b1', unit: 'next', requested_by: 'engine' })
+    await sleep(400) // Bob is idle, but the job is not his
+    expect(who['b1--t--next--r0']).toBeUndefined()
+    expect(await jobsIn(env!, 'queued')).toEqual(['b1--t--next--r0.md'])
+    g.open()
+    await waitFor(() => who['b1--t--next--r0'] === 'writer-ann', 5000, 'ann takes the next one')
+  })
+
+  it('an exclusive owner that is paused still keeps the job waiting', async () => {
+    const { who } = await twoWriters()
+    await env!.engine.assignBook('writer-ann', 'b1', true)
+    await env!.engine.handleCommand({ type: 'pause', agent: 'writer-ann' })
+    await env!.engine.jobs.enqueue({ id: 'b1--t--next--r0', task: 't', role: 'writer', book: 'b1', unit: 'next', requested_by: 'engine' })
+    await sleep(400)
+    expect(who['b1--t--next--r0']).toBeUndefined()
+    await env!.engine.handleCommand({ type: 'resume', agent: 'writer-ann' })
+    await waitFor(() => who['b1--t--next--r0'] === 'writer-ann', 5000, 'ann works again')
+  })
+
+  it('a plain pin only prefers the book: the other writer helps while the pinned one is busy', async () => {
+    const { who, g } = await twoWriters()
+    await env!.engine.assignBook('writer-ann', 'b1')
+    expect(env!.engine.agents.get('writer-ann')?.data.pin_exclusive).toBe(false)
+    await env!.engine.jobs.enqueue({ id: 'b1--t--hold--r0', task: 't', role: 'writer', book: 'b1', unit: 'hold', requested_by: 'engine' })
+    await waitFor(() => who['b1--t--hold--r0'] === 'writer-ann', 5000, 'ann (pinned, preferred) holds')
+    await env!.engine.jobs.enqueue({ id: 'b1--t--next--r0', task: 't', role: 'writer', book: 'b1', unit: 'next', requested_by: 'engine' })
+    await waitFor(() => who['b1--t--next--r0'] === 'writer-bob', 5000, 'bob helps')
+    g.open()
+  })
+
+  it('freeing the agent clears the exclusive flag', async () => {
+    await twoWriters()
+    await env!.engine.assignBook('writer-ann', 'b1', true)
+    await env!.engine.assignBook('writer-ann', null, true)
+    expect(env!.engine.agents.get('writer-ann')?.data).toMatchObject({ pin: null, pin_exclusive: false })
+  })
+})
+
+describe('the models of a story reach the start job', () => {
+  it('a job that names a story (no book yet) uses the story\'s model for its role', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'alt', local: true, models: ['m2'] }], roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    registerChat(env)
+    const idea = await env.engine.addStory({ ...emptyBrief(), title: 'The Bell Fox', premise: 'A fox rings a bell.', models: { writer: 'alt/m2' } })
+    await env.engine.jobs.enqueue({ id: 'eic--start--n1--r0', task: 't', role: 'writer', idea: idea.slug, requested_by: 'engine' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'job done')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'eic--start--n1--r0.md'), 'utf8')).data).toMatchObject({ model: 'alt/m2', idea: idea.slug })
   })
 })

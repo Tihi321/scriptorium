@@ -20,6 +20,12 @@ export interface NoteFact {
   source?: { url: string; title?: string }
 }
 
+/** A sentence of a page kept word for word, with its page: what the researcher's notes may lack (a date, a figure) stays in front of the writer. */
+export interface NoteExcerpt {
+  text: string
+  url: string
+}
+
 export interface NoteFile {
   /** Path relative to the data folder, forward slashes. */
   file: string
@@ -133,12 +139,13 @@ export class ResearchStore {
    * Writes a note. The facts are in the researcher's own words, one per line, each with its source URL and the date it was read.
    * `unverified: true` marks notes that come from the model's own knowledge.
    */
-  async write(o: { question: string; book: string | null; facts: NoteFact[]; unverified: boolean; askedBy: string; purpose?: string; provider?: string; idea?: string; now?: Date }): Promise<NoteFile> {
+  async write(o: { question: string; book: string | null; facts: NoteFact[]; unverified: boolean; askedBy: string; purpose?: string; provider?: string; idea?: string; excerpts?: NoteExcerpt[]; now?: Date }): Promise<NoteFile> {
     const date = stampOf(o.now)
     const slug = await this.freeSlug(o.book, o.question)
     const sources = [...new Map(o.facts.filter((f) => f.source).map((f) => [f.source!.url, { url: f.source!.url, title: f.source!.title ?? '', retrieved: date }])).values()]
     const lines = o.facts.map((f) => `- ${f.fact.replace(/\s+/g, ' ').trim()} ${f.source ? `(source: ${f.source.url}, ${date})` : `(source: none, the model's own knowledge, ${date}; unverified)`}`)
-    const body = `\n# ${o.question.replace(/\s+/g, ' ').trim()}\n\n${o.unverified ? '**Unverified:** no web source was found. These facts come from the model\'s own knowledge. Treat them with suspicion.\n\n' : ''}${lines.join('\n')}\n`
+    const excerpts = (o.excerpts ?? []).slice(0, 4).map((x) => `- "${x.text.replace(/\s+/g, ' ').replace(/"/g, "'").trim().slice(0, 300)}" (source: ${x.url}, ${date})`)
+    const body = `\n# ${o.question.replace(/\s+/g, ' ').trim()}\n\n${o.unverified ? '**Unverified:** no web source was found. These facts come from the model\'s own knowledge. Treat them with suspicion.\n\n' : ''}${lines.join('\n')}\n${excerpts.length ? `\n${EXCERPTS_HEADING}\n\n${excerpts.join('\n')}\n` : ''}`
     const file = path.join(this.dirFor(o.book), `${slug}.md`)
     await writeMd(
       file,
@@ -161,9 +168,16 @@ export class ResearchStore {
   }
 }
 
-/** The note text a writer sees: the facts, framed as data. */
-export function formatNote(n: NoteFile, maxChars = 1800): string {
+/** The heading of the verbatim sentences at the end of a note. */
+export const EXCERPTS_HEADING = '## Source excerpts (verbatim, for checking)'
+
+/** The note text a writer sees: the facts, framed as data. The source excerpts stay inside the cap, the facts give way. */
+export function formatNote(n: NoteFile, maxChars = 2400): string {
   const body = n.body.replace(/^# .*\n+/, '').trim()
-  const cut = body.length > maxChars ? body.slice(0, maxChars).replace(/\n[^\n]*$/, '') + '\n- (more facts in the file)' : body
-  return `### ${n.question}${n.unverified ? ' (unverified)' : ''}\n${cut}`
+  const at = body.indexOf(EXCERPTS_HEADING)
+  const facts = at >= 0 ? body.slice(0, at).trim() : body
+  const excerpts = at >= 0 ? body.slice(at).trim() : ''
+  const room = Math.max(600, maxChars - (excerpts ? excerpts.length + 2 : 0))
+  const cut = facts.length > room ? facts.slice(0, room).replace(/\n[^\n]*$/, '') + '\n- (more facts in the file)' : facts
+  return `### ${n.question}${n.unverified ? ' (unverified)' : ''}\n${cut}${excerpts ? `\n\n${excerpts}` : ''}`
 }

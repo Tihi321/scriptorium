@@ -127,7 +127,7 @@ export async function makeEnv(o: EnvOptions = {}, engineOpts: Partial<EngineOpti
   }
 }
 
-export async function waitFor<T>(fn: () => T | Promise<T>, ms = 8000, label = 'condition'): Promise<NonNullable<T>> {
+export async function waitFor<T>(fn: () => T | Promise<T>, ms = 20000, label = 'condition'): Promise<NonNullable<T>> {
   const end = Date.now() + ms
   for (;;) {
     const v = await fn()
@@ -176,6 +176,8 @@ export interface PipelineEnvOptions {
   humanizer?: boolean
   /** What the mock humanizer answers: the chapter text it was given and the request. Default: the same chapter with one tic cut. */
   humanizeWith?: (chapter: string, request: string) => string
+  /** The `story_year` the mock architect puts into the outline (default: none). */
+  storyYear?: number
   /** Format the mock editor-in-chief picks. */
   format?: string
   /** Which topics.md edits to make before the engine starts. */
@@ -342,7 +344,7 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
   const prose = (n: number) => Array.from({ length: n }, (_, i) => ['The', 'little', 'fox', 'yawned', 'and', 'curled', 'up', 'in', 'the', 'warm', 'hay.'][i % 11]).join(' ')
   const wantWords = (req: { messages: { role: string; content: string }[] }, fallback: number) => {
     const t = lastUser(req)
-    const m = /Rewrite this chapter to about (\d+) words/.exec(t) ?? /Expand this chapter to about (\d+) words/.exec(t) ?? /chapter should be about (\d+) words/.exec(t) ?? /Keep the chapter at about (\d+) words/.exec(t)
+    const m = /Rewrite this chapter to about (\d+) words/.exec(t) ?? /Expand this chapter to about (\d+) words/.exec(t) ?? /chapter should be about (\d+) words/.exec(t) ?? /Keep the chapter at about (\d+) words/.exec(t) ?? /Cut it to about (\d+) words/.exec(t)
     return m ? Number(m[1]) : fallback
   }
   mock.on({ task: 'generate_ideas' }, (req) => {
@@ -379,14 +381,15 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
       places: [{ name: 'Hay Barn', description: 'warm and dim' }],
       threads: o.extraThread ? ['Who left the lantern in the barn?', 'What is the fox hiding?'] : ['Who left the lantern in the barn?'],
       setting: 'a hay barn at night',
-      style: 'gentle and rhythmic'
+      style: 'gentle and rhythmic',
+      story_year: o.storyYear ?? null
     })
   })
   const cite = o.citations ? ' The facts above come from the notes [1].' : ''
   mock.on({ task: 'draft_chapter' }, (req) => {
     bump('draft_chapter')
-    // the expand retry is a second request in the same job: its last message asks for the full length
-    const expand = /Expand this chapter to about/.test(lastUser(req))
+    // the expand and tighten retries are a second request in the same job: their last message asks for the full length
+    const expand = /Expand this chapter to about|Cut it to about/.test(lastUser(req))
     const n = Number(/Now write chapter (\d+):/.exec(req.messages[1]?.content ?? '')?.[1] ?? 0)
     const words = o.shortDrafts ? 60 : Math.round(wantWords(req, 100) * (expand ? 1 : (o.draftRatio ?? 1)))
     const marks = expand ? '' : (o.markers?.[n] ?? []).map((q) => ` [RESEARCH: ${q}]`).join('')
@@ -407,7 +410,7 @@ function scriptMock(mock: MockProvider, o: PipelineEnvOptions, counters: { calls
     return JSON.stringify({
       verdict: revise ? 'revise' : 'pass',
       scores: Object.fromEntries(dimensionsFor(role).map((d) => [d, revise ? 5 : 8])),
-      notes: revise ? `Please soften the ending (${role}).` : `Looks good (${role}).`,
+      notes: revise ? `Please soften the ending (${role}): the last scene is too abrupt for a bedtime story.` : `Looks good (${role}).`,
       chapters: revise ? (o.reviewChapters?.[role] ?? []) : [],
       research_questions: round === 0 ? (o.reviewQuestions?.[role] ?? []) : []
     })

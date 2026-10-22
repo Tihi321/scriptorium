@@ -1,0 +1,194 @@
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ModelRegistry } from '../src/engine/models/registry'
+import { initDataFolder } from '../src/engine/store/dataFolder'
+import { migrateClientProvider, migrateSeedPrompts } from '../src/engine/store/migrations'
+import { SEED_HISTORY, seedHash } from '../src/engine/store/seedHistory'
+import { seedDir } from './helpers'
+
+const dirs: string[] = []
+const tmp = async () => {
+  const d = await mkdtemp(path.join(os.tmpdir(), 'scrip-mig-'))
+  dirs.push(d)
+  return d
+}
+afterEach(async () => {
+  for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+})
+
+/** A providers.md from before the client provider: only a mock-free OpenAI provider and the search providers. */
+const OLD_PROVIDERS = [
+  '---',
+  'kind: providers',
+  'providers:',
+  '  - id: lmstudio',
+  '    kind: openai-compat',
+  '    local: true',
+  '    base_url: http://localhost:1234/v1',
+  '    models: []',
+  '  # my own note about search',
+  '  - id: tavily',
+  '    kind: search',
+  '    engine: tavily',
+  '    price_per_request: 0.008',
+  'search_order: [tavily, wikipedia]',
+  '---',
+  '# Providers',
+  ''
+]
+
+const providersFolder = async (lines: string[], eol = '\n') => {
+  const dir = await tmp()
+  await mkdir(path.join(dir, 'config'), { recursive: true })
+  await writeFile(path.join(dir, 'config', 'providers.md'), lines.join(eol))
+  return dir
+}
+
+describe('migrateClientProvider', () => {
+  it('adds the client provider before the first search provider, keeps comments and CRLF, and is idempotent', async () => {
+    const dir = await providersFolder(OLD_PROVIDERS, '\r\n')
+    const res = await migrateClientProvider(dir, seedDir)
+    expect(res.changes).toEqual(['config/providers.md: added the client provider (client/claude-code, switched off, context 200000)'])
+    const text = await readFile(path.join(dir, 'config', 'providers.md'), 'utf8')
+    expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/) // every line break is still CRLF
+    const lines = text.split('\r\n')
+    const at = lines.indexOf('  - id: client')
+    expect(at).toBeGreaterThan(0)
+    expect(lines[at - 2]).toMatch(/^ {2}# Claude Code/) // the seed's two comment lines come with it
+    expect(lines.indexOf('  # my own note about search')).toBeGreaterThan(at)
+    expect(lines.indexOf('  - id: tavily')).toBeGreaterThan(at)
+    expect(lines.slice(at, at + 12).join('\n')).toContain('context: 200000')
+    expect(lines.slice(at, at + 4)).toContain('    enabled: false')
+    expect(lines).toContain('# Providers')
+    expect((await migrateClientProvider(dir, seedDir)).changes).toEqual([])
+    expect(await readFile(path.join(dir, 'config', 'providers.md'), 'utf8')).toBe(text)
+  })
+
+  it('works without a seed (the built-in block) and without search providers', async () => {
+    const dir = await providersFolder(['---', 'kind: providers', 'providers:', '  - id: a', '    kind: openai-compat', '    models: []', 'search_order: []', '---', 'x', ''])
+    expect((await migrateClientProvider(dir, undefined)).changes).toHaveLength(1)
+    const text = await readFile(path.join(dir, 'config', 'providers.md'), 'utf8')
+    expect(text.indexOf('- id: client')).toBeLessThan(text.indexOf('search_order:'))
+    expect(text.indexOf('- id: a')).toBeLessThan(text.indexOf('- id: client'))
+  })
+
+  it('gives an existing client model a context, and leaves a context the user set', async () => {
+    const withClient = (extra: string[]) => [
+      ...OLD_PROVIDERS.slice(0, 8),
+      '  - id: client',
+      '    kind: client',
+      '    enabled: true',
+      '    models:',
+      '      - id: claude-code',
+      '        family: claude',
+      ...extra,
+      '        vision: true',
+      ...OLD_PROVIDERS.slice(8)
+    ]
+    const bare = await providersFolder(withClient([]))
+    expect((await migrateClientProvider(bare, seedDir)).changes).toEqual(['config/providers.md: client/claude-code got context 200000 (the window of Claude)'])
+    const text = await readFile(path.join(bare, 'config', 'providers.md'), 'utf8')
+    expect(text).toContain('        family: claude\n        context: 200000\n        vision: true')
+    expect(text).toContain('    enabled: true') // a provider the user switched on stays on
+    expect((await migrateClientProvider(bare, seedDir)).changes).toEqual([])
+    const own = await providersFolder(withClient(['        context: 100000']))
+    expect((await migrateClientProvider(own, seedDir)).changes).toEqual([])
+    expect(await readFile(path.join(own, 'config', 'providers.md'), 'utf8')).toContain('context: 100000')
+  })
+
+  it('does not touch a folder without providers.md', async () => {
+    const dir = await tmp()
+    expect((await migrateClientProvider(dir, seedDir)).changes).toEqual([])
+    expect(existsSync(path.join(dir, 'config'))).toBe(false)
+  })
+
+  it('the registry loads the migrated file: client/claude-code has the window and is switched off', async () => {
+    const dir = await providersFolder(OLD_PROVIDERS)
+    await migrateClientProvider(dir, seedDir)
+    await writeFile(path.join(dir, 'config', 'roles.md'), ['---', 'kind: roles', 'roles: {}', '---', ''].join('\n'))
+    const registry = new ModelRegistry(dir, { keys: () => undefined })
+    await registry.load()
+    expect(registry.getModel('client/claude-code')?.context).toBe(200000)
+    expect(registry.providers.get('client')?.available).toBe(false)
+  })
+
+  it('initDataFolder logs the migration once on an old folder, and nothing the second time', async () => {
+    const dir = await tmp()
+    await initDataFolder(dir, seedDir)
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await readFile(file, 'utf8')
+    const from = text.indexOf('  # Claude Code')
+    const to = text.indexOf('  # Search services')
+    expect(from).toBeGreaterThan(0)
+    await writeFile(file, text.slice(0, from) + text.slice(to))
+    const first = await initDataFolder(dir, seedDir)
+    expect(first.migrated.filter((m) => m.includes('client provider'))).toHaveLength(1)
+    expect((await initDataFolder(dir, seedDir)).migrated).toEqual([])
+  })
+})
+
+describe('migrateSeedPrompts', () => {
+  const REL = 'prompts/writer/draft.md'
+  const setup = async (data: string | null, history: string[]) => {
+    const dataDir = await tmp()
+    const seed = await tmp()
+    await mkdir(path.join(seed, 'prompts', 'writer'), { recursive: true })
+    await mkdir(path.join(dataDir, 'prompts', 'writer'), { recursive: true })
+    await writeFile(path.join(seed, REL), 'The new prompt.\nSecond line.\n')
+    if (data !== null) await writeFile(path.join(dataDir, REL), data)
+    return { dataDir, seed, history: { [REL]: [...history, seedHash('The new prompt.\nSecond line.\n')] } }
+  }
+  const OLD = 'The old prompt.\nSecond line.\n'
+
+  it('upgrades an unedited earlier version and keeps the file\'s line endings', async () => {
+    const lf = await setup(OLD, [seedHash(OLD)])
+    expect((await migrateSeedPrompts(lf.dataDir, lf.seed, lf.history)).changes).toEqual([`${REL}: upgraded to the current seed version (it was an unedited earlier version)`])
+    expect(await readFile(path.join(lf.dataDir, REL), 'utf8')).toBe('The new prompt.\nSecond line.\n')
+    const crlf = await setup(OLD.replace(/\n/g, '\r\n'), [seedHash(OLD)])
+    await migrateSeedPrompts(crlf.dataDir, crlf.seed, crlf.history)
+    expect(await readFile(path.join(crlf.dataDir, REL), 'utf8')).toBe('The new prompt.\r\nSecond line.\r\n')
+    expect((await migrateSeedPrompts(crlf.dataDir, crlf.seed, crlf.history)).changes).toEqual([]) // now current
+  })
+
+  it('keeps an edited file, leaves the current version, and leaves a missing file to the copy', async () => {
+    const edited = await setup('My own words.\n', [seedHash(OLD)])
+    expect((await migrateSeedPrompts(edited.dataDir, edited.seed, edited.history)).changes).toEqual([])
+    expect(await readFile(path.join(edited.dataDir, REL), 'utf8')).toBe('My own words.\n')
+    const current = await setup('The new prompt.\nSecond line.\n', [seedHash(OLD)])
+    expect((await migrateSeedPrompts(current.dataDir, current.seed, current.history)).changes).toEqual([])
+    const missing = await setup(null, [seedHash(OLD)])
+    expect((await migrateSeedPrompts(missing.dataDir, missing.seed, missing.history)).changes).toEqual([])
+    expect(existsSync(path.join(missing.dataDir, REL))).toBe(false)
+  })
+
+  it('without a seed nothing happens', async () => {
+    const dir = await tmp()
+    expect((await migrateSeedPrompts(dir, undefined)).changes).toEqual([])
+  })
+})
+
+describe('the seed history', () => {
+  const walk = async (dir: string): Promise<string[]> => {
+    const out: string[] = []
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) out.push(...(await walk(p)))
+      else out.push(p)
+    }
+    return out
+  }
+
+  it('has the current version of every seed prompt and template (run `yarn seed:hashes` after editing one)', async () => {
+    const missing: string[] = []
+    for (const sub of ['prompts', 'templates']) {
+      for (const file of await walk(path.join(seedDir, sub))) {
+        const rel = path.relative(seedDir, file).split(path.sep).join('/')
+        if (!SEED_HISTORY[rel]?.includes(seedHash(await readFile(file, 'utf8')))) missing.push(rel)
+      }
+    }
+    expect(missing, 'run `yarn seed:hashes`').toEqual([])
+  })
+})

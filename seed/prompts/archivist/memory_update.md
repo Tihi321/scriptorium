@@ -24,11 +24,11 @@ Work through these steps in order:
 
 Fields:
 - "summary": a summary of the chapter in four to six sentences (who did what, what changed, where it ended).
-- "characters": for every character that appears or changes, their name and one line saying what is new or different about them after this chapter (state, wants, relationships, injuries, secrets learned). For a new character add a "description". Use the exact names from the list when they exist.
-- "places": the same for places.
+- "characters": for every character that appears or changes, their name and one line saying what is new or different about them after this chapter (state, wants, relationships, injuries, secrets learned). For a new character add a "description". Use the exact name from the list. A person called by another name (a first name, a surname, a title, a nickname) is the same entry: use the list's name and put the other name in "aliases". A group (the twins, the family) is not an entry: update each member. Record a relationship only when the chapter states it in so many words; never infer kinship.
+- "places": the same for places (a place called by another name is the same entry: put the other name in "aliases").
 - "threads_opened": new promises, mysteries or subplots this chapter starts, as short sentences.
 - "threads_closed": the ids of open threads this chapter closes.
-- "timeline": one short line for each event that matters for the order of events.
+- "timeline": one short line for each event that matters for the order of events. A weekday next to a date must match the calendar below the chapter.
 
 Reply with one JSON object like this:
-{"summary": "...", "characters": [{"name": "...", "update": "...", "description": ""}], "places": [{"name": "...", "update": "...", "description": ""}], "threads_opened": ["..."], "threads_closed": ["t1"], "timeline": ["..."]}
+{"summary": "...", "characters": [{"name": "...", "update": "...", "description": "", "aliases": []}], "places": [{"name": "...", "update": "...", "description": "", "aliases": []}], "threads_opened": ["..."], "threads_closed": ["t1"], "timeline": ["..."]}

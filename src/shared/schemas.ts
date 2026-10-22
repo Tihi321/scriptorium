@@ -255,6 +255,8 @@ export const agentSchema = z.looseObject({
   focus: z.array(z.string()).default([]),
   /** Only take jobs for this book. */
   pin: z.string().nullable().default(null),
+  /** With `pin`: only the agents assigned to the book this way take its jobs (the job waits for them, even while they are paused). */
+  pin_exclusive: z.boolean().default(false),
   max_parallel: z.number().int().positive().default(1),
   paused: z.boolean().default(false)
 })
@@ -321,6 +323,8 @@ export const bookSchema = z.looseObject({
   standfirst: z.string().optional(),
   /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
   humanize: z.boolean().optional(),
+  /** The year the story is set in: the architect's outline sets it, you may set it by hand. The reviewers get the calendar of that year. */
+  story_year: z.number().int().optional(),
   age_band: z.string().nullable().default(null),
   target_words: z.number().int().positive(),
   author: z.string().nullable().default(null),
@@ -358,6 +362,10 @@ export const jobSchema = z.looseObject({
   waiting_on: z.string().nullable().default(null),
   /** Short text for the office (the handover line and the agent's bubble) instead of `task unit`. Research jobs use the question. */
   label: z.string().optional(),
+  /** The story (idea) slug a job of no book yet is about: a `start_book` job names the story it starts, so the story's `role_models` apply to it. */
+  idea: z.string().optional(),
+  /** A research job of an article: `true` searches the news of the last 7 days, `false` does not (see `isNewsQuestion`). */
+  news: z.boolean().optional(),
   /** Locks that must be free to run, for example `bible:silver-inn`. */
   locks: z.array(z.string()).default([]),
   /** Reviewers prefer a model family different from this one. */

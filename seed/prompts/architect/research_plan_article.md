@@ -11,7 +11,7 @@ Section: {{topic}}. Genre: {{genre}}.
 Pitch:
 {{pitch}}
 
-List the most important questions (at most {{max_questions}}) whose answers the article needs. Ask like a reporter: what happened, when and where; who is involved and what each of them said or did; the key figures and what they are measured against; what was decided, announced, found or disputed; what the background is, in a sentence; what happens next. Prefer questions about recent events and name the main subject and the year or "this week", the way you would type it into a news search box, for example "What did the EU agree on AI rules in 2026?" or "Who won the 2026 Tour de France?". Each question must be short (under 15 words) and specific. Do not ask for opinions, predictions, or for the structure of the article.
+List the most important questions (at most {{max_questions}}) whose answers the article needs. Ask like a reporter: what happened, when and where; who is involved and what each of them said or did; the key figures and what they are measured against; what was decided, announced, found or disputed; what the background is, in a sentence; what happens next. Prefer questions about recent events and name the main subject and the year or "this week", the way you would type it into a news search box, for example "What did the EU agree on AI rules in 2026?" or "Who won the 2026 Tour de France?". Each question must be short (under 15 words) and specific. Do not ask for opinions, predictions, or for the structure of the article. Give each question a "news" flag: true only for what happened in the last days or weeks (the latest development, what was announced this week); false for background, history, how something works and official explanations, which are searched without the news filter.
 
 Reply with one JSON object like this:
-{"needs_research": true, "questions": ["..."]}
+{"needs_research": true, "questions": [{"question": "...", "news": true}]}

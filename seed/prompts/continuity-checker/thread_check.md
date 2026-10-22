@@ -16,7 +16,7 @@ Summaries of the book:
 The last chapter:
 {{last_chapter}}
 
-Go through the open threads one by one. For each, decide if the book really closed it (the summaries and last chapter may show it even if the bible was not updated). In "resolved" list the ids (such as "t3") of the threads the book really closed. Every id you leave out is reported to the publisher as still open, so be accurate. In "notes" say which threads are really unresolved. Say "revise" only if an important thread is left dangling, and name the chapter where it should be closed (usually one of the last chapters). Score threads from 1 to 10 (10 = everything closed).
+Go through the open threads one by one. For each, decide if the book really closed it (the summaries and last chapter may show it even if the bible was not updated). In "resolved" list the ids (such as "t3") of the threads the book really closed. Every id you leave out is reported to the publisher as still open, so be accurate. In "notes" say which threads are really unresolved. Say "revise" only if an important thread is left dangling, and name the chapter where it should be closed (usually one of the last chapters). Score threads from 1 to 10 (10 = everything closed). "chapters" holds chapter numbers only, as plain numbers; for a "revise", give each dangling thread as one string in "problems": the thread, and where and how to close it.
 
 Reply with one JSON object like this:
-{"verdict": "pass", "scores": {"threads": 9}, "notes": "...", "chapters": [], "resolved": ["t1"]}
+{"verdict": "pass", "scores": {"threads": 9}, "notes": "...", "chapters": [], "problems": [], "resolved": ["t1"]}

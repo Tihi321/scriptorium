@@ -4,6 +4,7 @@
 - The MVP scope is in `docs/design.md` under "Milestones → MVP: text only". Milestone 2 (ComfyUI images) and everything under "Later" are out of scope until the MVP works.
 - The user wants the factory fully automated. The UI is mainly for watching: keep on-screen controls to the ones listed in the UI decision row, and put everything else in markdown config files.
 - All information agents share, and everything the UI shows, lives in plain markdown files with YAML frontmatter (see "Shared files" in the design doc). The only exceptions are EPUB and image output, and the SQLite search index, which must stay rebuildable from the files.
+- After editing a file under `seed/prompts` or `seed/templates`, run `yarn seed:hashes` (a test fails otherwise).
 - API keys never go in the repository or in the data folder's markdown files. Store them in Windows' credential store or in environment variables.
 - Book content is English only.
 

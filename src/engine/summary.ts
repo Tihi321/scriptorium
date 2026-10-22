@@ -70,6 +70,14 @@ export function ideaSummaries(ideas: IdeaFile[], used = 10): IdeaSummary[] {
 
 export const formatSummaries = (formats: FormatEntry[]): FormatSummary[] => formats.filter((f) => f.enabled).map((f) => ({ id: f.id, name: f.name, kinds: f.kinds }))
 
+/** `length_gate` of book.md as the summary shows it (`words_before` is `wordsBefore`), or null when the gate has not run. */
+function lengthGateOf(raw: unknown): BookSummary['lengthGate'] {
+  if (!raw || typeof raw !== 'object') return null
+  const g = raw as Record<string, unknown>
+  const num = (k: string) => (typeof g[k] === 'number' ? { [k === 'words_before' ? 'wordsBefore' : k]: g[k] as number } : {})
+  return { status: String(g.status ?? ''), ...num('words'), ...num('min'), ...num('max'), ...num('words_before') }
+}
+
 export async function bookSummary(books: BookStore, slug: string, topics: TopicRow[]): Promise<BookSummary | null> {
   const b = await books.read(slug)
   if (!b) return null
@@ -112,7 +120,9 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     epub: d.article !== true && (await exists(books.file(slug, epub))) ? rel(epub) : null,
     readerDir: (await exists(books.file(slug, 'out', 'reader', 'index.html'))) ? rel('out', 'reader') : null,
     readerPages: await readReaderPages(books.file(slug, 'out', 'reader')),
-    publishedAt: typeof d.published === 'string' ? d.published : null
+    publishedAt: typeof d.published === 'string' ? d.published : null,
+    lengthGate: lengthGateOf(d.length_gate),
+    ...(d.length_over === true ? { lengthOver: true } : {})
   }
 }
 
@@ -127,6 +137,7 @@ export function agentSummary(def: AgentDef, sched: Scheduler, router: ModelRoute
     model: def.data.model,
     resolvedModel: resolved,
     pin: def.data.pin,
+    pinExclusive: def.data.pin_exclusive,
     paused: def.data.paused,
     state: def.data.paused && info.state === 'idle' ? 'paused' : info.state,
     task: info.task,

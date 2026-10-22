@@ -17,6 +17,12 @@ export class MemoryService {
     return !!m && m.provider.available
   }
 
+  /** `available()` and the embeddings server is not known to be down (it is checked every 10 seconds, and a request that can't connect marks it down). */
+  ready(): boolean {
+    const m = this.registry.embeddingModel()
+    return !!m && m.provider.available && !m.provider.down
+  }
+
   readonly embedder: Embedder = (texts, kind) => this.registry.embed(texts, kind)
 
   getIndex(): MemoryIndex {

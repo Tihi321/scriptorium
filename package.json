@@ -17,6 +17,7 @@
     "test:ui": "playwright test --config playwright.config.ts",
     "test:electron": "yarn build && playwright test --config playwright.electron.config.ts",
     "test:packaged": "yarn dist:dir && playwright test --config playwright.packaged.config.ts",
+    "seed:hashes": "node scripts/seed-hashes.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
     "dist": "yarn build && electron-builder --config electron-builder.yml --win nsis --x64",

@@ -3,11 +3,14 @@ import { z } from 'zod'
 import { parseMd } from '../../shared/md'
 import { memoryUpdateSchema } from '../memory/bible'
 import { reindex } from '../memory/index'
+import { ServerDownError } from '../models/types'
 import { analyzeRepetition } from '../memory/repetition'
 import type { Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
 import { pad2 } from './books'
 import { chatJson, cleanProse } from './llm'
+import { calendarFor, storyYearOf, weekdayMismatches } from './calendar'
+import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
 import { appendToPrompt, buildMessages } from './prompts'
 import { seriesSection } from './series'
 import { askFromReview, clamp, formatVars, memoryContext, recordMade, Run, storyBriefSection, unitNumber } from './handlers'
@@ -19,6 +22,7 @@ const reviewSchema = (dims: string[]) =>
     scores: z.object(Object.fromEntries(dims.map((x) => [x, z.number()]))),
     notes: z.string(),
     chapters: z.array(z.number()).default([]),
+    problems: z.array(z.string()).default([]),
     research_questions: z.array(z.string()).default([])
   })
 
@@ -53,7 +57,8 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     run.version = version
     appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await seriesSection(d, slug))
-    const r = await chatJson(ctx, messages, reviewSchema(['structure']), { maxTokens: 6000, temperature: 0.2 })
+    await ensureProblemsRule(d.dataDir, messages, 'developmental-editor', 'review_outline')
+    const r = await chatJson(ctx, messages, reviewSchema(['structure']), { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
     run.addJson(r.cost, r.chat.model)
     const score = clamp(Number(r.value.scores.structure), 1, 10)
     const q = d.getQuality()
@@ -61,7 +66,7 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     await writeMd(
       d.books.file(slug, 'reviews', 'outline-review.md'),
       { kind: 'outline-review', role: 'developmental-editor', verdict, scores: { structure: score }, agent: ctx.agent.id, model: r.chat.model.ref },
-      '\n' + r.value.notes.trim() + '\n'
+      '\n' + reviewBody(r.value.notes, r.value.problems) + '\n'
     )
     await made(slug, run)
     return { result: `outline ${verdict} (structure ${score})`, resultPath: `books/${slug}/reviews/outline-review.md` }
@@ -86,16 +91,27 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     })
     run.version = version
     appendToPrompt(messages, await seriesSection(d, slug))
-    const r = await chatJson(ctx, messages, reviewSchema(['continuity']), { maxTokens: 6000, temperature: 0.2 })
+    await ensureProblemsRule(d.dataDir, messages, 'continuity-checker', 'check_chapter')
+    appendToPrompt(messages, await calendarFor(d, slug, chapter.body))
+    const q = d.getQuality()
+    const schema = reviewSchema(['continuity'])
+    const first = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
+    // a revise whose notes say nothing usable ("three fixes below" and no list) is asked again, then the job is tried again
+    const r = await withUsableNotes(ctx, messages, schema, first, {
+      effective: (v) => (v.verdict === 'revise' && clamp(Number(v.scores.continuity), 1, 10) >= q.revise_below ? 'pass' : v.verdict),
+      notes: (v) => v.notes,
+      problems: (v) => v.problems,
+      retryLeft: ctx.job.attempts + 1 < (ctx.job.max_attempts ?? d.getFactory().max_attempts),
+      maxTokens: 6000
+    })
     run.addJson(r.cost, r.chat.model)
     const researchJobs = await askFromReview(d, ctx.agent.id, slug, `the continuity checker doubts a claim in chapter ${n}`, r.value.research_questions)
     const score = clamp(Number(r.value.scores.continuity), 1, 10)
-    const q = d.getQuality()
     const verdict = r.value.verdict === 'revise' && score >= q.revise_below ? 'pass' : r.value.verdict
     await writeMd(
       d.books.file(slug, 'reviews', `ch-${pad2(n)}-check.md`),
       { kind: 'chapter-check', n, role: 'continuity-checker', verdict, scores: { continuity: score }, ...(researchJobs.length ? { research_jobs: researchJobs } : {}), agent: ctx.agent.id, model: r.chat.model.ref },
-      '\n' + r.value.notes.trim() + '\n'
+      '\n' + reviewBody(r.value.notes, r.value.problems) + '\n'
     )
     await made(slug, run)
     return { result: `chapter ${n} continuity: ${verdict} (${score})`, resultPath: `books/${slug}/reviews/ch-${pad2(n)}-check.md` }
@@ -116,10 +132,11 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
       chapter_n: n,
       chapter_title: chapter.title,
       chapter_text: chapter.body,
-      known: entries.map((e) => `- ${e.name} (${e.group === 'characters' ? 'character' : 'place'})`).join('\n') || '(none yet)',
+      known: entries.map((e) => `- ${e.name} (${e.group === 'characters' ? 'character' : 'place'}${e.aliases.length ? `; also: ${e.aliases.join(', ')}` : ''})`).join('\n') || '(none yet)',
       threads: threads.map((t) => `${t.id}: ${t.text}`).join('\n') || '(none)'
     })
     run.version = version
+    appendToPrompt(messages, await calendarFor(d, slug, chapter.body))
     ctx.context([
       { name: `chapter ${n} text`, tokens: Math.round(chapter.body.length / 4) },
       { name: `${entries.length} bible entries (names only)`, tokens: Math.round(entries.length * 6) },
@@ -127,6 +144,24 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     ])
     const r = await chatJson(ctx, messages, memoryUpdateSchema, { maxTokens: 8000, temperature: 0.2 })
     run.addJson(r.cost, r.chat.model)
+    // a weekday the archivist got wrong next to a date (the chapter has it right, or has no weekday) is corrected in the summary and the timeline
+    const year = await storyYearOf(d, slug)
+    if (year !== null) {
+      const fix = (text: string): string => {
+        let out = text
+        for (const slip of weekdayMismatches(text, year)) {
+          if (chapter.body.includes(slip.said)) {
+            ctx.log(`warning: "${slip.said}" is a weekday slip, but it is in the chapter text itself (${slip.date} is a ${slip.actual}): the continuity check sees it`)
+            continue
+          }
+          ctx.log(`warning: the archivist wrote "${slip.said}", but ${slip.date} is a ${slip.actual}: corrected`)
+          out = out.split(slip.said).join(slip.said.replace(/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\.?/i, slip.actual))
+        }
+        return out
+      }
+      r.value.summary = fix(r.value.summary)
+      r.value.timeline = r.value.timeline.map(fix)
+    }
     const applied = await d.bible.apply(slug, n, r.value)
     for (const w of applied.warnings) ctx.log(`warning: ${w}`)
     await writeMd(d.books.file(slug, 'summaries', `ch-${pad2(n)}.md`), { kind: 'summary', n, title: chapter.title, indexed: false }, '\n' + r.value.summary.trim() + '\n')
@@ -141,6 +176,8 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     const file = d.books.file(slug, 'summaries', `ch-${pad2(n)}.md`)
     const doc = parseMd(await fs.readFile(file, 'utf8'))
     let note: string
+    // never mark a chapter indexed without indexing it: with the embeddings server down the job waits (see ServerDownError)
+    if (d.memory.available() && !d.memory.ready()) throw new ServerDownError('the embeddings server is not running: the chapter is indexed when it is', 'embeddings')
     if (d.memory.available()) {
       const r = await reindex(d.dataDir, d.memory.getIndex())
       note = `indexed (${r.indexed} file(s) new or changed)`
@@ -218,9 +255,12 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
         scores: z.object({ structure: z.number() }),
         notes: z.string(),
         chapters: z.array(z.number()).default([]),
+        problems: z.array(z.string()).default([]),
         tension: z.array(z.object({ chapter: z.number(), score: z.number() })).default([])
       })
-      const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2 })
+      await ensureProblemsRule(d.dataDir, messages, 'developmental-editor', 'act_review')
+      appendToPrompt(messages, await calendarFor(d, slug, chapters.map((c) => c.body).join('\n')))
+      const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
       run.addJson(r.cost, r.chat.model)
       for (const t of r.value.tension) if (act.chapters.includes(t.chapter)) tension[String(t.chapter)] = clamp(Number(t.score), 1, 10)
       const flat = flatStretches(tension)
@@ -229,7 +269,7 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
         { kind: 'report', tension, flat_stretches: flat },
         `\n# Tension per chapter\n\n${Object.entries(tension).map(([c, v]) => `- Chapter ${c}: ${v}`).join('\n')}\n\n${flat.length ? `Flat stretches (three or more chapters at 4 or below): ${flat.map((f) => `${f[0]}-${f[1]}`).join(', ')}\n` : 'No flat stretch found.\n'}`
       )
-      const notes = r.value.notes.trim() + (flat.length ? `\n\nFlat stretch flagged: chapters ${flat.map((f) => `${f[0]}-${f[1]}`).join(', ')}. Raise the stakes there.` : '')
+      const notes = reviewBody(r.value.notes, r.value.problems) + (flat.length ? `\n\nFlat stretch flagged: chapters ${flat.map((f) => `${f[0]}-${f[1]}`).join(', ')}. Raise the stakes there.` : '')
       await writeMd(
         d.books.file(slug, 'reviews', `actreview-${actN}.md`),
         { kind: 'act-review', act: actN, role: 'developmental-editor', verdict: r.value.verdict, scores: { structure: clamp(Number(r.value.scores.structure), 1, 10) }, agent: ctx.agent.id, model: r.chat.model.ref },
@@ -283,11 +323,13 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
         })
         run.version = version
         const schema = reviewSchema(['threads']).extend({ resolved: z.array(z.string()).default([]) })
-        const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2 })
+        await ensureProblemsRule(d.dataDir, messages, 'continuity-checker', 'thread_check')
+        appendToPrompt(messages, await calendarFor(d, slug, `${summaries.join('\n')}\n${last?.body ?? ''}`))
+        const r = await chatJson(ctx, messages, schema, { maxTokens: 6000, temperature: 0.2, normalize: normalizeReviewJson })
         run.addJson(r.cost, r.chat.model)
         score = clamp(Number(r.value.scores.threads), 1, 10)
         verdict = r.value.verdict === 'revise' && score >= d.getQuality().revise_below ? 'pass' : r.value.verdict
-        notes = r.value.notes.trim()
+        notes = reviewBody(r.value.notes, r.value.problems)
         affected = r.value.chapters
         // threads the checker found really closed are closed in the bible; the rest stays open and goes to the publisher
         closedNow = await d.bible.closeThreads(slug, r.value.resolved, last?.n ?? 0)

@@ -10,7 +10,8 @@ import type { PipelineDeps } from './handlers'
 import type { ChatMessage } from '../models/types'
 import { chatJson } from './llm'
 import { candidateFacts, chapterNotes, numberedNotes, unmergedNotes } from './nfcontext'
-import { buildMessages } from './prompts'
+import { calendarFor } from './calendar'
+import { appendToPrompt, buildMessages } from './prompts'
 import { dimensionsFor } from './scoring'
 
 const isAbort = (err: unknown) => ['AbortError', 'BudgetError'].includes((err as Error)?.name)
@@ -232,6 +233,7 @@ export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): v
         scores_example: JSON.stringify(Object.fromEntries(dimensionsFor(role).map((x) => [x, 8])))
       })
       run.version = version
+      appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([
         { name: 'whole book text', tokens: Math.round(bookText.length / 4) },
         { name: 'fact base', tokens: Math.round(digest.length / 4) },

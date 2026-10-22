@@ -13,7 +13,7 @@ What the book has established (bible, summaries, passages, the previous chapter)
 The new chapter:
 {{chapter_text}}
 
-Look for real contradictions: names, ages, places, objects, the timeline, who knows what, a character acting against what was set up, a thread that is dropped or closed wrongly. Be calibrated: say "revise" only for a concrete contradiction you can quote from both places, and say exactly what to change. Style and taste are not your job. Score continuity from 1 to 10 (7 means good enough). If a statement about the real world in the chapter looks wrong and you cannot be sure, put a short, precise question in "research_questions" (at most two); leave it empty otherwise.
+Look for real contradictions: names, ages, places, objects, the timeline, who knows what, a character acting against what was set up, a thread that is dropped or closed wrongly. Be calibrated: say "revise" only for a concrete contradiction you can quote from both places, and say exactly what to change. Style and taste are not your job. Score continuity from 1 to 10 (7 means good enough). When the verdict is "revise", give every contradiction as one string in "problems": where it is (the chapter and a short quote), the place it contradicts (a short quote), and what to change; "notes" is the summary and "chapters" holds chapter numbers only, as plain numbers. Leave "problems" empty for "pass". If a statement about the real world in the chapter looks wrong and you cannot be sure, put a short, precise question in "research_questions" (at most two); leave it empty otherwise.
 
 Reply with one JSON object like this:
-{"verdict": "pass", "scores": {"continuity": 9}, "notes": "...", "chapters": [], "research_questions": []}
+{"verdict": "pass", "scores": {"continuity": 9}, "notes": "...", "chapters": [], "problems": [], "research_questions": []}

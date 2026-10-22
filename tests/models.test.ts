@@ -910,6 +910,26 @@ describe('client provider', () => {
     expect(await prose.done).toBe('Once upon a time.')
   })
 
+  it('refuses a prose answer that repeats the task\'s instructions, keeps the task leased, and takes the clean one', async () => {
+    const q = new ClientTaskQueue()
+    const forbid = ['write only the script, with no title, heading or notes.', 'keep it a visual novel script, one element per line: scene: place and time']
+    const { task, done } = q.add({ messages: msgs }, { job: 'j3', forbid })
+    expect(task.forbid).toEqual(forbid)
+    expect(q.lease()!.id).toBe(task.id)
+    const leaky = 'SCENE: The dome, night\nMara waits.\n\nWrite only the script, with no title, heading or notes.'
+    const refused = q.submit(task.id, leaky) as { accepted: false; problems: string[] }
+    expect(refused.accepted).toBe(false)
+    expect(refused.problems[0]).toMatch(/^the answer repeats the task's instructions \("write only the script, with no title/)
+    expect(refused.problems[0]).toContain('send only the chapter text')
+    expect(q.counts()).toEqual({ waiting: 0, leased: 1 })
+    const clean = 'SCENE: The dome, night\nMara waits.'
+    expect(q.submit(task.id, clean)).toEqual({ accepted: true })
+    expect(await done).toBe(clean)
+    // a structured task has no such check, and a task without forbid lines takes anything
+    const json = q.add({ messages: msgs, schema: objectSchema }, { job: 'j4', forbid })
+    expect(json.task.forbid).toBeUndefined()
+  })
+
   it('chat waits for the answer, yields it as one delta with estimated usage, and costs nothing', async () => {
     const { registry } = await registryWith({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] } })
     const router = new ModelRouter(registry, undefined)

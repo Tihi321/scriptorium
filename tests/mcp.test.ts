@@ -74,7 +74,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'refresh_factbase']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -392,7 +392,8 @@ describe('MCP client tasks and reopen_book', () => {
       output: 'Reply with one JSON object that matches `schema`. No prose, no code fence.',
       leaseMinutes: 30
     })
-    expect(got.messages).toHaveLength(3)
+    // two system messages and one user message: no `messages`, so the prompt is sent once
+    expect(got).not.toHaveProperty('messages')
     expect((await call(c, 'factory_status')).data.clientTasks).toEqual({ waiting: 0, leased: 1 })
     // a bad answer comes back with its problems and keeps the task; give it back and take it again
     const bad = await call(c, 'submit_client_task', { taskId: got.taskId, text: '{"name": "x"}' })
@@ -424,8 +425,8 @@ describe('MCP client tasks and reopen_book', () => {
     await makeBook(env!)
     await makeBook(env!, 'running-book', 'drafting')
     await makeBook(env!, 'rejected-book', 'rejected')
-    expect((await call(c, 'reopen_book', { book: 'demo-book', mode: 'rewrite' })).raw).toMatch(/not a rejected book \(stage: published\)/)
-    expect((await call(c, 'reopen_book', { book: 'running-book', mode: 'review' })).raw).toMatch(/not a rejected book \(stage: drafting\)/)
+    expect((await call(c, 'reopen_book', { book: 'demo-book', mode: 'rewrite' })).raw).toMatch(/give the chapters to rewrite/)
+    expect((await call(c, 'reopen_book', { book: 'running-book', mode: 'review' })).raw).toMatch(/not a rejected or published book \(stage: drafting\)/)
     expect((await call(c, 'reopen_book', { book: 'nobody', mode: 'review' })).raw).toMatch(/no book/)
     expect((await call(c, 'reopen_book', { book: 'rejected-book', mode: 'redo' })).isError).toBe(true)
     expect((await call(c, 'reopen_book', { book: 'rejected-book', mode: 'review', chapters: [1] })).raw).toMatch(/only apply to mode rewrite/)
@@ -556,5 +557,201 @@ describe('MCP newspaper', () => {
     // an article is not a book that can be adapted, and the factory status shows the article limit
     expect((await call(c, 'adapt_book', { book: 'chips', format: 'visual-novel' })).raw).toMatch(/newspaper article/)
     expect((await call(c, 'factory_status')).data.maxArticlesInProgress).toBe(3)
+  })
+})
+
+describe('MCP: the prompt once, waiting for a book, absolute paths, book models and reopening', () => {
+  const clientEnv = async () => {
+    env = await makeEnv({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    return connect(mcp!.url)
+  }
+
+  it('a follow-up round sends the conversation in messages (without the system turns) and only the last turn in user', async () => {
+    const c = await clientEnv()
+    env!.engine.scheduler.register('t', async (ctx) => {
+      const r = await ctx.chat({
+        messages: [
+          { role: 'system', content: 'Be brief.' },
+          { role: 'user', content: 'Name the book.' },
+          { role: 'assistant', content: 'It is called X.' },
+          { role: 'user', content: 'Fix the title.' }
+        ]
+      })
+      return { result: r.text }
+    })
+    await env!.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const got = await waitFor(async () => {
+      const r = await call(c, 'get_client_task')
+      return r.data.taskId ? r.data : null
+    })
+    expect(got.system).toBe('Be brief.')
+    expect(got.user).toBe('Fix the title.')
+    expect(got.messages).toEqual([
+      { role: 'user', content: 'Name the book.' },
+      { role: 'assistant', content: 'It is called X.' },
+      { role: 'user', content: 'Fix the title.' }
+    ])
+    expect((await call(c, 'submit_client_task', { taskId: got.taskId, text: 'Done.' })).data).toEqual({ accepted: true })
+  })
+
+  it('wait_for_book: a story without a book times out, an unknown slug is an error, a book that gets published returns at once', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await call(c, 'add_story', { title: 'The Bell', premise: 'A bell under the sea.' })
+    const t0 = Date.now()
+    const waited = await call(c, 'wait_for_book', { slug: 'the-bell', timeout_seconds: 1 })
+    expect(waited.isError).toBe(false)
+    expect(waited.data).toMatchObject({ done: false, reason: 'timeout', story: 'the-bell', book: null, stage: null, clientTasks: { waiting: 0, leased: 0 } })
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(900)
+    expect((await call(c, 'wait_for_book', { slug: 'nope', timeout_seconds: 1 })).raw).toMatch(/no book or story "nope"/)
+
+    await makeBook(env!, 'wb', 'drafting')
+    const pending = call(c, 'wait_for_book', { slug: 'wb', timeout_seconds: 30 })
+    await new Promise((r) => setTimeout(r, 300))
+    await env!.engine.books.update('wb', () => ({ stage: 'published' }))
+    const done = await pending
+    expect(done.data).toMatchObject({ done: true, reason: 'published', book: 'wb', story: null, title: 'Demo Book', stage: 'published', chaptersWritten: 1, folder: path.join(env!.dir, 'books', 'wb') })
+    expect(done.data.waitedMs).toBeLessThan(2500)
+  })
+
+  it('wait_for_book returns when a model request of the book waits for the client', async () => {
+    const c = await clientEnv()
+    await makeBook(env!, 'b1', 'drafting')
+    env!.engine.scheduler.register('t', async (ctx) => ({ result: (await ctx.chat({ messages: [{ role: 'user', content: 'Say hi.' }] })).text }))
+    await env!.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(async () => (await call(c, 'list_client_tasks')).data.waiting === 1, 8000, 'the waiting task')
+    const r = await call(c, 'wait_for_book', { slug: 'b1', timeout_seconds: 30 })
+    expect(r.data).toMatchObject({ done: false, reason: 'client-task', book: 'b1', stage: 'drafting', clientTasks: { waiting: 1, leased: 0 } })
+    // with stop_on_client_task false it waits for the timeout
+    expect((await call(c, 'wait_for_book', { slug: 'b1', timeout_seconds: 1, stop_on_client_task: false })).data).toMatchObject({ reason: 'timeout' })
+    const task = (await call(c, 'get_client_task')).data
+    await call(c, 'submit_client_task', { taskId: task.taskId, text: 'hi' })
+  })
+
+  it('paths are absolute: dataDir in factory_status, the folder in list_books, paths in get_book', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await makeBook(env!, 'demo-book', 'published')
+    expect((await call(c, 'factory_status')).data.dataDir).toBe(env!.dir)
+    const folder = path.join(env!.dir, 'books', 'demo-book')
+    expect((await call(c, 'list_books')).data[0].folder).toBe(folder)
+    const got = (await call(c, 'get_book', { book: 'demo-book' })).data
+    expect(got.paths).toMatchObject({ dataDir: env!.dir, folder, chapters: path.join(folder, 'chapters'), epub: null, coverPng: null, readerDir: null, articlePage: null, articleMarkdown: null })
+    await mkdir(path.join(folder, 'out'), { recursive: true })
+    await writeFile(path.join(folder, 'out', 'demo-book.epub'), 'x')
+    expect((await call(c, 'get_book', { book: 'demo-book' })).data.paths.epub).toBe(path.join(folder, 'out', 'demo-book.epub'))
+    expect((await call(c, 'get_book', { book: 'demo-book' })).data.epub).toBe('books/demo-book/out/demo-book.epub') // the relative field stays
+  })
+
+  it('a book model can be set on any stage, and cleared on a published book', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await makeBook(env!, 'pub', 'published')
+    await makeBook(env!, 'bad', 'failed')
+    const set = await call(c, 'set_book_model', { book: 'bad', role: 'writer', model: 'loc/m1' })
+    expect(set.isError).toBe(false)
+    expect(set.data.roleModels).toEqual({ writer: 'loc/m1' })
+    expect((await call(c, 'set_book_model', { book: 'pub', role: 'writer', model: 'loc/m1' })).data.roleModels).toEqual({ writer: 'loc/m1' })
+    const cleared = await call(c, 'set_book_model', { book: 'pub', role: 'writer', model: null })
+    expect(cleared.isError).toBe(false)
+    expect(cleared.data.roleModels).toEqual({})
+    expect((await engineBook('pub')).data.role_models).toEqual({})
+  })
+
+  it('reopen_book takes a published book and refuses one in progress', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await makeBook(env!, 'pub', 'published')
+    await makeBook(env!, 'wip', 'drafting')
+    expect((await call(c, 'reopen_book', { book: 'wip', mode: 'review' })).raw).toMatch(/not a rejected or published book/)
+    const r = await call(c, 'reopen_book', { book: 'pub', mode: 'review' })
+    expect(r.isError).toBe(false)
+    expect(r.data.stage).toBe('reviewing')
+    expect((await engineBook('pub')).data).toMatchObject({ round: 1, reopened_from: 'published', extra_rounds: 1 })
+  })
+
+  it('get_script returns the parsed script of a script book and refuses a prose book', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await env!.engine.books.create('vn', { title: 'The Lighthouse Letters', author: 'Mara Quill', genre: 'Mystery', format: 'choice-visual-novel', stage: 'drafting', target_words: 5000, script: true }, '')
+    await writeFile(
+      env!.engine.books.file('vn', 'outline.md'),
+      ['---', 'kind: outline', 'chapters:', '  - { n: 1, title: The Late Boat, summary: s, choices: [{ text: Wait, to: 2 }] }', '  - { n: 2, title: The End, summary: s, ending: "quiet" }', '---', 'Outline', ''].join('\n')
+    )
+    await mkdir(path.join(env!.engine.books.dir('vn'), 'bible'), { recursive: true })
+    await writeFile(
+      env!.engine.books.file('vn', 'bible', 'bible.md'),
+      ['---', 'kind: bible', '---', '## Characters', '- **Mara**: Seventeen, small and wiry. Voice: short sentences', '', '## Places', '- **The harbour wall**: A long stone pier at dusk.', '', '## Style', 'Moody and rain-soaked.', ''].join('\n')
+    )
+    await env!.engine.books.writeChapter('vn', { n: 1, title: 'The Late Boat', round: 0, body: 'SCENE: The harbour wall, dusk\nRain needles the grey water.\nON SCREEN: Mara (worried)\nMARA (worried): He is late.\nFootsteps.\n---\n' })
+    await env!.engine.books.writeChapter('vn', { n: 2, title: 'The End', round: 0, body: 'SCENE: The kitchen, night\nA low room.\nMARA: Home.\n' })
+    const all = (await call(c, 'get_script', { book: 'vn' })).data
+    expect(all).toMatchObject({
+      slug: 'vn',
+      title: 'The Lighthouse Letters',
+      author: 'Mara Quill',
+      style: 'Moody and rain-soaked.',
+      characters: [{ name: 'Mara', looks: 'Seventeen, small and wiry.', voice: 'short sentences' }],
+      places: [{ name: 'The harbour wall', looks: 'A long stone pier at dusk.' }]
+    })
+    expect(all.chapters).toHaveLength(2)
+    expect(all.chapters[0]).toMatchObject({ n: 1, title: 'The Late Boat', choices: [{ text: 'Wait', to: 2 }], ending: null })
+    expect(all.chapters[0].scenes[0]).toMatchObject({ place: 'The harbour wall', time: 'dusk', background: 'Rain needles the grey water.' })
+    expect(all.chapters[1]).toMatchObject({ n: 2, ending: 'quiet', choices: [] })
+    const one = (await call(c, 'get_script', { book: 'vn', chapter: 2 })).data
+    expect(one.chapters.map((x: { n: number }) => x.n)).toEqual([2])
+    expect((await call(c, 'get_script', { book: 'vn', chapter: 5 })).raw).toMatch(/not written/)
+    await makeBook(env!, 'prose', 'published')
+    expect((await call(c, 'get_script', { book: 'prose' })).raw).toMatch(/not a visual novel script \(its format is novel\)/)
+  })
+
+  it('refresh_factbase refuses a fiction book', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await makeBook(env!, 'prose', 'published')
+    const r = await call(c, 'refresh_factbase', { book: 'prose' })
+    expect(r.isError).toBe(true)
+    expect(r.raw).toMatch(/not a non-fiction/)
+  })
+})
+
+/** book.md of a book in the current test environment. */
+async function engineBook(slug: string) {
+  return parseMd(await readFile(path.join(env!.dir, 'books', slug, 'book.md'), 'utf8'))
+}
+
+describe('MCP: exclusive pins and what blocks the factory', () => {
+  it('assign_agent {exclusive: true} shows pinExclusive, and freeing the agent clears it', async () => {
+    env = await makeEnv({ paused: true, roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    await makeBook(env, 'b1', 'drafting')
+    const plain = await call(c, 'assign_agent', { agent: 'writer-ann', book: 'b1' })
+    expect(plain.data).toMatchObject({ pin: 'b1', pinExclusive: false })
+    const exclusive = await call(c, 'assign_agent', { agent: 'writer-ann', book: 'b1', exclusive: true })
+    expect(exclusive.data).toMatchObject({ pin: 'b1', pinExclusive: true })
+    expect((await call(c, 'list_agents')).data[0]).toMatchObject({ pinExclusive: true })
+    const freed = await call(c, 'assign_agent', { agent: 'writer-ann', book: null })
+    expect(freed.data).toMatchObject({ pin: null, pinExclusive: false })
+  })
+
+  it('factory_status lists the providers, the embeddings server, and the jobs no model can take', async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'Ann' }] })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const idle = (await call(c, 'factory_status')).data
+    expect(idle.blocked).toEqual([])
+    expect(idle.providers).toEqual([{ id: 'loc', dayFull: false, resetsAt: null, down: false }])
+    expect(idle.embeddings).toBeNull() // the test config has no embedding model
+    env.engine.scheduler.register('t', async () => ({ result: 'ok' }))
+    env.engine.router.limiter.markDayFull(env.engine.registry.providers.get('loc')!)
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    const status = await waitFor(async () => {
+      const s = (await call(c, 'factory_status')).data
+      return s.blocked.length ? s : null
+    }, 5000, 'a blocked job')
+    expect(status.blocked).toEqual([{ job: 'b1--t--u1--r0', role: 'writer', agent: 'writer-ann', reason: expect.stringContaining('loc/m1: used up its requests for today') }])
+    expect(status.providers[0]).toMatchObject({ id: 'loc', dayFull: true, down: false, resetsAt: expect.stringMatching(/T00:00:00\.000Z$/) })
   })
 })

@@ -137,6 +137,12 @@ const OLD_PROVIDERS = [
   '---',
   'kind: providers',
   'providers:',
+  '  - id: client',
+  '    kind: client',
+  '    enabled: false',
+  '    models:',
+  '      - id: claude-code',
+  '        context: 200000',
   '  - id: tavily',
   '    kind: search',
   '    engine: tavily',
@@ -172,7 +178,7 @@ describe('migration: the client search provider for an existing data folder', ()
     const parsed = providersSchema.parse(parseMd(after).data)
     expect(parsed.search_order).toEqual(['tavily', 'client-search', 'wikipedia', 'brave'])
     expect(parsed.providers.find((p) => p.id === 'client-search')).toMatchObject({ kind: 'search', engine: 'client', enabled: true, wait_minutes: 10 })
-    expect(parsed.providers.map((p) => p.id)).toEqual(['tavily', 'wikipedia', 'brave', 'client-search'])
+    expect(parsed.providers.map((p) => p.id)).toEqual(['client', 'tavily', 'wikipedia', 'brave', 'client-search'])
     expect(after).toContain('# my own order')
     expect(after.startsWith(text.slice(0, text.indexOf('# my own order')))).toBe(true)
     const second = await initDataFolder(dir, seedDir)

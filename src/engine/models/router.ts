@@ -78,8 +78,20 @@ export class ModelRouter {
   }
 
   /** The provider can take requests now: its server is up and its daily limit isn't used up. */
-  private usable(p: ProviderInfo): boolean {
+  usable(p: ProviderInfo): boolean {
     return !p.down && !this.limiter.dayFull(p)
+  }
+
+  /** Why a provider takes no request now, in words for the office and `factory_status`, or null when it takes one. */
+  blockReason(p: ProviderInfo): string | null {
+    if (p.down) return `down (${p.baseUrl ?? p.id} does not answer)`
+    if (this.limiter.dayFull(p)) {
+      const at = new Date(this.limiter.dayResetsAt()).toISOString().slice(11, 16)
+      return `used up its requests for today (resets ${at} UTC)`
+    }
+    if (this.limiter.rpmWaitMs(p) > 0) return `rate limit (${p.rpm}/min)`
+    if (this.limiter.inFlight(p.id) >= p.concurrency) return `busy (${this.limiter.inFlight(p.id)} of ${p.concurrency} requests at once)`
+    return null
   }
 
   /**
