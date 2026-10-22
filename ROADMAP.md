@@ -1,6 +1,6 @@
 # Roadmap
 
-What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-19 this roadmap's own items) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
+What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-16 VN media lines, SCP-19 this roadmap's own items) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
 
 ## Where it stands (2026-10-22, branch SCP-19_roadmap-tasks)
 
@@ -15,7 +15,7 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
 - **Verified live:** full book runs over MCP with Claude as the client writer, the series gate and carry-over (Hartley & Varga book 2), a short story, an article with client web research, and linear and choice VN adaptations that VN Studio built and the user played.
 - **Hub tasks that change this repo:**
   - HUB-04 (SCP-14 live check).
-  - HUB-06 (VN media lines, `SCP-16`).
+  - HUB-06 (VN media lines, `SCP-16`): **done in code** on `SCP-16-18_hub-roadmap` (2026-10-22), not merged: the VN prompts, the outline `aliases`, the cue lines in `get_script`, EPUB and the humanizer guard (details in `.claude/tickets/SCP-16-vn-media-lines/changelog.md`). Open: the live run with VN Studio (hub step H2), which the user plays.
   - HUB-10 (puzzle-mystery format, later phase, `SCP-18`).
   - HUB-11 (screenplay writer, `SCP-17`).
 
