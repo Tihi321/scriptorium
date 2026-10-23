@@ -73,7 +73,10 @@ describe('the embeddings server is down', () => {
     await waitFor(async () => (await jobsIn(e, 'done')).includes(`${slug}--draft--ch01--r0.md`), 60000, 'chapter 1 drafted')
     const queued = await waitFor(async () => {
       if (!(await jobsIn(e, 'queued')).includes(`${indexJob}.md`)) return null
-      const d = parseMd(await readFile(path.join(e.dir, 'jobs', 'queued', `${indexJob}.md`), 'utf8')).data
+      // the job is claimed and put back again while it waits: it can leave queued/ between the listing and the read
+      const text = await readFile(path.join(e.dir, 'jobs', 'queued', `${indexJob}.md`), 'utf8').catch(() => null)
+      if (text === null) return null
+      const d = parseMd(text).data
       return d.not_before ? d : null
     }, 60000, 'the index job waiting for the server')
     expect(queued.attempts).toBe(0)
