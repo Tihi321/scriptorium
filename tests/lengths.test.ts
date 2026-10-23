@@ -271,7 +271,7 @@ describe('a rewrite from an owner note is tightened too (pipeline)', () => {
     })
     const doneNote = async (text: string, known: Set<string>) => {
       await e.engine.handleCommand({ type: 'addBookNote', book: slug, text, chapter: 1, rewrite: true })
-      const file = (await waitFor(async () => (await readdir(path.join(e.dir, 'jobs', 'done'))).find((f) => f.startsWith(`${slug}--rewrite--ch01--note`) && !known.has(f)), 30000, `the rewrite for "${text}"`))!
+      const file = (await waitFor(async () => (await readdir(path.join(e.dir, 'jobs', 'done'))).find((f) => f.startsWith(`${slug}--rewrite--ch01--note`) && f.endsWith('.md') && !known.has(f)), 30000, `the rewrite for "${text}"`))!
       known.add(file)
       return readFile(path.join(e.dir, 'jobs', 'done', file), 'utf8')
     }

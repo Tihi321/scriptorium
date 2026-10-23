@@ -394,7 +394,7 @@ describe('a mystery with puzzles through the pipeline (mock models)', () => {
       const found = await waitFor(async () => {
         for (const s of await e.engine.books.slugs()) {
           const dir = path.join(e.dir, 'books', s, 'reviews')
-          const name = (await readdir(dir).catch(() => [] as string[])).find((f) => /^book-continuity-checker-r0/.test(f))
+          const name = (await readdir(dir).catch(() => [] as string[])).find((f) => f === 'book-continuity-checker-r0.md')
           if (name) return { dir, name }
         }
         return null

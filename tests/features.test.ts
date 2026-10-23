@@ -159,6 +159,8 @@ describe('commands', () => {
     // the UI hears about it at once, so the picker keeps the new model
     expect(last('agent.updated')).toMatchObject({ agent: { id: agent.id, model: 'r/review-model', resolvedModel: 'r/review-model' } })
     await env.engine.handleCommand({ type: 'setModel', agent: agent.id, model: null })
+    // a writer that is still working on a job shows the model of that job until its request starts again on the new one
+    await waitFor(async () => (await env.engine.snapshot()).agents.find((a) => a.id === agent.id)?.resolvedModel === 'w/writer-model', 10000, 'the writer back on its role model')
     expect((await env.engine.snapshot()).agents.find((a) => a.id === agent.id)).toMatchObject({ model: null, resolvedModel: 'w/writer-model' })
     expect(last('agent.updated')).toMatchObject({ agent: { id: agent.id, model: null } })
     // a new role default goes out with a snapshot, for the pickers

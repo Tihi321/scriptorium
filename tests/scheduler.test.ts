@@ -365,7 +365,8 @@ describe('agent controls and hot reload', () => {
     await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'finished')
     await waitFor(() => !existsSync(fileOf(runner.agent)), 3000, 'file removed')
 
-    const other = env.engine.agents.list()[0]!.id
+    // the fired agent's file is gone before the registry forgets it (AgentStore.remove), so list()[0] can still be the fired one
+    const other = env.engine.agents.list().find((x) => x.id !== runner.agent)!.id
     env.mock.onAny({ text: 'text '.repeat(40), chunkDelayMs: 60, chunks: 40 })
     await env.engine.jobs.enqueue({ id: 'j2', task: 't', role: 'writer' })
     await waitFor(() => env!.engine.scheduler.runningJobs().length === 1, 3000, 'j2 running')

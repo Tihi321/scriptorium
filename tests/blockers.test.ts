@@ -14,6 +14,17 @@ afterEach(async () => {
 })
 
 const jobsIn = (e: Env, state: string) => readdir(path.join(e.dir, 'jobs', state)).then((f) => f.filter((n) => n.endsWith('.md')))
+// files are replaced by a rename; a read in that instant can find no file (Windows), so it tries again a few times
+const readText = async (file: string) => {
+  for (let i = 0; ; i++) {
+    try {
+      return await readFile(file, 'utf8')
+    } catch (err) {
+      if (i >= 4 || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
+}
 
 describe('a story with models: the start job uses them', () => {
   it('add_story {models: {editor-in-chief: client}} makes the start_book job a client task, and the book starts with the models', async () => {
@@ -38,7 +49,7 @@ describe('a story with models: the start job uses them', () => {
     expect(e.engine.clientQueue.submit(leased.id, JSON.stringify({ format: 'bedtime-toddler', title: 'The Bell Fox', genre: 'Bedtime', notes: '' }))).toEqual({ accepted: true })
     const slug = await waitFor(async () => (await readdir(path.join(e.dir, 'books')))[0] ?? null, 30000, 'the book')
     const data = await waitFor(async () => {
-      const d = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8').catch(() => '')).data
+      const d = parseMd(await readText(path.join(e.dir, 'books', slug, 'book.md')).catch(() => '')).data
       return d.title ? d : null
     }, 30000, 'book.md')
     expect(data.role_models).toEqual({ 'editor-in-chief': 'client/claude-code' })
@@ -67,15 +78,15 @@ describe('the embeddings server is down', () => {
     }, 60000, 'the index job waiting for the server')
     expect(queued.attempts).toBe(0)
     expect(await jobsIn(e, 'failed')).toEqual([])
-    expect((await parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data).stage).not.toBe('failed')
+    expect((await parseMd(await readText(path.join(e.dir, 'books', slug, 'book.md'))).data).stage).not.toBe('failed')
     expect(e.logs.some((l) => /embeddings server .* is not running/.test(l) || /search skipped/.test(l))).toBe(true)
-    expect(parseMd(await readFile(path.join(e.dir, 'books', slug, 'summaries', 'ch-01.md'), 'utf8')).data.indexed).not.toBe(true)
+    expect(parseMd(await readText(path.join(e.dir, 'books', slug, 'summaries', 'ch-01.md'))).data.indexed).not.toBe(true)
 
     // the server answers again: the job goes on at once (its wait is cleared here, instead of waiting 30 seconds)
     down = false
     await e.engine.jobs.update('queued', indexJob, { not_before: null })
     e.engine.scheduler.kick()
-    await waitFor(async () => parseMd(await readFile(path.join(e.dir, 'books', slug, 'summaries', 'ch-01.md'), 'utf8')).data.indexed === true, 60000, 'chapter 1 indexed')
+    await waitFor(async () => parseMd(await readText(path.join(e.dir, 'books', slug, 'summaries', 'ch-01.md'))).data.indexed === true, 60000, 'chapter 1 indexed')
     expect(await jobsIn(e, 'failed')).toEqual([])
   }, 180000)
 })

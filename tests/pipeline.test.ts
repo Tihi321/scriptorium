@@ -25,7 +25,17 @@ afterEach(async () => {
 })
 
 const parseMdFile = async (f: string) => parseMd(await readFile(f, 'utf8'))
-const bookMd = async (e: Env, slug: string) => parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8'))
+// book.md is replaced by a rename; a read in that instant can find no file (Windows), so the read tries again a few times
+const bookMd = async (e: Env, slug: string) => {
+  for (let i = 0; ; i++) {
+    try {
+      return parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8'))
+    } catch (err) {
+      if (i >= 4 || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
+}
 const firstBook = async (e: Env) => (await readdir(path.join(e.dir, 'books')))[0]
 const stageOf = async (e: Env) => {
   try {
