@@ -39,6 +39,21 @@ export interface SourceBook {
   chapterCount: number
 }
 
+/**
+ * A visual novel script is about this many times the words of the prose it adapts: dialogue lines, one speaker each, and the scene and cue lines
+ * add to the story (the hub's 5,900-word short story came out at 10,212 words in six chapters, 1.7 times).
+ */
+export const ADAPT_WORD_FACTOR = 1.7
+
+/**
+ * The length an adaptation is meant to have: the source's words times `ADAPT_WORD_FACTOR`, within the format's range. Only for a visual novel script
+ * (a screenplay is held to its runtime, not its words). Null when the source has no words or the format is not a visual novel.
+ */
+export function adaptTargetWords(sourceWords: number, fmt: { words: [number, number]; script?: boolean; screenplay?: boolean }): number | null {
+  if (!fmt.script || fmt.screenplay || !(sourceWords > 0)) return null
+  return Math.min(fmt.words[1], Math.max(fmt.words[0], Math.round(sourceWords * ADAPT_WORD_FACTOR)))
+}
+
 /** The book a book adapts (its `source_book`), or null when it adapts none or the source is no longer in the library. */
 export async function sourceOf(d: { books: BookStore }, slug: string): Promise<SourceBook | null> {
   const src = (await d.books.read(slug))?.data.source_book

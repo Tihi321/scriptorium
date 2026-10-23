@@ -32,7 +32,7 @@ import { findMarkers, stripMarkers } from '../research/markers'
 import type { ResearchService, SearchService } from '../research/service'
 import { bibleFor, nonfictionContext } from './nfcontext'
 import { chatJson, cleanProse } from './llm'
-import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
+import { adaptationFamily, adaptSection, adaptTargetWords, ADAPT_WORD_FACTOR, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
@@ -496,7 +496,17 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     }
     const fmt = fixedFormat ?? allowed.find((f) => f.id === r.value.format) ?? allowed[0]
     if (!fmt) throw new Error(idea?.data.source_book ? 'no enabled visual novel format for this adaptation' : 'no enabled format for this topic')
-    const target = clamp(Math.round(r.value.target_words ?? (fmt.words[0] + fmt.words[1]) / 2), fmt.words[0], fmt.words[1])
+    let target = clamp(Math.round(r.value.target_words ?? (fmt.words[0] + fmt.words[1]) / 2), fmt.words[0], fmt.words[1])
+    // an adaptation's length follows its source (the format's middle would send every chapter of a short story's adaptation through a length rewrite)
+    let sourceWords = 0
+    if (idea?.data.source_book) {
+      sourceWords = (await d.books.chapters(idea.data.source_book)).reduce((n, c) => n + c.words, 0)
+      const fromSource = adaptTargetWords(sourceWords, fmt)
+      if (fromSource) {
+        target = fromSource
+        d.log(`start_book: "${idea.title}" adapts a book of ${sourceWords} words: target ${target} words (the source times ${ADAPT_WORD_FACTOR}, within the format's ${fmt.words[0]}-${fmt.words[1]})`)
+      } else sourceWords = 0
+    }
     const title = fixedTitle || r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     const slug = await d.books.freeSlug(title)
     await d.books.create(
@@ -518,6 +528,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
         target_words: target,
+        ...(sourceWords ? { target_from_source_words: sourceWords } : {}),
         ...(idea && idea.data.role_models && typeof idea.data.role_models === 'object' ? { role_models: idea.data.role_models } : {}),
         ...(idea?.data.series ? { series: idea.data.series, ...(idea.data.series_index ? { series_index: idea.data.series_index } : {}) } : {}),
         idea: idea?.slug ?? null,

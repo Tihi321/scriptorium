@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Bible } from '../src/engine/memory/bible'
 import { MemoryIndex, reindex } from '../src/engine/memory/index'
 import { hashEmbed } from '../src/engine/models/mock'
-import { adaptSection, normalizeSourceChapters, sourceExcerpt, uncovered, withSourceBible } from '../src/engine/pipeline/adapt'
+import { adaptSection, adaptTargetWords, normalizeSourceChapters, sourceExcerpt, uncovered, withSourceBible } from '../src/engine/pipeline/adapt'
 import { BookStore } from '../src/engine/pipeline/books'
 import { pickNext } from '../src/engine/pipeline/handlers'
 import { dimensionsFor } from '../src/engine/pipeline/scoring'
@@ -433,10 +433,43 @@ describe('an adaptation in the pipeline', () => {
     const slug = await waitFor(async () => (await e.engine.books.slugs()).find((s) => s !== 'moon-lamp') ?? null, 30000, 'the script book to start')
     const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
     expect(book).toMatchObject({ title: 'The Moon Lamp', format: 'visual-novel', source_book: 'moon-lamp', script: true })
-    expect(Number(book.target_words)).toBe(2600) // the middle of the format's 1200 to 4000
+    expect(Number(book.target_words)).toBe(1200) // the source has a few dozen words: its length times 1.7, held at the format's minimum (1200 to 4000)
+    expect(book.target_from_source_words).toBe(29)
     expect(e.counters.calls.start_book ?? 0).toBe(0)
     expect(e.logs.some((l) => l.includes('started without asking the editor-in-chief'))).toBe(true)
   }, 60000)
+
+  it('SCP-37: the length target follows the source: its words times 1.7, within the format range', async () => {
+    const e = await makePipelineEnv({
+      format: 'visual-novel',
+      beforeStart: async (dir) => {
+        await writeSource(dir)
+        // three chapters of 470 words: 1410 words, so 2397 for a script
+        for (const n of [1, 2, 3]) await writeMd(path.join(dir, 'books', 'moon-lamp', 'chapters', `ch-0${n}.md`), { kind: 'chapter', n, title: `Source ${n}`, round: 0 }, '\n' + Array.from({ length: 470 }, () => 'lamp').join(' ') + '\n')
+        const file = path.join(dir, 'config', 'formats.md')
+        const doc = parseMd(await readFile(file, 'utf8'))
+        const fmts = (doc.data.formats as { id: string }[]).map((f) => (f.id === 'visual-novel' ? { ...f, words: [1200, 4000], chapters: [4, 4] } : f))
+        await writeMd(file, { ...doc.data, formats: fmts }, doc.body)
+      }
+    })
+    env = e
+    await e.engine.adaptBook({ book: 'moon-lamp', format: 'visual-novel' })
+    const slug = await waitFor(async () => (await e.engine.books.slugs()).find((s) => s !== 'moon-lamp') ?? null, 30000, 'the script book to start')
+    const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
+    expect(book.target_words).toBe(2397)
+    expect(book.target_from_source_words).toBe(1410)
+    expect(e.logs.some((l) => l.includes('adapts a book of 1410 words: target 2397 words'))).toBe(true)
+  }, 60000)
+
+  it('SCP-37: adaptTargetWords clamps to the format range, and leaves a screenplay and an empty source alone', () => {
+    const vn = { words: [8000, 25000] as [number, number], script: true }
+    expect(adaptTargetWords(5900, vn)).toBe(10030) // the hub's short story: not the format's 18,000
+    expect(adaptTargetWords(100, vn)).toBe(8000)
+    expect(adaptTargetWords(60000, vn)).toBe(25000)
+    expect(adaptTargetWords(5900, { ...vn, screenplay: true })).toBeNull()
+    expect(adaptTargetWords(0, vn)).toBeNull()
+    expect(adaptTargetWords(5900, { words: [8000, 25000] })).toBeNull()
+  })
 
   it('a story with choices keeps the source ending as the canon path', async () => {
     const e = await adaptEnv()
