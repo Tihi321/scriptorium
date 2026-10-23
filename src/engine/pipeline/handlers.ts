@@ -191,6 +191,10 @@ export const chapterRuntime = (f: FormatEntry, chapters: number): number | '' =>
 /** A drafted chapter of a long book under this share of its target words gets an expand retry. */
 export const EXPAND_BELOW = 0.8
 
+/** The pitch prompts ask for under this many words; a pitch more than 3 % over (above 309 words) gets one tighten retry. */
+const PITCH_WORDS = 300
+const PITCH_OVER = 1.03
+
 /** A chapter over this share of its target words gets one tighten retry (every format, drafts and round rewrites). */
 export const TRIM_ABOVE = 1.2
 
@@ -317,6 +321,36 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       ctx.log(`the tighten retry failed (${(err as Error).message}): keeping the first answer of ${words} words`)
     }
     return { body, reply: null }
+  }
+
+  /**
+   * The pitch prompts ask for under PITCH_WORDS words. A pitch more than PITCH_OVER (3 %) over gets one more request to cut it;
+   * the shorter answer is kept when it is not empty and shorter, else the first one stays. Whatever comes back is accepted.
+   */
+  const tightenPitch = async (ctx: JobContext, run: Run, messages: ChatMessage[], text: string): Promise<string> => {
+    const words = countWords(text)
+    if (words <= PITCH_WORDS * PITCH_OVER) return text
+    try {
+      const retry = await run.chat({
+        messages: [
+          ...messages,
+          { role: 'assistant', content: text },
+          { role: 'user', content: `This pitch has ${words} words, but it must stay under ${PITCH_WORDS}. Cut it to about ${PITCH_WORDS - 20} words and keep every part the instructions asked for, the ending included. Write the whole pitch again, as plain text only.` }
+        ],
+        maxTokens: 4000
+      })
+      const shorter = cleanProse(retry.text)
+      const now = countWords(shorter)
+      if (shorter.length >= 40 && now < words) {
+        ctx.log(`the pitch was ${words} words (limit ${PITCH_WORDS}); tightened to ${now}`)
+        return shorter
+      }
+      ctx.log(`the pitch tighten retry gave ${now} words: keeping the first answer of ${words}`)
+    } catch (err) {
+      if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
+      ctx.log(`the pitch tighten retry failed (${(err as Error).message}): keeping the first answer of ${words} words`)
+    }
+    return text
   }
 
   /** A visual novel script: its SCENE places are the bible's names, and the places the bible lacks are added to it (see scriptPlaces.ts). */
@@ -492,6 +526,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       const r = await run.chat({ messages, maxTokens: 4000 })
       text = cleanProse(r.text)
       if (text.length < 40) throw new Error('the pitch came back empty')
+      text = await tightenPitch(ctx, run, messages, text)
       if (!mem || attempt >= 2) break
       // library-wide check: a pitch too close to an existing pitch or blurb is written again
       let near: { book: string; similarity: number } | null = null
