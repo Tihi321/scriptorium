@@ -36,6 +36,7 @@ import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters,
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
+import { mergeBriefCast } from './briefCast'
 import { cleanCastAliases, scriptBibleLine } from './scriptBible'
 import { PUZZLE_REVIEW_NOTE, dropClueChangeProblems, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
 import { placesBlock, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
@@ -742,7 +743,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
-        (characters.length ? characters.map((c) => (fmt.script ? scriptBibleLine(c) : `- **${c.name}**: ${c.description}`)).join('\n') : '(see the pitch)') +
+        (characters.length ? characters.map((c) => (fmt.script ? scriptBibleLine(c) : `- **${c.name}**: ${c.description}${c.aliases?.length ? ` (also called ${c.aliases.join(', ')})` : ''}`)).join('\n') : '(see the pitch)') +
         // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
         (fmt.script && places.length ? `\n\n## Places\n${places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
@@ -1417,14 +1418,17 @@ export async function storyBriefSection(d: { books: BookStore }, slug: string): 
 
 type OutlineCharacter = { name: string; description: string; voice: string; aliases?: string[] }
 
-/** The outline's characters plus every character of the owner's brief that the architect left out (matched by name, ignoring case). */
+/**
+ * The outline's characters plus every character of the owner's brief that the architect left out. A brief character the outline has under a shorter name
+ * (Dec for Declan Hartley) is the same person: one entry, named as the brief names it, the outline's name as an alias (`mergeBriefCast`).
+ */
 export async function withBriefCharacters(d: { books: BookStore }, slug: string, characters: OutlineCharacter[], log: (m: string) => void): Promise<OutlineCharacter[]> {
   const brief = await d.books.brief(slug)
   if (!brief) return characters
-  const have = new Set(characters.map((c) => c.name.trim().toLowerCase()))
-  const missing = brief.characters.filter((c) => c.name.trim() && !have.has(c.name.trim().toLowerCase()))
-  if (missing.length) log(`the outline left out ${missing.length} character(s) of the owner's brief: ${missing.map((c) => c.name).join(', ')}. They are added to the bible.`)
-  return [...characters, ...missing.map((c) => ({ name: c.name.trim(), description: [c.role.trim(), c.description.trim()].filter(Boolean).join('. '), voice: '' }))]
+  const merged = mergeBriefCast(characters, brief.characters)
+  if (merged.matched.length) log(`the outline names ${merged.matched.length} character(s) of the owner's brief by a shorter name: ${merged.matched.map((m) => `${m.outline} is ${m.brief}`).join(', ')}. One entry each, with the short name as an alias.`)
+  if (merged.added.length) log(`the outline left out ${merged.added.length} character(s) of the owner's brief: ${merged.added.map((c) => c.name).join(', ')}. They are added to the bible.`)
+  return [...merged.characters, ...merged.added.map((c) => ({ name: c.name.trim(), description: [c.role.trim(), c.description.trim()].filter(Boolean).join('. '), voice: '' }))]
 }
 
 /** Your notes from the draft reader (books/<slug>/notes.md), for the writers. Empty when there are none. */
