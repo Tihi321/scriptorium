@@ -37,7 +37,7 @@ import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible }
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
 import { cleanCastAliases, scriptBibleLine } from './scriptBible'
-import { PUZZLE_REVIEW_NOTE, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
+import { PUZZLE_REVIEW_NOTE, dropClueChangeProblems, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
 import { placesBlock, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
@@ -982,7 +982,19 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       let reviewProblems = r.value.problems
       let reviewChapters = r.value.chapters
       if (fmt.puzzles && role === 'continuity-checker') {
-        const found = puzzleProblems(await d.books.chapters(slug), await puzzlesOf(d, slug))
+        const entries = await puzzlesOf(d, slug)
+        // the clues are fixed by the puzzle core: a problem that asks to change one, or calls it a contradiction (an either/or clue, say), is dropped
+        const split = dropClueChangeProblems(reviewProblems, entries)
+        if (split.dropped.length) {
+          reviewProblems = split.kept
+          ctx.log(`puzzle clues are fixed: dropped ${split.dropped.length} review problem(s) that ask to change a CLUE line: ${split.dropped.map((x) => x.slice(0, 120)).join(' | ')}`)
+          // a revise that rested only on those problems is a pass
+          if (!reviewProblems.length) {
+            verdict = 'pass'
+            reviewChapters = []
+          }
+        }
+        const found = puzzleProblems(await d.books.chapters(slug), entries)
         if (found.length) {
           verdict = 'revise'
           reviewNotes = `The engine's puzzle check found ${found.length} problem(s) in the puzzle lines (see the problems). ${reviewNotes}`.trim()

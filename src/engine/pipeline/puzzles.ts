@@ -262,7 +262,24 @@ export function puzzlesChapterSection(puzzles: PuzzleEntry[], n: number, chapter
 
 /** For every reviewer of a puzzle book. */
 export const PUZZLE_REVIEW_NOTE =
-  'Lines that start with CLUE:, EVIDENCE:, PUZZLE: or TESTIMONY:, and END TESTIMONY lines, belong to the book\'s logic puzzles. They are made and checked by code: do not review them as prose and do not ask for changes in their form or ids. A clue line should read naturally in the story. Judge whether the mystery is fair: the clues are found in the story before the puzzle, and the story does not give the answer away.'
+  'Lines that start with CLUE:, EVIDENCE:, PUZZLE: or TESTIMONY:, and END TESTIMONY lines, belong to the book\'s logic puzzles. They are made and checked by code: do not review them as prose and do not ask for changes in their form or ids. A clue line should read naturally in the story. Judge whether the mystery is fair: the clues are found in the story before the puzzle, and the story does not give the answer away. The CLUE lines are fixed puzzle clues, proved solvable by code: never report one as a contradiction (of another clue, of the prose or of itself) and never ask for one to be changed. Clues that look as if they clash, or that say "either ... or", are expected: that is the deduction. Two clues that seem to put one object or person in two places are the puzzle, not a continuity error.'
+
+/**
+ * Review problems that ask to change a puzzle clue or call it a contradiction (`winter_garden/c3`, "clue c3", "CLUE:" with "change", "contradicts" ...).
+ * The clues are fixed by the puzzle core, so the continuity review drops such a problem: a rewrite could only break the puzzle.
+ */
+export function dropClueChangeProblems(problems: string[], puzzles: PuzzleEntry[]): { kept: string[]; dropped: string[] } {
+  const ids = [...new Set(puzzles.flatMap((p) => clueIdsOf(p)))]
+  const keys = puzzles.map((p) => p.key)
+  const alt = (list: string[]) => (list.length ? list.map((x) => x.replace(/[^A-Za-z0-9_-]/g, '')).join('|') : '(?!)')
+  const ref = new RegExp(`\\b(?:${alt(keys)})/(?:${alt(ids)})\\b|\\bclues?\\s+\\W?(?:${alt(ids)})\\b|\\bCLUE:`, 'i')
+  const asks = /\b(chang\w*|alter\w*|reword\w*|rewrit\w*|replac\w*|remov\w*|contradict\w*|conflict\w*|clash\w*|inconsisten\w*|cannot both|can't both|both hold|break\w*)\b/i
+  const kept: string[] = []
+  const dropped: string[] = []
+  for (const x of problems) (ref.test(x) && asks.test(x) ? dropped : kept).push(x)
+  return { kept, dropped }
+}
+
 /** For the humanizer of a puzzle book. */
 export const PUZZLE_HUMANIZER_NOTE =
   'Keep every CLUE, EVIDENCE, PUZZLE, TESTIMONY and END TESTIMONY line exactly as it is, word for word and in the same place: they are made by code, and a changed word changes the puzzle. The statements of a testimony keep their meaning and their order.'

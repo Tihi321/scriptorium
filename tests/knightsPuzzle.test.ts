@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clueChapters, clueIdsOf, placePuzzles, puzzlesChapterSection, puzzlesOutlineSection, solutionWords } from '../src/engine/pipeline/puzzles'
+import { clueChapters, clueIdsOf, dropClueChangeProblems, placePuzzles, PUZZLE_REVIEW_NOTE, puzzlesChapterSection, puzzlesOutlineSection, solutionWords } from '../src/engine/pipeline/puzzles'
 import { parsePuzzleEntries } from '../src/shared/puzzles'
 import type { PuzzleEntry } from '../src/shared/puzzles'
 
@@ -95,5 +95,29 @@ describe('SCP-31: the writer is told who is a knight and who a knave', () => {
   it('a Murdle solved in an earlier chapter is told to the later chapters too', () => {
     const placed = placePuzzles([MURDLE], 4, { winter_garden: 2 })
     expect(puzzlesChapterSection(placed, 3, 4)).toContain('suspect: Madame Verac')
+  })
+})
+
+describe('SCP-32: the continuity review leaves the CLUE lines alone', () => {
+  it('the reviewer note says the clues are fixed and that either/or clues are expected', () => {
+    expect(PUZZLE_REVIEW_NOTE).toContain('fixed puzzle clues')
+    expect(PUZZLE_REVIEW_NOTE).toContain('never ask for one to be changed')
+    expect(PUZZLE_REVIEW_NOTE).toContain('either ... or')
+  })
+
+  it('drops a problem that asks to change a clue or calls it a contradiction (the c3 of the hub book), keeps the others', () => {
+    const c3 = 'Chapter 2, clue winter_garden/c3: Remy says he had either the brass carriage clock or the curtain cord, but clue winter_garden/c5 has Madame Verac hold the clock. Two people cannot both hold the same clock; change Remy\'s alternatives.'
+    const c3Short = 'Clue c3 contradicts c5: rewrite c3.'
+    const caneProblem = 'Chapter 1: the Baron\'s cane leaves marks everywhere, but chapter 2 says the gravel was raked; state that the gravel was raked after nine.'
+    const notPlanted = 'Chapter 2: the clue c4 is never found by a character, only narrated.'
+    const out = dropClueChangeProblems([c3, caneProblem, c3Short, notPlanted], [MURDLE, BELFRY])
+    expect(out.dropped).toEqual([c3, c3Short])
+    expect(out.kept).toEqual([caneProblem, notPlanted])
+  })
+
+  it('keeps everything when the book has no puzzle', () => {
+    const out = dropClueChangeProblems(['change the ending'], [])
+    expect(out.kept).toEqual(['change the ending'])
+    expect(out.dropped).toEqual([])
   })
 })
