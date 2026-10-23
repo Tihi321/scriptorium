@@ -4,7 +4,7 @@ import type { FactoryConfig, JobFrontmatter } from '../../shared/schemas'
 import type { AgentDef, AgentStore } from '../agents/agents'
 import type { Budget } from '../budget/spend'
 import { localIso } from '../budget/spend'
-import type { LogWriter } from '../logs/logs'
+import type { LogSession, LogWriter } from '../logs/logs'
 import { isPaidModel } from '../models/registry'
 import type { ModelInfo } from '../models/registry'
 import type { ModelRouter } from '../models/router'
@@ -64,6 +64,8 @@ interface RunningJob {
   controller: AbortController
   reason?: AbortReason
   done: Promise<void>
+  /** The job's log writer (its text stays in one piece in the logs); ended when the run is over. */
+  log?: LogSession
   /** Providers whose slot the job holds from its start: the first model's, until the job falls back to another provider. */
   held: Set<string>
   /** The model the job calls now: the first one, then each fallback. */
@@ -469,6 +471,7 @@ export class Scheduler {
     this.running.set(job.id, rj)
     rt.running.set(job.id, rj)
     rj.done = this.run(rj, agent, models, leased).catch((err) => { console.error('[engine] job runner failed:', err) }).finally(() => {
+      rj.log?.end()
       this.running.delete(job.id)
       rt.running.delete(job.id)
       if (rj.held.delete(leased.provider.id)) this.d.router.limiter.release(leased.provider)
@@ -506,7 +509,9 @@ export class Scheduler {
     const requests: string[] = []
     const usedModels: string[] = []
     const totals = { calls: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, costUsd: 0 }
-    const logAll = (text: string) => logs.both(agent.id, j.book, text)
+    const session = logs.session(agent.id, j.book)
+    rj.log = session
+    const logAll = (text: string) => session.write(text)
 
     this.setState(rt, agent, handler.opts.reviewing ? 'reviewing' : 'working', taskLabel, j)
     emit({ type: 'job.started', jobId: j.id, agent: agent.id, task: taskLabel, book: j.book ?? undefined, model: leased.ref })

@@ -261,7 +261,7 @@ export class Engine {
     if (this.slotTimer) clearInterval(this.slotTimer)
     await this.pipeline.stop()
     await this.scheduler.stop()
-    await this.logs.flush()
+    await this.logs.close()
     await this.budget.flush().catch(() => undefined)
     this.memory.close()
   }
