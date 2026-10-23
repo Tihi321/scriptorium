@@ -15,7 +15,7 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
-import { ModelRouter, isDailyLimitError, problemKind } from '../src/engine/models/router'
+import { ModelRouter, isDailyLimitError, isRetiredModelError, problemKind } from '../src/engine/models/router'
 import { BudgetError, collect, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
@@ -774,6 +774,49 @@ describe('daily request limits', () => {
     registry.providers.get('b')!.rpd = 3
     await ask()
     expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/y'])
+  })
+
+  it('a retired model is asked once, then every job goes to the next model', async () => {
+    const { registry, mock } = await registryWith({ providers: [{ id: 'a', models: ['x'] }, { id: 'b', models: ['y'] }], roles: { writer: ['a/x', 'b/y'] } })
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw new ProviderError('HTTP 404: {"error":{"message":"The `:free` variant has been retired","code":404}}', 404)
+      return 'ok'
+    })
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1 })
+    const retired: string[] = []
+    r.onModelRetired = (m, message) => retired.push(`${m.ref}: ${message}`)
+    const models = r.candidates('writer')
+    const ask = async () => {
+      for await (const ev of r.chat(models, { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    }
+    await ask()
+    expect(seen).toEqual(['x', 'y']) // one call on the retired model, no retries, then the next model answers
+    expect(retired).toHaveLength(1)
+    expect(retired[0]).toContain('a/x: HTTP 404')
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['b/y'])
+    await ask() // a job that picked its models earlier skips it too, and nothing is reported twice
+    expect(seen).toEqual(['x', 'y', 'y'])
+    expect(retired).toHaveLength(1)
+    // the only model left stays in the list, so the error still shows
+    const solo = await registryWith({ providers: [{ id: 'a', models: ['x'] }], roles: { writer: ['a/x'] } })
+    solo.mock.onAny(() => {
+      throw new ProviderError('HTTP 404: No endpoints found for x', 404)
+    })
+    const r2 = new ModelRouter(solo.registry, undefined)
+    await expect((async () => { for await (const ev of r2.chat(r2.candidates('writer'), { messages: [], meta: { role: 'writer' } })) void ev })()).rejects.toThrow(/No endpoints/)
+    expect(r2.candidates('writer').map((m) => m.ref)).toEqual(['a/x'])
+  })
+
+  it('tells a retired or unknown model from other failures', () => {
+    expect(isRetiredModelError(new ProviderError('HTTP 404: The `:free` variant has been retired', 404))).toBe(true)
+    expect(isRetiredModelError(new ProviderError('HTTP 404: No endpoints found for foo/bar', 404))).toBe(true)
+    expect(isRetiredModelError(new ProviderError('HTTP 404: model "foo" not found', 404))).toBe(true)
+    expect(isRetiredModelError(new ProviderError('provider error: {"message":"variant has been retired"}', undefined, true))).toBe(true)
+    expect(isRetiredModelError(new ProviderError('HTTP 404: Not Found', 404))).toBe(false)
+    expect(isRetiredModelError(new ProviderError('HTTP 500: has been retired', 500, true))).toBe(false)
+    expect(isRetiredModelError(new Error('has been retired'))).toBe(false)
   })
 
   it('the spend files give the requests since midnight UTC, so a daily limit holds across restarts', async () => {

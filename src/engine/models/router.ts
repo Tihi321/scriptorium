@@ -65,6 +65,10 @@ export class ModelRouter {
   onProviderDown?: (p: ProviderInfo) => void
   /** Called when a provider's daily limit is used up (its `rpd`, or the provider said so): its jobs use their next model until midnight UTC. */
   onProviderDayFull?: (p: ProviderInfo) => void
+  /** Called once when a model turns out to be retired or unknown at its provider: it is left out of every job's list until the engine restarts. */
+  onModelRetired?: (m: ModelInfo, message: string) => void
+  /** Models the provider no longer serves (`provider/model` ref to the provider's text), for this engine run. */
+  private readonly retired = new Map<string, string>()
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
   constructor(
@@ -80,6 +84,11 @@ export class ModelRouter {
   /** The provider can take requests now: its server is up and its daily limit isn't used up. */
   usable(p: ProviderInfo): boolean {
     return !p.down && !this.limiter.dayFull(p)
+  }
+
+  /** The provider's text when this model was found retired or unknown in this engine run, else undefined. */
+  retiredReason(m: ModelInfo): string | undefined {
+    return this.retired.get(m.ref)
   }
 
   /** Why a provider takes no request now, in words for the office and `factory_status`, or null when it takes one. */
@@ -113,6 +122,9 @@ export class ModelRouter {
     }
     const up = list.filter((m) => this.usable(m.provider))
     if (up.length > 0) list = up
+    // a model the provider retired answers 404 every time: leave it out while another model is left (the chain's last entry stays so the error shows)
+    const live = list.filter((m) => !this.retired.has(m.ref))
+    if (live.length > 0) list = live
     if (o.avoidFamily) {
       // the book's and the agent's own model were picked on purpose: they stay first even in the writer's family
       let lead = 0
@@ -139,6 +151,8 @@ export class ModelRouter {
     for (const [i, model] of models.entries()) {
       // a server that went down, or a daily limit used up, after the job started: skip it while a later model can answer
       if (!this.usable(model.provider) && models.slice(i + 1).some((m) => this.usable(m.provider))) continue
+      // a job that picked its models before the model was found retired skips it too
+      if (this.retired.has(model.ref) && models.slice(i + 1).some((m) => !this.retired.has(m.ref))) continue
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
         const paid = isPaidModel(model)
@@ -216,6 +230,16 @@ export class ModelRouter {
             failures.push(`${model.ref}: ${err instanceof Error ? err.message : String(err)}`)
             break
           }
+          // the provider no longer serves this model (OpenRouter retired a `:free` variant): retrying is no use, and neither is asking again in the next job
+          if (isRetiredModelError(err)) {
+            if (!this.retired.has(model.ref)) {
+              const text = err instanceof Error ? err.message : String(err)
+              this.retired.set(model.ref, text)
+              this.onModelRetired?.(model, text)
+            }
+            failures.push(`${model.ref}: ${err instanceof Error ? err.message : String(err)}`)
+            break
+          }
           // a request too big for this model fails the same way every time: go straight to the next model
           const retryable = err instanceof ProviderError && err.retryable && !isContextError(err)
           if (!retryable || retry === this.opts.retries) {
@@ -257,6 +281,18 @@ export function problemKind(err: unknown): ProblemKind {
 export function isDailyLimitError(err: unknown): boolean {
   if (!(err instanceof ProviderError) || err.status !== 429) return false
   return /per[-_ ]day|daily/i.test(err.message)
+}
+
+/**
+ * The provider says the model does not exist or was retired: OpenRouter's "has been retired" and "No endpoints found", or a 404 that says
+ * the model is not found. Asking again fails the same way. Other 404s (a wrong address) are not matched.
+ */
+export function isRetiredModelError(err: unknown): boolean {
+  if (!(err instanceof ProviderError)) return false
+  if (err.status !== undefined && err.status !== 404) return false
+  const msg = err.message
+  if (/has been retired|variant has been retired|no endpoints found/i.test(msg)) return true
+  return err.status === 404 && /model[^.]{0,60}(not found|does not exist|not exist)|no such model|unknown model/i.test(msg)
 }
 
 /** The request is larger than the model's context window, or the model ran out of tokens before answering. */
