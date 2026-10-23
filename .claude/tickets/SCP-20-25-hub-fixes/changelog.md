@@ -1,5 +1,18 @@
 # SCP-20 to SCP-25 changelog
 
+## 2026-10-23 (later): SCP-26 to SCP-28, found when every book start was blocked in the hub's productions
+
+Same branch `SCP-20-25_fixes`. Committed, not pushed.
+
+| Ticket | Commit | Files | What changed |
+|---|---|---|---|
+| SCP-26 | 873c730 | `src/engine/models/router.ts`, `src/engine/engine.ts`, `tests/models.test.ts` | A model answering "retired" / "No endpoints found" / model-not-found (404 or in-stream) is marked retired for the engine run: later calls skip it while another model is left, and the engine logs it once with the provider's text (`engine.warning`). The 404 was already not retried; the gap was asking the dead model first on every later call. |
+| SCP-27 | b014e1f | `src/engine/pipeline/pipeline.ts`, `src/engine/pipeline/handlers.ts`, `tests/startFailures.test.ts` (new) | Failed `eic--start--` jobs are counted per story; a story with 3 is skipped by `pickNext` (warning names it) and the others still start. Editing the story (newer mtime) or removing its failed jobs makes it eligible again. Starts with no story keep a shared count. |
+| SCP-28 | 490cbf9 | `src/engine/pipeline/handlers.ts`, `tests/adapt.test.ts` | An adaptation's `start_book` makes no model call: format fixed by `adapt_book`, title and genre from the source, the middle of the format's length range. Also fixed: `start_book` read the source of a book instead of the story's `source_book`, so `source` was always null there. |
+| docs | 2333917 | `ROADMAP.md`, `docs/design.md`, `plan.md` | Done lines and plan results. |
+
+Verification: `yarn test` (46 files, 594 tests, plus the recovery test), `yarn typecheck`, `yarn lint`: pass. Not run: a real model, `yarn test:electron`. The live block was cleared by hand in the user's config (fallback `deepseek/deepseek-flash`, failed start jobs moved to the hub's `.claude/temp/scp-failed-starts/`); these fixes are not yet in the running app.
+
 ## 2026-10-23: the six findings of the hub's HUB-04 live check fixed
 
 Branch `SCP-20-25_fixes` (from master 5801f09), one commit per ticket. Committed, not pushed.
