@@ -55,7 +55,8 @@ describe('restart recovery', () => {
     expect(await list('done')).toEqual([])
 
     startChild(dir)
-    await waitFor(async () => (await list('done')).length === 4, 40000, 'all four jobs done after restart')
+    // a finished job is written to done/ first and removed from running/ a moment later: wait for both
+    await waitFor(async () => (await list('done')).length === 4 && (await list('running')).length === 0, 40000, 'all four jobs done after restart')
 
     expect(await list('done')).toEqual(ids.map((i) => `${i}.md`))
     expect(await list('queued')).toEqual([])
