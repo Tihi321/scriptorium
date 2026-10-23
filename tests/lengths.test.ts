@@ -1,9 +1,9 @@
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { advance } from '../src/engine/pipeline/advance'
+import { advance, runtimeNote } from '../src/engine/pipeline/advance'
 import type { BookState } from '../src/engine/pipeline/advance'
-import { noteWantsLength, perChapterTarget, TRIM_ABOVE } from '../src/engine/pipeline/handlers'
+import { chapterSeconds, noteWantsLength, perChapterTarget, TRIM_ABOVE } from '../src/engine/pipeline/handlers'
 import { writeMd } from '../src/engine/store/atomic'
 import { parseMd } from '../src/shared/md'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
@@ -203,6 +203,41 @@ describe('the rewrite of a long book asks for the chapter\'s own share (pipeline
     expect(asked).toBeLessThanOrEqual(Math.round(1.15 * share))
     expect(asked).not.toBe(Math.round(target / 2))
   }, 180000)
+})
+
+const film = formatEntrySchema.parse({ id: 'short-film', name: 'Short film', enabled: true, script: true, screenplay: true, words: [400, 2000], chapters: [2, 2], runtime: [60, 180] })
+/** A screenplay chapter: `shots` shots of `sec` seconds, each with a long cue line (many words, few seconds). */
+const reel = (shots: number, sec: number) =>
+  Array.from({ length: shots }, (_, i) => ['SHOT (wide, static, ' + sec + 's): ' + 'A very long description of what the camera sees in this one take, '.repeat(3), 'NARRATOR: Line ' + i + '.'].join(String.fromCharCode(10))).join(String.fromCharCode(10))
+
+describe('the length of a screenplay is its runtime (SCP-29)', () => {
+  it('chapterSeconds sums the shot lengths, not the words', () => {
+    expect(chapterSeconds(reel(5, 6))).toBe(30)
+    expect(reel(5, 6).split(/\s+/).length).toBeGreaterThan(200)
+  })
+
+  it('a film inside its runtime range but far over its word target gets no length rewrite', () => {
+    const plan = advance(base(film, { totalWords: 4200, targetWords: 1000, totalSeconds: 120 }))
+    expect(plan.jobs.filter((j) => j.task === 'rewrite_chapter')).toEqual([])
+    expect(plan.patch).toMatchObject({ length_gate: { status: 'ok', seconds: 120 } })
+  })
+
+  it('a film over its runtime gets a cut request in seconds and shots, not words', () => {
+    const plan = advance(base(film, { totalWords: 900, targetWords: 900, totalSeconds: 260 }))
+    expect(plan.patch).toMatchObject({ stage: 'length-fix', length_gate: { status: 'rewriting', seconds: 260 } })
+    const note = plan.jobs[0]!.body as string
+    expect(note).toContain('260 seconds')
+    expect(note).toContain('about 81 seconds')
+    expect(note).toContain('cut shots')
+    expect(note).not.toMatch(/words/)
+  })
+
+  it('a film under its runtime is asked to add shots, and the gate closes once every chapter is fixed', () => {
+    expect(runtimeNote(20, 60, 180, 2)).toContain('add shots')
+    const fixes = new Map([[1, ['len']], [2, ['len']]])
+    const plan = advance(base(film, { totalWords: 900, totalSeconds: 100, fixes, lengthGate: { status: 'rewriting', words: 900, seconds: 260 } }))
+    expect(plan.patch).toMatchObject({ stage: 'drafting', length_gate: { status: 'done', seconds_before: 260, seconds: 100 } })
+  })
 })
 
 describe('noteWantsLength', () => {

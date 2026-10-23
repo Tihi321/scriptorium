@@ -5,7 +5,7 @@ task: rewrite_chapter
 ---
 Rewrite chapter {{chapter_n}} of "{{title}}", a screenplay for a short film, using the editors' notes.
 
-Format: {{format_name}}. Age band: {{age_band}}. Keep the chapter at about {{chapter_words}} words and about {{chapter_runtime}} seconds of film (the whole film runs {{runtime_min}} to {{runtime_max}} seconds).
+Format: {{format_name}}. Age band: {{age_band}}. Keep the chapter at about {{chapter_runtime}} seconds of film: its length is the sum of its shot lengths, and the words do not count (the whole film runs {{runtime_min}} to {{runtime_max}} seconds).
 
 Format guidance:
 {{guidance}}

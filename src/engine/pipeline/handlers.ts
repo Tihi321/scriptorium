@@ -7,6 +7,7 @@ import type { FactoryConfig, FormatEntry, QualityConfig } from '../../shared/sch
 import { briefOf, briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
 import { genreClass, writeCoverHtml } from '../publish/cover'
+import { parseScreenplay, runtimeOf } from '../publish/screenplay'
 import type { ModelInfo } from '../models/registry'
 import type { JobStore } from '../queue/jobs'
 import type { ChatOptions, ChatResult, JobContext, Scheduler } from '../queue/scheduler'
@@ -189,6 +190,9 @@ export const formatVars = (f: FormatEntry, target: number) => ({
 export const chapterRuntime = (f: FormatEntry, chapters: number): number | '' =>
   f.runtime ? Math.round((f.runtime[0] + f.runtime[1]) / 2 / Math.max(1, chapters)) : ''
 
+/** The seconds a screenplay chapter runs: its shots' lengths. Words do not count (most of them are SHOT, MUSIC and other cue lines). */
+export const chapterSeconds = (body: string): number => runtimeOf([parseScreenplay(body)])
+
 /** A drafted chapter of a long book under this share of its target words gets an expand retry. */
 export const EXPAND_BELOW = 0.8
 
@@ -291,8 +295,10 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
   /**
    * A chapter over 120% of its target gets one more request: cut it to the target. The shorter text is kept when it is between 80% of the
    * target and the length it had. Returns the text, and the reply when the retry was kept.
+   * A screenplay is measured in seconds, not words (most of its words are cue lines): `runtime` is the seconds the chapter should run.
    */
-  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number, screenplay = false, puzzles = false): Promise<{ body: string; reply: ChatResult | null }> => {
+  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number, screenplay = false, puzzles = false, runtime: number | '' = ''): Promise<{ body: string; reply: ChatResult | null }> => {
+    if (screenplay && runtime) return tightenRuntime(ctx, run, messages, body, runtime, forbid, maxTokens)
     const words = countWords(body)
     if (words <= target * TRIM_ABOVE) return { body, reply: null }
     const how = screenplay
@@ -320,6 +326,34 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     } catch (err) {
       if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
       ctx.log(`the tighten retry failed (${(err as Error).message}): keeping the first answer of ${words} words`)
+    }
+    return { body, reply: null }
+  }
+
+  /** The screenplay's tighten: a chapter whose shots run over 120% of its runtime gets one request to cut shots; the words do not count. */
+  const tightenRuntime = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, runtime: number, forbid: string[], maxTokens: number): Promise<{ body: string; reply: ChatResult | null }> => {
+    const seconds = chapterSeconds(body)
+    if (seconds <= runtime * TRIM_ABOVE) return { body, reply: null }
+    try {
+      const retry = await run.chat({
+        messages: [
+          ...messages,
+          { role: 'assistant', content: body },
+          { role: 'user', content: `This chapter runs ${seconds} seconds, but it should run about ${runtime}. Cut it to about ${runtime} seconds: cut shots and minor action and lines, and keep every plot beat and every SCENE, ON SCREEN, MUSIC, SFX and TITLE line that stays. Write the whole chapter again, as plain script only, with no title or notes.` }
+        ],
+        maxTokens,
+        forbid
+      })
+      const shorter = chapterAnswer(ctx, forbid, retry.text)
+      const now = chapterSeconds(shorter)
+      if (now >= runtime * 0.8 && now < seconds) {
+        ctx.log(`chapter ran ${seconds} seconds (target ${runtime}); trimmed to ${now}`)
+        return { body: shorter, reply: retry }
+      }
+      ctx.log(`the tighten retry gave ${now} seconds (target ${runtime}): keeping the first answer of ${seconds}`)
+    } catch (err) {
+      if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
+      ctx.log(`the tighten retry failed (${(err as Error).message}): keeping the first answer of ${seconds} seconds`)
     }
     return { body, reply: null }
   }
@@ -829,7 +863,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     let trimmedFrom: number | null = null
     if (expandedFrom === null) {
       const before = countWords(body)
-      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles)
+      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles, chapterRuntime(fmt, outline.chapters.length))
       if (out.reply) {
         r = out.reply
         body = out.body
@@ -1048,6 +1082,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     // the words this chapter should have: its share of the book's target over the planned chapters (a length rewrite says its own number)
     const target = perChapterTarget(book, outline, chapters.length)
     const lengthWords = isLength ? Number(/about (\d+) words/.exec(ctx.jobBody)?.[1]) : NaN
+    const lengthSeconds = isLength ? Number(/about (\d+) seconds/.exec(ctx.jobBody)?.[1]) || 0 : 0
     const chapterWords = Number.isFinite(lengthWords) && lengthWords > 0 ? lengthWords : Math.round(clamp(current.words, 0.85 * target, 1.15 * target))
     const { messages, version, template } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'rewrite_chapter'), {
       title: book.title,
@@ -1060,7 +1095,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_text: current.body,
       other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : around.text || '(this is the only chapter)',
       chapter_words: chapterWords,
-      chapter_runtime: chapterRuntime(fmt, outline?.chapters.length ?? chapters.length),
+      chapter_runtime: lengthSeconds || chapterRuntime(fmt, outline?.chapters.length ?? chapters.length),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
@@ -1104,7 +1139,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const noteLonger = isNote && noteWantsLength(ctx.jobBody)
     if (noteLonger && countWords(body) > target * TRIM_ABOVE) ctx.log(`the note asks for more length: the chapter of ${countWords(body)} words (target ${target}) is not tightened`)
     if (!isLength && !noteLonger) {
-      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles)
+      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles, chapterRuntime(fmt, outline?.chapters.length ?? chapters.length))
       if (out.reply) {
         r = out.reply
         body = stripMarkers(out.body)

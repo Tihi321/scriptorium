@@ -65,12 +65,14 @@ export interface BookState {
   /** Chapter number -> fixes already applied (`len` = length rewrite, `chk` = continuity fix). */
   fixes: Map<number, string[]>
   totalWords: number
+  /** A screenplay's runtime so far: the seconds of all its shots. Its length is measured in this, not in words (SCP-29). */
+  totalSeconds?: number
   /** book.md `target_words`: the length the book is meant to have. The length gates use it next to the format's range. */
   targetWords?: number
   /** Chapter number -> words, for the length gate of a long book (which chapters are far from their share of the target). */
   chapterWords?: Map<number, number>
   /** book.md `length_gate`: null until the gate has run. */
-  lengthGate: { status: string; words?: number } | null
+  lengthGate: { status: string; words?: number; seconds?: number } | null
   /** `${role}:${round}` -> review. For long books this is only set once every act has been reviewed. */
   reviews: Map<string, ReviewSummary>
   /** Long books: `${role}:${act}:${round}` of the act review files that exist. */
@@ -277,6 +279,18 @@ function lengthNote(words: number, min: number, max: number, total: number, targ
   )
 }
 
+/** The note of a length rewrite of a screenplay: its length is its runtime, so the chapter is asked to add or cut shots and seconds, never words. */
+export function runtimeNote(seconds: number, min: number, max: number, total: number): string {
+  const low = seconds < min
+  const per = Math.max(1, Math.round(clamp(low ? min * 1.1 : max * 0.9, min, max) / total))
+  return (
+    `The whole film runs ${seconds} seconds, but the format wants ${min} to ${max} seconds. Rewrite this chapter to about ${per} seconds. ` +
+    (low
+      ? 'It is too short: add shots (4 to 10 seconds each) and a little action, without changing the story.'
+      : 'It is too long: cut shots, minor action and minor lines, keeping every plot beat, without changing the story.')
+  )
+}
+
 function lengthJobs(s: BookState, total: number, note: string | ((n: number) => string), only?: number[]): PlanJob[] {
   const list = only ?? [...Array(total).keys()].map((i) => i + 1)
   return list.map((n, i) => ({
@@ -360,7 +374,24 @@ export function advance(s: BookState): Plan {
   const r = s.round
 
   // length gate (short books, once, before the first reviews): a draft far outside the format's range is rewritten once
-  if (!s.format.long && r === 0 && s.stage !== 'rewriting') {
+  if (!s.format.long && r === 0 && s.stage !== 'rewriting' && s.format.screenplay && s.format.runtime && s.totalSeconds !== undefined) {
+    // a screenplay: its length is its runtime (the seconds of its shots), never its words (most of them are cue lines)
+    const [min, max] = s.format.runtime
+    const gate = s.lengthGate
+    if (!gate) {
+      const out = s.totalSeconds < min * 0.85 || s.totalSeconds > max * 1.15
+      if (!out) return { patch: { length_gate: { status: 'ok', words: s.totalWords, seconds: s.totalSeconds } }, jobs: [] }
+      return {
+        patch: { stage: 'length-fix', length_gate: { status: 'rewriting', words: s.totalWords, seconds: s.totalSeconds, min, max } },
+        jobs: lengthJobs(s, total, runtimeNote(s.totalSeconds, min, max, total))
+      }
+    }
+    if (gate.status === 'rewriting') {
+      const todo = [...Array(total).keys()].map((i) => i + 1).filter((n) => !(s.fixes.get(n) ?? []).includes('len'))
+      if (todo.length === 0) return { patch: { stage: 'drafting', length_gate: { status: 'done', words_before: gate.words, words: s.totalWords, seconds_before: gate.seconds, seconds: s.totalSeconds } }, jobs: [] }
+      return { patch: {}, jobs: lengthJobs(s, total, runtimeNote(gate.seconds ?? s.totalSeconds, min, max, total), todo) }
+    }
+  } else if (!s.format.long && r === 0 && s.stage !== 'rewriting') {
     const [min, max] = s.format.words
     const gate = s.lengthGate
     if (!gate) {

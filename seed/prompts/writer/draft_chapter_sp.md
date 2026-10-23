@@ -5,7 +5,7 @@ task: draft_chapter
 ---
 Write chapter {{chapter_n}} of {{chapter_count}} of "{{title}}", a screenplay for a short film.
 
-Format: {{format_name}}. Age band: {{age_band}}. The whole film runs {{runtime_min}} to {{runtime_max}} seconds. This chapter is one sequence of it. The chapter should be about {{chapter_words}} words and run about {{chapter_runtime}} seconds (the whole book is about {{target_words}} words).
+Format: {{format_name}}. Age band: {{age_band}}. The whole film runs {{runtime_min}} to {{runtime_max}} seconds. This chapter is one sequence of it. The chapter should run about {{chapter_runtime}} seconds: its length is the sum of its shot lengths, so count seconds, not words. Add or cut shots to fit.
 
 Format guidance:
 {{guidance}}
