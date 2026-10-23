@@ -48,10 +48,18 @@ export function solutionWords(p: PuzzleEntry): string {
   return parts.join(', ')
 }
 
-/** The chapter each clue of a puzzle placed in chapter `chapter` is planted in: spread over chapters 1 to `chapter` (a clue is never planted after its puzzle). */
+/**
+ * The chapter each clue of a puzzle placed in chapter `chapter` is planted in. A Murdle's clues are spread over chapters 1 to `chapter` (a clue is never
+ * planted after its puzzle). A puzzle with no `clues` in its core (knights: the `intro` and the statements of the speakers) plants all of them in the
+ * puzzle's own chapter: the speakers are in the story from there on, so a statement is never planted before the person who says it appears.
+ */
 export function clueChapters(p: PuzzleEntry, chapter: number): Record<string, number> {
   const ids = clueIdsOf(p)
   const out: Record<string, number> = {}
+  if (!Array.isArray(p.core?.clues)) {
+    ids.forEach((id) => (out[id] = chapter))
+    return out
+  }
   ids.forEach((id, i) => (out[id] = Math.min(chapter, 1 + Math.floor((i * chapter) / ids.length))))
   return out
 }
@@ -211,7 +219,7 @@ This book is a mystery with puzzles. Code made these puzzles; their solutions ar
 
 ${list}
 
-Place every puzzle in one chapter with "puzzles": ["<key>"] on that chapter in the JSON (a chapter may have none, one or two). Never put a puzzle in chapter 1 (the chapters before it plant its clues), and keep the puzzles apart: the story goes on between them. The characters and places of the story use the names above. A clue is found by what a character sees, hears or is told: say in each chapter summary what is found. The book has ${chapters[0]} to ${chapters[1]} chapters.`
+Place every puzzle in one chapter with "puzzles": ["<key>"] on that chapter in the JSON (a chapter may have none, one or two). Never put a puzzle in chapter 1 (the chapters before it plant its clues), and keep the puzzles apart: the story goes on between them. The characters and places of the story use the names above. A clue is found by what a character sees, hears or is told: say in each chapter summary what is found. The people who speak the statements of a knights puzzle appear in that puzzle's chapter or earlier, and their statements are planted in that chapter. The book has ${chapters[0]} to ${chapters[1]} chapters.`
 }
 
 /** The writer's section for chapter `n`: the rules, the puzzles placed here, the clues to plant here and the evidence. */
@@ -238,7 +246,6 @@ export function puzzlesChapterSection(puzzles: PuzzleEntry[], n: number, chapter
 /** For every reviewer of a puzzle book. */
 export const PUZZLE_REVIEW_NOTE =
   'Lines that start with CLUE:, EVIDENCE:, PUZZLE: or TESTIMONY:, and END TESTIMONY lines, belong to the book\'s logic puzzles. They are made and checked by code: do not review them as prose and do not ask for changes in their form or ids. A clue line should read naturally in the story. Judge whether the mystery is fair: the clues are found in the story before the puzzle, and the story does not give the answer away.'
-
 /** For the humanizer of a puzzle book. */
 export const PUZZLE_HUMANIZER_NOTE =
   'Keep every CLUE, EVIDENCE, PUZZLE, TESTIMONY and END TESTIMONY line exactly as it is, word for word and in the same place: they are made by code, and a changed word changes the puzzle. The statements of a testimony keep their meaning and their order.'
