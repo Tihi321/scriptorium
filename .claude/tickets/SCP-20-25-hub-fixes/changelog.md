@@ -1,6 +1,19 @@
 # SCP-20 to SCP-25 changelog
 
-## 2026-10-23 (latest): SCP-29, and three test races
+## 2026-10-23 (latest): SCP-30 to SCP-33, found in the hub's puzzle production
+
+Same branch `SCP-20-25_fixes`. Committed, not pushed. Evidence: `creative-hub/runs/the-winter-garden-clock.md` "Found" and the book's `log.md`, `bible/puzzles.md`.
+
+- **SCP-30** (3c4e31c): `clueChapters` (`src/engine/pipeline/puzzles.ts`) plants all ids of a puzzle whose core has no `clues` array (knights: `intro`, `t1`..) in the puzzle's own chapter instead of spreading them over chapters 1 to the puzzle chapter; the outline prompt says the speakers appear there or earlier. Deviation from the plan: the puzzle chapter, not "the chapter where the speaker first appears" (the engine does not know that).
+- **SCP-31** (8a46555): `solutionWords` says who is a knight and who a knave (from `core.solution`; a knave lies in every line). The puzzle chapter's prompt adds "do not state it or hint at it before the PUZZLE line"; every chapter after a solved puzzle, of any kind, is told the answer as settled fact.
+- **SCP-32** (8a01ed0): `PUZZLE_REVIEW_NOTE` says the CLUE lines are fixed and that either/or clues are the deduction. Because the note did not stop it, `dropClueChangeProblems` also drops, in the continuity review (`handlers.ts`), problems that name a clue and ask to change it or call it a contradiction (logged); a revise that rested only on those becomes a pass.
+- **SCP-33** (aa50cd1): `mergeBriefCast` (`src/engine/pipeline/briefCast.ts`, new) merges outline characters into brief characters by full name, surname, first name, alias or the brief's short name ("Called Dec."); ambiguous labels match neither; one entry named as the brief names it with the outline's names as aliases. The light bible of a non-script short story shows aliases as "also called".
+- **Test races** (85672bf, 76e9223, and one more `tests:` commit for `features` rebuild-reader, which removed `out/reader` while the engine was publishing a second book): `lengths` and `puzzles` read the atomic write's `.tmp` file; `scheduler` (fire now) took `agents.list()[0]`, which can still be the fired agent (`AgentStore.remove` deletes the file before the map entry; failed 1 in 25 alone, 0 in 40 after); `features` (setModel null) read a snapshot while the writer's job still showed its model; `pipeline` and `blockers` read files that a rename was replacing or a job that left `queued/`.
+- Docs: `ROADMAP.md`, `docs/design.md`, `docs/visual-novel.md` "Puzzles", this ticket's `plan.md`.
+
+Verification (after the last code commit): full `yarn test` three runs in a row, each 48 files, 613 tests plus the recovery test (1), all passed; `yarn typecheck` and `yarn lint` clean. Earlier runs of the same code showed six flaky tests (the races above); each was found and fixed, none was in the new code. No seed prompt changed (`yarn seed:hashes` leaves `seedHistory.ts` as is). Not run: a real model run, `yarn test:electron`, a new run of the hub book.
+
+## 2026-10-23 (before): SCP-29, and three test races
 
 Same branch `SCP-20-25_fixes`. Committed, not pushed.
 
