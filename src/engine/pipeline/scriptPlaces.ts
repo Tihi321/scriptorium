@@ -5,10 +5,18 @@ import { lightBibleEntries } from './series'
 import { parseScript } from '../publish/script'
 import { SCENE } from '../publish/xhtml'
 
-/** The place of a `SCENE: place, time` line: the text before the last comma (the whole text when there is none). */
+const WEEKDAY = /^(?:mon|tues?|wednes|thurs?|fri|satur|sun)day$/i
+
+/**
+ * The place of a `SCENE: place, time` line: the text before the last comma (the whole text when there is none). A weekday just before that comma
+ * (`Ferry deck, Monday, late afternoon`) is part of the time, not of the place: it goes to the time, which is kept as written.
+ */
 const placeOf = (text: string): { place: string; time: string } => {
-  const at = text.lastIndexOf(',')
-  return at < 0 ? { place: text.trim(), time: '' } : { place: text.slice(0, at).trim(), time: text.slice(at + 1).trim() }
+  const parts = text.split(',').map((p) => p.trim())
+  if (parts.length < 2) return { place: text.trim(), time: '' }
+  let end = parts.length - 1
+  while (end > 1 && WEEKDAY.test(parts[end - 1]!)) end--
+  return { place: parts.slice(0, end).join(', '), time: parts.slice(end).join(', ') }
 }
 
 /** The place of every `SCENE:` line of a script, in order. */
