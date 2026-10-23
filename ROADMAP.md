@@ -49,6 +49,16 @@ OpenRouter retired a `:free` model that was first in the user's `fallbacks`; the
 - **SCP-36 (done): the repetition counter skips script control lines.** SCENE, ON SCREEN, the cue lines and the puzzle lines are no longer counted as repeated phrases.
 - **SCP-37 (done): an adaptation's length target follows its source.** A visual novel adaptation's target is the source's words times 1.7 within the format's range (recorded as `target_from_source_words`), instead of the format's middle.
 
+## Open: findings of the hub's HUB-15 live check (2026-10-23)
+
+Found on the VN adaptation `the-local-patch-2` (hub run log `runs/the-local-patch-2.md`). SCP-28, SCP-34 (for bare weekdays), SCP-35, SCP-36 and SCP-37 held.
+
+- **SCP-38: the SCENE place fixer drops any time segment that is not a bare weekday.** `placeOf` keeps only `Place, Weekday, time`. `Observational Core, the following Thursday, before dawn` became `Observational Core, before dawn` (place "Observational Core, the following Thursday" matched the bible's "Observational Core" by `sameName`, and the extra segment was thrown away); `Bio-Integration Lab, the ninth day, night` lost "the ninth day". The script's own calendar then reads backwards and the reviewers ask for the same fix again (two review rounds here). Fix: when a place matches a bible place by containment, keep the segments after the bible name's words as part of the time, or try the first segment alone first.
+- **SCP-39: the humanizer's new-name guard counts a weekday as a new name.** "humanizer: chapter 5 kept as it was: it brought in a name that is not in the chapter or the bible (Saturday)": the SCENE lines had lost their weekdays (SCP-38), and putting them back was refused. Weekdays and months (and probably the calendar words of `calendar.ts`) should never count as names.
+- **SCP-40: a speaker new to the script is not added to the bible.** Sera (a named character of the source book's last chapter) speaks in the script, but the adaptation's bible has no entry for her, so VN Studio's import says "speakers not in the bible (no sprite): ... SERA". New places are added from the script (`placeDescriptions`); a named speaker who appears in the source should be added the same way, with a look from the source or the script's ON SCREEN line.
+- **SCP-41: the repetition counter counts speaker labels.** Run on the published script, it flags "watch officer off chief" (6) and the opener "watch officer" (41): `WATCH OFFICER (off):` is a label, not prose. `withoutControlLines` should strip the `NAME (direction):` prefix of a dialogue line in a script.
+- **SCP-42: the length-fix note for a script asks for "repetition".** A draft at 77% of its target (10,134 of 13,129, inside the format's 8,000 to 25,000) got a grow rewrite of every chapter with "develop the scenes, add concrete detail, repetition and sensory description". For a script that is the wrong advice (more lines and beats, not repeated prose). Phrase it per medium, and consider no grow rewrite for an adaptation that is inside its format's range and within about 25% of a source-derived target.
+
 ## Models
 
 - **Antigravity models** (user decision, 2026-10-22): no Antigravity login of Scriptorium's own. If they are wanted, they come through the ACP proxy (hub ticket HUB-09).
