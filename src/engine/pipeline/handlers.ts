@@ -1102,6 +1102,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    // the owner fixed the title in the story brief (`title_fixed`): the book keeps its title whatever the publisher answers
+    const titleFixed = ((await d.books.brief(slug))?.title.trim() ?? '') !== ''
+    if (titleFixed) appendToPrompt(messages, `The owner fixed the title: answer "title" with "${book.title}" exactly.`)
     const article = fmt.article === true
     const schema = z.object({
       title: z.string().min(1),
@@ -1115,7 +1118,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     })
     const r = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
     run.addJson(r.cost, r.chat.model)
-    const title = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim() || book.title
+    const answered = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
+    const title = titleFixed ? book.title : answered || book.title
+    if (titleFixed && answered && answered !== book.title) ctx.log(`the publisher suggested the title "${answered}", but the owner fixed "${book.title}": kept`)
     const year = new Date().getFullYear()
     const uuid = book.uuid ?? randomUUID()
     if (article) {

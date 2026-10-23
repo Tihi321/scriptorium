@@ -174,3 +174,36 @@ describe('editing a story', () => {
     expect([a.slug, b.slug]).toEqual(['same-name', 'same-name-2'])
   })
 })
+
+describe('the publisher and a fixed title', () => {
+  const published = (e: TestEnv) => waitFor(async () => (await e.engine.snapshot()).books.find((b) => b.stage === 'published')?.slug ?? null, 90000, 'the book to be published')
+
+  it('keeps the title the owner fixed, tells the publisher, and still takes its title for a story without one', async () => {
+    const e = await makePipelineEnv({ format: 'bedtime-toddler' })
+    env = e
+    const asked: string[] = []
+    // the mock publisher answers "The Sleepy Fox" (see helpers); a fixed title must survive it
+    e.mock.on({ task: 'publish' }, (req) => {
+      asked.push(req.messages.map((m) => m.content).join('\n'))
+      return JSON.stringify({ title: 'The Sleepy Fox', blurb: 'A fox who cannot sleep finds out what the moon sings.', subjects: ['Bedtime stories'], keywords: ['fox'], cover_brief: 'A fox.', illustration_briefs: [] })
+    })
+    await e.engine.addStory({ ...story, title: 'The Umbrella Conductor', format: 'bedtime-toddler' })
+    const slug = (await published(e))!
+    expect(parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data.title).toBe('The Umbrella Conductor')
+    expect(asked[0]).toContain('The owner fixed the title')
+  }, 120000)
+
+  it('takes the publisher title when the story fixed none', async () => {
+    const e = await makePipelineEnv({ format: 'bedtime-toddler' })
+    env = e
+    const asked: string[] = []
+    e.mock.on({ task: 'publish' }, (req) => {
+      asked.push(req.messages.map((m) => m.content).join('\n'))
+      return JSON.stringify({ title: 'The Moon Song', blurb: 'A fox who cannot sleep finds out what the moon sings.', subjects: ['Bedtime stories'], keywords: ['fox'], cover_brief: 'A fox.', illustration_briefs: [] })
+    })
+    await e.engine.addStory({ ...story, title: '', format: 'bedtime-toddler' })
+    const slug = (await published(e))!
+    expect(parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data.title).toBe('The Moon Song')
+    expect(asked[0]).not.toContain('The owner fixed the title')
+  }, 120000)
+})
