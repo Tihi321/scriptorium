@@ -2,6 +2,21 @@
  * Repetition counter for long books: plain counting, no model. Finds repeated phrases, repeated sentence openers
  * and gesture tics over the whole text. The report goes to the line editor.
  */
+import { CAST, cueOf, puzzleLineOf, SCENE } from '../publish/xhtml'
+
+/**
+ * A script's control lines (`SCENE:`, `ON SCREEN:`, the picture and sound cues and the puzzle lines): the writer repeats them on purpose (the same
+ * ambience key replays the same loop) and the humanizer must keep them word for word, so they are not prose to count.
+ */
+export function withoutControlLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((raw) => {
+      const line = raw.trim()
+      return !(line && (SCENE.test(line) || CAST.test(line) || cueOf(line) || puzzleLineOf(line)))
+    })
+    .join('\n')
+}
 
 export interface Counted {
   text: string
@@ -56,7 +71,8 @@ export function analyzeRepetition(chapters: { n: number; text: string }[]): Repe
   const gestures = new Map<string, { count: number; chapters: Set<number> }>()
   let total = 0
   let sentences = 0
-  for (const ch of chapters) {
+  for (const chapter of chapters) {
+    const ch = { n: chapter.n, text: withoutControlLines(chapter.text) }
     const w = words(ch.text)
     total += w.length
     for (let i = 0; i + 4 <= w.length; i++) {

@@ -72,11 +72,13 @@ export function weekdayMismatches(text: string, year: number): WeekdaySlip[] {
 }
 
 /**
- * The year a story is set in: `story_year` of book.md when it is set, else the year (1000 to 2999) that the book's own texts name
+ * The year a story is set in: `story_year` of book.md when it is a number; `null` there means the story has no fixed year, so none is guessed.
+ * Only when book.md has no `story_year` at all (an older book) it is the year (1000 to 2999) that the book's own texts name
  * most often (the brief's setting, the bible's setting and style, the pitch, the timeline), else null.
  */
 export function storyYear(book: { story_year?: unknown }, texts: string[]): number | null {
   if (typeof book.story_year === 'number' && Number.isInteger(book.story_year)) return book.story_year
+  if (book.story_year === null) return null
   const count = new Map<number, number>()
   for (const t of texts) for (const m of t.matchAll(/\b([12]\d{3})\b/g)) count.set(Number(m[1]), (count.get(Number(m[1])) ?? 0) + 1)
   let best: number | null = null
@@ -89,8 +91,9 @@ const SERIES_CANON = 'Facts that come from the earlier books of the series (the 
 /**
  * A block for a prompt: the story's year and the weekday of every date the text names (at most 30), the weekday slips the engine found,
  * and the rule that notes about weekdays, dates or years must agree with it. Without a year it says not to report them as errors.
+ * `guessed`: the year was taken from the texts, not stated by the architect or the owner, so the block says it is a guess.
  */
-export function calendarSection(year: number | null, text: string): string {
+export function calendarSection(year: number | null, text: string, guessed = false): string {
   if (year === null) {
     return `## The story's calendar\nThe story's year is not stated: do not report a weekday or a count of years as an error unless the text contradicts itself. ${SERIES_CANON}`
   }
@@ -106,23 +109,34 @@ export function calendarSection(year: number | null, text: string): string {
   const slips = weekdayMismatches(text, year)
   return [
     `## The story's calendar`,
-    `The story is set in ${year} (from the book's own files). Do not assume the current year.${days.length ? ` The dates this text names fall on: ${days.join(', ')}.` : ''}` +
+    (guessed
+      ? `The story's year is not stated. The book's texts mention ${year} most often, so it is probably set in ${year}, but this is only a guess: a date in the text may belong to something else, so do not report a year as an error on the strength of it.`
+      : `The story is set in ${year} (from the book's own files). Do not assume the current year.`) +
+      `${days.length ? ` The dates this text names fall on: ${days.join(', ')}.` : ''}` +
       (slips.length ? ` The engine found these weekday slips in the text: ${slips.map((s) => `"${s.said}" (${s.date} is a ${s.actual})`).join('; ')}.` : ''),
     `A note about a weekday, a date or a count of years must agree with this calendar. ${SERIES_CANON}`
   ].join('\n')
 }
 
-/** The year of a book's story, from `story_year` or from the texts that set the scene. */
-export async function storyYearOf(d: { books: BookStore; bible: Bible }, slug: string): Promise<number | null> {
+/** The year of a book's story and whether it is only a guess from the texts (an older book with no `story_year`). */
+export async function storyYearInfo(d: { books: BookStore; bible: Bible }, slug: string): Promise<{ year: number | null; guessed: boolean }> {
   const book = (await d.books.read(slug))?.data
-  if (!book) return null
-  if (typeof book.story_year === 'number') return book.story_year
+  if (!book) return { year: null, guessed: false }
+  if (typeof book.story_year === 'number') return { year: book.story_year, guessed: false }
+  if (book.story_year === null) return { year: null, guessed: false }
   const brief = await d.books.brief(slug)
   const texts = [brief?.setting ?? '', (await d.books.pitch(slug)) ?? '', await d.bible.style(slug), await d.books.bible(slug), (await d.books.readText(slug, 'bible', 'timeline.md')) ?? '']
-  return storyYear(book, texts)
+  const year = storyYear(book, texts)
+  return { year, guessed: year !== null }
+}
+
+/** The year of a book's story, from `story_year` or (older books) from the texts that set the scene. */
+export async function storyYearOf(d: { books: BookStore; bible: Bible }, slug: string): Promise<number | null> {
+  return (await storyYearInfo(d, slug)).year
 }
 
 /** `calendarSection` for a book and the text a prompt is about. */
 export async function calendarFor(d: { books: BookStore; bible: Bible }, slug: string, text: string): Promise<string> {
-  return calendarSection(await storyYearOf(d, slug), text)
+  const { year, guessed } = await storyYearInfo(d, slug)
+  return calendarSection(year, text, guessed)
 }

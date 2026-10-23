@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { parseMd } from '../../shared/md'
 import { COVER_HEIGHT, COVER_WIDTH, genreClass, writeCoverHtml } from '../publish/cover'
 import type { Scheduler } from '../queue/scheduler'
-import { advance, chaptersToRewrite, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
+import { advance, chaptersToRewrite, needsResearch, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
 import { findMarkers } from '../research/markers'
 import type { BookState, ChapterScores, ReviewSummary } from './advance'
 import { countBooksInProgress, countInProgress } from './books'
@@ -15,8 +15,10 @@ import { unmergedNotes as unmergedNotesOf } from './nfcontext'
 import { registerHumanizerHandlers } from './humanizerHandlers'
 import { FactBase } from '../memory/factbase'
 import { registerResearchHandlers } from './researchHandlers'
+import { parseScreenplay, runtimeOf } from '../publish/screenplay'
 import type { PipelineDeps } from './handlers'
 import type { JobStore } from '../queue/jobs'
+import type { IdeaFile } from '../store/ideas'
 
 export interface PipelineOptions extends Omit<PipelineDeps, 'requestCover' | 'kick' | 'factbase'> {
   scheduler: Scheduler
@@ -324,7 +326,7 @@ export class Pipeline {
     const factory = this.o.getFactory()
     const genreText = `${d.genre ?? ''} ${d.topic_name ?? ''}`.toLowerCase()
     const adaptation = typeof d.source_book === 'string' && d.source_book !== ''
-    const prepEnabled = !adaptation && (format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase())))
+    const prepEnabled = !adaptation && needsResearch(format) && (format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase())))
     const tensionDoc = await this.books.readText(slug, 'reports', 'tension.md')
     const tensionData = tensionDoc ? parseMd(tensionDoc).data : {}
     for (const [c, v] of Object.entries((tensionData.tension as Record<string, number> | undefined) ?? {})) {
@@ -356,6 +358,7 @@ export class Pipeline {
       chapters,
       fixes: new Map(chapterFiles.map((c) => [c.n, c.fixes])),
       totalWords: chapterFiles.reduce((n, c) => n + c.words, 0),
+      ...(format.screenplay ? { totalSeconds: chapterFiles.reduce((n, c) => n + runtimeOf([parseScreenplay(c.body)]), 0) } : {}),
       targetWords: typeof d.target_words === 'number' ? d.target_words : undefined,
       chapterWords: new Map(chapterFiles.map((c) => [c.n, c.words])),
       lengthGate: (d.length_gate as { status: string; words?: number } | undefined) ?? null,
@@ -460,6 +463,30 @@ export class Pipeline {
     return { all, failed: (await this.jobs.ids('failed')).filter((i) => i.startsWith(prefix)).length }
   }
 
+  /**
+   * Failed `eic--start--` jobs, counted per story (the job's `idea`) and, for starts with no story, together.
+   * A failure older than the story's last edit does not count: editing the story makes it eligible again. A story that is gone counts nothing.
+   */
+  private async startFailures(ideas: IdeaFile[]): Promise<{ stories: Map<string, number>; shared: number }> {
+    const stories = new Map<string, number>()
+    let shared = 0
+    const mtime = async (file: string) => (await fs.stat(file).catch(() => null))?.mtimeMs ?? 0
+    for (const id of (await this.jobs.ids('failed')).filter((i) => i.startsWith('eic--start--'))) {
+      const j = await this.jobs.read('failed', id).catch(() => null)
+      if (!j) continue
+      const slug = j.data.idea
+      if (!slug) {
+        shared++
+        continue
+      }
+      const idea = ideas.find((i) => i.slug === slug)
+      if (!idea) continue
+      if ((await mtime(this.jobs.file('failed', id))) < (await mtime(idea.file))) continue
+      stories.set(slug, (stories.get(slug) ?? 0) + 1)
+    }
+    return { stories, shared }
+  }
+
   private async fillIdeas(): Promise<void> {
     const formats = this.o.getFormats()
     const topics = await this.o.topics.read()
@@ -489,7 +516,16 @@ export class Pipeline {
     // books and articles have separate limits: a full set of articles never holds a book back, and the other way round
     const room = { books: open.books < factory.max_books_in_progress, articles: open.articles < factory.max_articles_in_progress }
     if ((!room.books && !room.articles) || pending > 0) return
-    const pick = pickNext(await this.o.ideas.list(), await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room)
+    const ideas = await this.o.ideas.list()
+    // a story whose start failed 3 times is skipped (the others still start); a start with no story (a topic) has one shared count
+    const { stories: failedStories, shared: failedShared } = await this.startFailures(ideas)
+    const skip = new Set<string>()
+    for (const [slug, n] of failedStories) {
+      if (n < 3) continue
+      skip.add(slug)
+      this.warnOnce(`start-failing:${slug}`, `starting the story "${ideas.find((i) => i.slug === slug)?.title ?? slug}" failed ${n} times. It is skipped; the other stories still start. Remove its failed jobs in jobs/failed/ (eic--start--*) or edit the story to try it again.`)
+    }
+    const pick = pickNext(ideas, await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room, undefined, skip)
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {
@@ -497,11 +533,11 @@ export class Pipeline {
       }
       return
     }
-    const { all, failed } = await this.jobCount('eic--start--')
-    if (failed >= 3) {
-      this.warnOnce('start-failing', 'starting a book failed 3 times. Not trying again until the failed jobs in jobs/failed/ are removed.')
+    if (!pick.idea && failedShared >= 3) {
+      this.warnOnce('start-failing', 'starting a book (no story, from a topic) failed 3 times. Not trying again until the failed jobs in jobs/failed/ are removed.')
       return
     }
+    const { all } = await this.jobCount('eic--start--')
     await this.jobs.enqueue({
       id: `eic--start--n${all + 1}--r0`,
       task: 'start_book',

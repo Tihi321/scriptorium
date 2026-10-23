@@ -7,6 +7,7 @@ import type { FactoryConfig, FormatEntry, QualityConfig } from '../../shared/sch
 import { briefOf, briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
 import { genreClass, writeCoverHtml } from '../publish/cover'
+import { parseScreenplay, runtimeOf } from '../publish/screenplay'
 import type { ModelInfo } from '../models/registry'
 import type { JobStore } from '../queue/jobs'
 import type { ChatOptions, ChatResult, JobContext, Scheduler } from '../queue/scheduler'
@@ -31,12 +32,13 @@ import { findMarkers, stripMarkers } from '../research/markers'
 import type { ResearchService, SearchService } from '../research/service'
 import { bibleFor, nonfictionContext } from './nfcontext'
 import { chatJson, cleanProse } from './llm'
-import { adaptationFamily, adaptSection, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
+import { adaptationFamily, adaptSection, adaptTargetWords, ADAPT_WORD_FACTOR, canonPathNote, normalizeSourceChapters, sourceExcerpt, sourceOf, uncovered, withSourceBible } from './adapt'
 import { earlierSeriesBooks, lightBibleEntries, seriesSection, withSeriesBible } from './series'
 import { instructionLines, stripTrailingLeak } from './leak'
 import { chapterNotes, otherChapters } from './rewriteContext'
+import { mergeBriefCast } from './briefCast'
 import { cleanCastAliases, scriptBibleLine } from './scriptBible'
-import { PUZZLE_REVIEW_NOTE, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
+import { PUZZLE_REVIEW_NOTE, dropClueChangeProblems, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
 import { placesBlock, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
@@ -131,11 +133,12 @@ export interface NextPick {
  * Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic.
  * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
  * `prefer` is the slug of the story a start job was queued for (its models were chosen for that story): it is picked when it can still start.
+ * `skip` are stories whose start failed too often: they are never picked, so the others still start.
  */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string): NextPick | null {
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string, skip: ReadonlySet<string> = new Set()): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
   const waiting = waitingStories(ideas, books)
-  const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug))
+  const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug) && !skip.has(i.slug))
   // an article needs a free article slot and a book a free book slot: the two limits are separate
   const slot = (article: boolean) => (article ? room.articles : room.books)
   const ok = (topic?: TopicRow, idea?: IdeaFile) => {
@@ -188,8 +191,15 @@ export const formatVars = (f: FormatEntry, target: number) => ({
 export const chapterRuntime = (f: FormatEntry, chapters: number): number | '' =>
   f.runtime ? Math.round((f.runtime[0] + f.runtime[1]) / 2 / Math.max(1, chapters)) : ''
 
+/** The seconds a screenplay chapter runs: its shots' lengths. Words do not count (most of them are SHOT, MUSIC and other cue lines). */
+export const chapterSeconds = (body: string): number => runtimeOf([parseScreenplay(body)])
+
 /** A drafted chapter of a long book under this share of its target words gets an expand retry. */
 export const EXPAND_BELOW = 0.8
+
+/** The pitch prompts ask for under this many words; a pitch more than 3 % over (above 309 words) gets one tighten retry. */
+const PITCH_WORDS = 300
+const PITCH_OVER = 1.03
 
 /** A chapter over this share of its target words gets one tighten retry (every format, drafts and round rewrites). */
 export const TRIM_ABOVE = 1.2
@@ -286,8 +296,10 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
   /**
    * A chapter over 120% of its target gets one more request: cut it to the target. The shorter text is kept when it is between 80% of the
    * target and the length it had. Returns the text, and the reply when the retry was kept.
+   * A screenplay is measured in seconds, not words (most of its words are cue lines): `runtime` is the seconds the chapter should run.
    */
-  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number, screenplay = false, puzzles = false): Promise<{ body: string; reply: ChatResult | null }> => {
+  const tighten = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, target: number, script: boolean, forbid: string[], maxTokens: number, screenplay = false, puzzles = false, runtime: number | '' = ''): Promise<{ body: string; reply: ChatResult | null }> => {
+    if (screenplay && runtime) return tightenRuntime(ctx, run, messages, body, runtime, forbid, maxTokens)
     const words = countWords(body)
     if (words <= target * TRIM_ABOVE) return { body, reply: null }
     const how = screenplay
@@ -319,8 +331,66 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     return { body, reply: null }
   }
 
+  /** The screenplay's tighten: a chapter whose shots run over 120% of its runtime gets one request to cut shots; the words do not count. */
+  const tightenRuntime = async (ctx: JobContext, run: Run, messages: ChatMessage[], body: string, runtime: number, forbid: string[], maxTokens: number): Promise<{ body: string; reply: ChatResult | null }> => {
+    const seconds = chapterSeconds(body)
+    if (seconds <= runtime * TRIM_ABOVE) return { body, reply: null }
+    try {
+      const retry = await run.chat({
+        messages: [
+          ...messages,
+          { role: 'assistant', content: body },
+          { role: 'user', content: `This chapter runs ${seconds} seconds, but it should run about ${runtime}. Cut it to about ${runtime} seconds: cut shots and minor action and lines, and keep every plot beat and every SCENE, ON SCREEN, MUSIC, SFX and TITLE line that stays. Write the whole chapter again, as plain script only, with no title or notes.` }
+        ],
+        maxTokens,
+        forbid
+      })
+      const shorter = chapterAnswer(ctx, forbid, retry.text)
+      const now = chapterSeconds(shorter)
+      if (now >= runtime * 0.8 && now < seconds) {
+        ctx.log(`chapter ran ${seconds} seconds (target ${runtime}); trimmed to ${now}`)
+        return { body: shorter, reply: retry }
+      }
+      ctx.log(`the tighten retry gave ${now} seconds (target ${runtime}): keeping the first answer of ${seconds}`)
+    } catch (err) {
+      if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
+      ctx.log(`the tighten retry failed (${(err as Error).message}): keeping the first answer of ${seconds} seconds`)
+    }
+    return { body, reply: null }
+  }
+
+  /**
+   * The pitch prompts ask for under PITCH_WORDS words. A pitch more than PITCH_OVER (3 %) over gets one more request to cut it;
+   * the shorter answer is kept when it is not empty and shorter, else the first one stays. Whatever comes back is accepted.
+   */
+  const tightenPitch = async (ctx: JobContext, run: Run, messages: ChatMessage[], text: string): Promise<string> => {
+    const words = countWords(text)
+    if (words <= PITCH_WORDS * PITCH_OVER) return text
+    try {
+      const retry = await run.chat({
+        messages: [
+          ...messages,
+          { role: 'assistant', content: text },
+          { role: 'user', content: `This pitch has ${words} words, but it must stay under ${PITCH_WORDS}. Cut it to about ${PITCH_WORDS - 20} words and keep every part the instructions asked for, the ending included. Write the whole pitch again, as plain text only.` }
+        ],
+        maxTokens: 4000
+      })
+      const shorter = cleanProse(retry.text)
+      const now = countWords(shorter)
+      if (shorter.length >= 40 && now < words) {
+        ctx.log(`the pitch was ${words} words (limit ${PITCH_WORDS}); tightened to ${now}`)
+        return shorter
+      }
+      ctx.log(`the pitch tighten retry gave ${now} words: keeping the first answer of ${words}`)
+    } catch (err) {
+      if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
+      ctx.log(`the pitch tighten retry failed (${(err as Error).message}): keeping the first answer of ${words} words`)
+    }
+    return text
+  }
+
   /** A visual novel script: its SCENE places are the bible's names, and the places the bible lacks are added to it (see scriptPlaces.ts). */
-  const settlePlaces = (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => settleScenePlaces(d, slug, n, body, ctx.log)
+  const settlePlaces = (ctx: JobContext, slug: string, n: number, body: string, cues: boolean): Promise<string> => settleScenePlaces(d, slug, n, body, ctx.log, { cues })
 
   sched.register('generate_ideas', async (ctx) => {
     const run = new Run(ctx)
@@ -373,7 +443,9 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it
-    const source = idea?.data.source_book ? await sourceOf(d, idea.data.source_book) : null
+    // the story's `source_book` is the book it adapts (sourceOf reads the source of a *book*, which is not what is wanted here)
+    const sourceRead = idea?.data.source_book ? await d.books.read(idea.data.source_book) : null
+    const source = sourceRead ? { title: sourceRead.data.title, genre: sourceRead.data.genre } : null
     let allowed = formatsForKind(formats, topic?.kind ?? null).filter((f) => !idea?.data.source_book || f.script)
     // a story with no topic that fixes an article format is an article of no section
     if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.article && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
@@ -392,29 +464,49 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       if (!fixedFormat) d.log(`the story "${idea!.title}" asks for the format "${brief.format}", which ${topic ? 'the topic does not allow' : 'is not enabled'}: the editor chooses`)
     }
     const ideaText = brief ? briefPromptText(brief) : idea?.body ?? ''
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', articleStory ? 'start_book_article' : 'start_book', {
-      source: idea
-        ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
-          (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
-          (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '') +
-          (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into ${allowed.every((f) => f.screenplay) && allowed.length > 0 ? 'a screenplay for a short film' : 'a visual novel script'}: keep the book's genre, and take the title from the book if the owner gave none.` : '')
-        : 'No idea was picked: choose a fresh premise that fits the topic.',
-      topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
-      formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
-    })
-    run.version = version
-    const schema = z.object({
-      format: z.string(),
-      title: z.string().min(2),
-      genre: z.string().default(''),
-      target_words: z.number().optional(),
-      notes: z.string().default('')
-    })
-    const r = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
-    run.addJson(r.cost, r.chat.model)
+    // An adaptation whose format is settled (the owner fixed it, or only one script format is open) leaves the editor-in-chief nothing to decide:
+    // the title comes from the book (or the owner), the genre from the book and the length from the format. No model call, so the start needs no model of its own.
+    const direct = !!source && !!(fixedFormat ?? (allowed.length === 1 ? allowed[0] : undefined))
+    let r: { value: { format: string; title: string; genre: string; target_words?: number; notes: string } }
+    if (direct) {
+      d.log(`start_book: "${idea!.title}" adapts "${source!.title}" and its format is settled: started without asking the editor-in-chief`)
+      r = { value: { format: (fixedFormat ?? allowed[0])!.id, title: source!.title, genre: '', notes: '' } }
+    } else {
+      const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', articleStory ? 'start_book_article' : 'start_book', {
+        source: idea
+          ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
+            (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
+            (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '') +
+            (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into ${allowed.every((f) => f.screenplay) && allowed.length > 0 ? 'a screenplay for a short film' : 'a visual novel script'}: keep the book's genre, and take the title from the book if the owner gave none.` : '')
+          : 'No idea was picked: choose a fresh premise that fits the topic.',
+        topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
+        formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
+      })
+      const schema = z.object({
+        format: z.string(),
+        title: z.string().min(2),
+        genre: z.string().default(''),
+        target_words: z.number().optional(),
+        notes: z.string().default('')
+      })
+      run.version = version
+      const got = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
+      run.addJson(got.cost, got.chat.model)
+      r = got
+    }
     const fmt = fixedFormat ?? allowed.find((f) => f.id === r.value.format) ?? allowed[0]
     if (!fmt) throw new Error(idea?.data.source_book ? 'no enabled visual novel format for this adaptation' : 'no enabled format for this topic')
-    const target = clamp(Math.round(r.value.target_words ?? (fmt.words[0] + fmt.words[1]) / 2), fmt.words[0], fmt.words[1])
+    let target = clamp(Math.round(r.value.target_words ?? (fmt.words[0] + fmt.words[1]) / 2), fmt.words[0], fmt.words[1])
+    // an adaptation's length follows its source (the format's middle would send every chapter of a short story's adaptation through a length rewrite)
+    let sourceWords = 0
+    if (idea?.data.source_book) {
+      sourceWords = (await d.books.chapters(idea.data.source_book)).reduce((n, c) => n + c.words, 0)
+      const fromSource = adaptTargetWords(sourceWords, fmt)
+      if (fromSource) {
+        target = fromSource
+        d.log(`start_book: "${idea.title}" adapts a book of ${sourceWords} words: target ${target} words (the source times ${ADAPT_WORD_FACTOR}, within the format's ${fmt.words[0]}-${fmt.words[1]})`)
+      } else sourceWords = 0
+    }
     const title = fixedTitle || r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     const slug = await d.books.freeSlug(title)
     await d.books.create(
@@ -436,6 +528,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
         target_words: target,
+        ...(sourceWords ? { target_from_source_words: sourceWords } : {}),
         ...(idea && idea.data.role_models && typeof idea.data.role_models === 'object' ? { role_models: idea.data.role_models } : {}),
         ...(idea?.data.series ? { series: idea.data.series, ...(idea.data.series_index ? { series_index: idea.data.series_index } : {}) } : {}),
         idea: idea?.slug ?? null,
@@ -492,6 +585,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       const r = await run.chat({ messages, maxTokens: 4000 })
       text = cleanProse(r.text)
       if (text.length < 40) throw new Error('the pitch came back empty')
+      text = await tightenPitch(ctx, run, messages, text)
       if (!mem || attempt >= 2) break
       // library-wide check: a pitch too close to an existing pitch or blurb is written again
       let near: { book: string; similarity: number } | null = null
@@ -660,14 +754,15 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     } else {
       const bible =
         `# Story bible (light)\n\n## Setting\n${r.value.setting || '(see the pitch)'}\n\n## Characters\n` +
-        (characters.length ? characters.map((c) => (fmt.script ? scriptBibleLine(c) : `- **${c.name}**: ${c.description}`)).join('\n') : '(see the pitch)') +
+        (characters.length ? characters.map((c) => (fmt.script ? scriptBibleLine(c) : `- **${c.name}**: ${c.description}${c.aliases?.length ? ` (also called ${c.aliases.join(', ')})` : ''}`)).join('\n') : '(see the pitch)') +
         // a visual novel's places are the backgrounds an artist draws, so the light bible keeps them too
         (fmt.script && places.length ? `\n\n## Places\n${places.map((p) => `- **${p.name}**: ${p.description}`).join('\n')}` : '') +
         `\n\n## Style\n${r.value.style || '(see the format guidance)'}\n`
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
     const year = Math.round(Number(r.value.story_year))
-    if (Number.isInteger(year) && year >= 1000 && year <= 2999 && book.story_year === undefined) await d.books.update(slug, () => ({ story_year: year }))
+    // no valid year from the architect means no fixed year: recorded as null, so the calendar does not guess one from the texts
+    if (book.story_year === undefined) await d.books.update(slug, () => ({ story_year: Number.isInteger(year) && year >= 1000 && year <= 2999 ? year : null }))
     if (fmt.article) {
       // the headline and the standfirst of the article, kept in book.md (the publisher makes them final)
       const headline = r.value.headline.replace(/^["'“”]+|["'“”]+$/g, '').replace(/\s+/g, ' ').trim()
@@ -780,7 +875,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     let trimmedFrom: number | null = null
     if (expandedFrom === null) {
       const before = countWords(body)
-      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles)
+      const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles, chapterRuntime(fmt, outline.chapters.length))
       if (out.reply) {
         r = out.reply
         body = out.body
@@ -788,7 +883,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       }
     }
     // a script: the SCENE places are the bible's names, and a new place is added to the bible
-    if (fmt.script) body = await settlePlaces(ctx, slug, n, body)
+    if (fmt.script) body = await settlePlaces(ctx, slug, n, body, !fmt.screenplay)
     // [RESEARCH: question] markers (any model can write them): each becomes a research job. A fix-up job replaces the sentences when the notes are in.
     const asked: string[] = []
     for (const m of findMarkers(body).slice(0, MAX_MARKERS_PER_CHAPTER)) {
@@ -899,7 +994,19 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       let reviewProblems = r.value.problems
       let reviewChapters = r.value.chapters
       if (fmt.puzzles && role === 'continuity-checker') {
-        const found = puzzleProblems(await d.books.chapters(slug), await puzzlesOf(d, slug))
+        const entries = await puzzlesOf(d, slug)
+        // the clues are fixed by the puzzle core: a problem that asks to change one, or calls it a contradiction (an either/or clue, say), is dropped
+        const split = dropClueChangeProblems(reviewProblems, entries)
+        if (split.dropped.length) {
+          reviewProblems = split.kept
+          ctx.log(`puzzle clues are fixed: dropped ${split.dropped.length} review problem(s) that ask to change a CLUE line: ${split.dropped.map((x) => x.slice(0, 120)).join(' | ')}`)
+          // a revise that rested only on those problems is a pass
+          if (!reviewProblems.length) {
+            verdict = 'pass'
+            reviewChapters = []
+          }
+        }
+        const found = puzzleProblems(await d.books.chapters(slug), entries)
         if (found.length) {
           verdict = 'revise'
           reviewNotes = `The engine's puzzle check found ${found.length} problem(s) in the puzzle lines (see the problems). ${reviewNotes}`.trim()
@@ -999,6 +1106,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     // the words this chapter should have: its share of the book's target over the planned chapters (a length rewrite says its own number)
     const target = perChapterTarget(book, outline, chapters.length)
     const lengthWords = isLength ? Number(/about (\d+) words/.exec(ctx.jobBody)?.[1]) : NaN
+    const lengthSeconds = isLength ? Number(/about (\d+) seconds/.exec(ctx.jobBody)?.[1]) || 0 : 0
     const chapterWords = Number.isFinite(lengthWords) && lengthWords > 0 ? lengthWords : Math.round(clamp(current.words, 0.85 * target, 1.15 * target))
     const { messages, version, template } = await buildMessages(d.dataDir, ctx, 'writer', variant(fmt, 'rewrite_chapter'), {
       title: book.title,
@@ -1011,7 +1119,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       chapter_text: current.body,
       other_chapters: fmt.nonfiction ? '(the other chapters are in the fact base section above)' : around.text || '(this is the only chapter)',
       chapter_words: chapterWords,
-      chapter_runtime: chapterRuntime(fmt, outline?.chapters.length ?? chapters.length),
+      chapter_runtime: lengthSeconds || chapterRuntime(fmt, outline?.chapters.length ?? chapters.length),
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
@@ -1055,13 +1163,13 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const noteLonger = isNote && noteWantsLength(ctx.jobBody)
     if (noteLonger && countWords(body) > target * TRIM_ABOVE) ctx.log(`the note asks for more length: the chapter of ${countWords(body)} words (target ${target}) is not tightened`)
     if (!isLength && !noteLonger) {
-      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles)
+      const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles, chapterRuntime(fmt, outline?.chapters.length ?? chapters.length))
       if (out.reply) {
         r = out.reply
         body = stripMarkers(out.body)
       }
     }
-    if (fmt.script) body = await settlePlaces(ctx, slug, n, body)
+    if (fmt.script) body = await settlePlaces(ctx, slug, n, body, !fmt.screenplay)
     await d.books.writeChapter(slug, { n, title: current.title, round, body, agent: ctx.agent.id, model: r.model.ref, fixes: isLength ? [...current.fixes, 'len'] : isCheck ? [...current.fixes, 'chk'] : current.fixes })
     await made(slug, run)
     return { result: `chapter ${n} rewritten (round ${round}): ${countWords(body)} words`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
@@ -1102,6 +1210,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       ...formatVars(fmt, book.target_words)
     })
     run.version = version
+    // the owner fixed the title in the story brief (`title_fixed`): the book keeps its title whatever the publisher answers
+    const titleFixed = ((await d.books.brief(slug))?.title.trim() ?? '') !== ''
+    if (titleFixed) appendToPrompt(messages, `The owner fixed the title: answer "title" with "${book.title}" exactly.`)
     const article = fmt.article === true
     const schema = z.object({
       title: z.string().min(1),
@@ -1115,7 +1226,9 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     })
     const r = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
     run.addJson(r.cost, r.chat.model)
-    const title = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim() || book.title
+    const answered = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
+    const title = titleFixed ? book.title : answered || book.title
+    if (titleFixed && answered && answered !== book.title) ctx.log(`the publisher suggested the title "${answered}", but the owner fixed "${book.title}": kept`)
     const year = new Date().getFullYear()
     const uuid = book.uuid ?? randomUUID()
     if (article) {
@@ -1316,14 +1429,17 @@ export async function storyBriefSection(d: { books: BookStore }, slug: string): 
 
 type OutlineCharacter = { name: string; description: string; voice: string; aliases?: string[] }
 
-/** The outline's characters plus every character of the owner's brief that the architect left out (matched by name, ignoring case). */
+/**
+ * The outline's characters plus every character of the owner's brief that the architect left out. A brief character the outline has under a shorter name
+ * (Dec for Declan Hartley) is the same person: one entry, named as the brief names it, the outline's name as an alias (`mergeBriefCast`).
+ */
 export async function withBriefCharacters(d: { books: BookStore }, slug: string, characters: OutlineCharacter[], log: (m: string) => void): Promise<OutlineCharacter[]> {
   const brief = await d.books.brief(slug)
   if (!brief) return characters
-  const have = new Set(characters.map((c) => c.name.trim().toLowerCase()))
-  const missing = brief.characters.filter((c) => c.name.trim() && !have.has(c.name.trim().toLowerCase()))
-  if (missing.length) log(`the outline left out ${missing.length} character(s) of the owner's brief: ${missing.map((c) => c.name).join(', ')}. They are added to the bible.`)
-  return [...characters, ...missing.map((c) => ({ name: c.name.trim(), description: [c.role.trim(), c.description.trim()].filter(Boolean).join('. '), voice: '' }))]
+  const merged = mergeBriefCast(characters, brief.characters)
+  if (merged.matched.length) log(`the outline names ${merged.matched.length} character(s) of the owner's brief by a shorter name: ${merged.matched.map((m) => `${m.outline} is ${m.brief}`).join(', ')}. One entry each, with the short name as an alias.`)
+  if (merged.added.length) log(`the outline left out ${merged.added.length} character(s) of the owner's brief: ${merged.added.map((c) => c.name).join(', ')}. They are added to the bible.`)
+  return [...merged.characters, ...merged.added.map((c) => ({ name: c.name.trim(), description: [c.role.trim(), c.description.trim()].filter(Boolean).join('. '), voice: '' }))]
 }
 
 /** Your notes from the draft reader (books/<slug>/notes.md), for the writers. Empty when there are none. */

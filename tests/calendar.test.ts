@@ -38,6 +38,18 @@ describe('the calendar', () => {
     expect(storyYear({}, ['Once upon a time, 99 days ago.'])).toBeNull()
   })
 
+  it('does not guess a year when the outline said the story has none (story_year: null), even if a text names one', () => {
+    expect(storyYear({ story_year: null }, ['A tram ticket dated 3 March 1989.', 'Setting: 1989.'])).toBeNull()
+  })
+
+  it('words a year taken from the texts as a guess, and a stated year as a fact', () => {
+    const guessed = calendarSection(1989, 'On 3 March it rained.', true)
+    expect(guessed).toContain('not stated')
+    expect(guessed).toContain('only a guess')
+    expect(guessed).not.toContain("from the book's own files")
+    expect(calendarSection(1989, 'On 3 March it rained.')).toContain("The story is set in 1989 (from the book's own files)")
+  })
+
   it('writes the calendar block: the year, the weekdays, the slips and the canon rule; without a year, the no-year text', () => {
     const text = 'On Saturday 24 October and on 25 October. Then Sunday 24 October again.'
     const section = calendarSection(2026, text)
@@ -95,6 +107,36 @@ describe('the reviewers and the writer get the calendar', () => {
     expect(rewrites.length).toBeGreaterThan(0)
     expect(rewrites[0]).toContain('open to judgement')
     expect(rewrites[0]).toContain('The story is set in 2026')
+  }, 120000)
+})
+
+describe('a story without a year', () => {
+  let env: Awaited<ReturnType<typeof makePipelineEnv>> | undefined
+  afterEach(async () => {
+    await env?.cleanup()
+    env = undefined
+  })
+
+  it('records story_year null from the outline, and the prompts do not state a year found in the text', async () => {
+    env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler' })
+    const e = env
+    const prompts: string[] = []
+    const body = 'The little fox found a tram ticket dated 3 March 1989 and curled up in the warm hay. '.repeat(14)
+    e.mock.on({ task: 'draft_chapter' }, body)
+    e.mock.on({ task: 'rewrite_chapter' }, body)
+    e.mock.on({ task: 'review' }, (req) => {
+      prompts.push(req.messages.map((m) => m.content).join('\n'))
+      const role = req.meta!.role!
+      return JSON.stringify({ verdict: 'pass', scores: Object.fromEntries(dimensionsFor(role).map((d) => [d, 8])), notes: 'Fine.', chapters: [], problems: [], research_questions: [] })
+    })
+    const slug = (await waitFor(async () => (await e.engine.snapshot()).books.find((b) => b.stage === 'published')?.slug ?? null, 90000, 'the book to be published'))!
+    const data = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
+    expect(data.story_year).toBeNull()
+    expect(prompts.length).toBeGreaterThan(0)
+    for (const p of prompts) {
+      expect(p).toContain("The story's year is not stated")
+      expect(p).not.toContain('The story is set in 1989')
+    }
   }, 120000)
 })
 

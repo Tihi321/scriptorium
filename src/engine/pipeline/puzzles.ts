@@ -40,18 +40,39 @@ export function evidenceKeysOf(p: PuzzleEntry): string[] {
 
 const nameOf = (p: PuzzleEntry, id: string) => p.names[id] ?? id
 
-/** The solution of a puzzle in words, for the writers (never to be stated before the puzzle). Empty when the core has no murder answer. */
+/** The solution of a knights puzzle in words: who is a knight (always tells the truth) and who a knave (always lies). Empty for any other core. */
+function knightsWords(p: PuzzleEntry): string {
+  if (p.kind !== 'knights' && p.core?.kind !== 'knights') return ''
+  const sol = p.core?.solution
+  if (!sol || typeof sol !== 'object') return ''
+  const parts = Object.entries(sol as Record<string, unknown>)
+    .filter(([, v]) => v === 'knight' || v === 'knave')
+    .map(([who, v]) => `${nameOf(p, who)} is a ${String(v)}`)
+  return parts.length ? `${parts.join(', ')}. A knight always tells the truth and a knave always lies, in every line they speak, also outside the puzzle` : ''
+}
+
+/** The solution of a puzzle in words, for the writers (never to be stated before the puzzle). Empty when the core has no answer. */
 export function solutionWords(p: PuzzleEntry): string {
   const a = (p.core?.murder as { answer?: Record<string, string> } | undefined)?.answer
+  const knights = knightsWords(p)
+  if (knights) return knights
   if (!a) return p.testimony ? `${p.testimony.witness}'s statement ${p.testimony.breaks.map((b) => `${b.statement} is broken by the evidence ${b.evidence}`).join('; ')}` : ''
   const parts = Object.entries(a).map(([cat, item]) => `${cat}: ${nameOf(p, item)}`)
   return parts.join(', ')
 }
 
-/** The chapter each clue of a puzzle placed in chapter `chapter` is planted in: spread over chapters 1 to `chapter` (a clue is never planted after its puzzle). */
+/**
+ * The chapter each clue of a puzzle placed in chapter `chapter` is planted in. A Murdle's clues are spread over chapters 1 to `chapter` (a clue is never
+ * planted after its puzzle). A puzzle with no `clues` in its core (knights: the `intro` and the statements of the speakers) plants all of them in the
+ * puzzle's own chapter: the speakers are in the story from there on, so a statement is never planted before the person who says it appears.
+ */
 export function clueChapters(p: PuzzleEntry, chapter: number): Record<string, number> {
   const ids = clueIdsOf(p)
   const out: Record<string, number> = {}
+  if (!Array.isArray(p.core?.clues)) {
+    ids.forEach((id) => (out[id] = chapter))
+    return out
+  }
   ids.forEach((id, i) => (out[id] = Math.min(chapter, 1 + Math.floor((i * chapter) / ids.length))))
   return out
 }
@@ -211,7 +232,7 @@ This book is a mystery with puzzles. Code made these puzzles; their solutions ar
 
 ${list}
 
-Place every puzzle in one chapter with "puzzles": ["<key>"] on that chapter in the JSON (a chapter may have none, one or two). Never put a puzzle in chapter 1 (the chapters before it plant its clues), and keep the puzzles apart: the story goes on between them. The characters and places of the story use the names above. A clue is found by what a character sees, hears or is told: say in each chapter summary what is found. The book has ${chapters[0]} to ${chapters[1]} chapters.`
+Place every puzzle in one chapter with "puzzles": ["<key>"] on that chapter in the JSON (a chapter may have none, one or two). Never put a puzzle in chapter 1 (the chapters before it plant its clues), and keep the puzzles apart: the story goes on between them. The characters and places of the story use the names above. A clue is found by what a character sees, hears or is told: say in each chapter summary what is found. The people who speak the statements of a knights puzzle appear in that puzzle's chapter or earlier, and their statements are planted in that chapter. The book has ${chapters[0]} to ${chapters[1]} chapters.`
 }
 
 /** The writer's section for chapter `n`: the rules, the puzzles placed here, the clues to plant here and the evidence. */
@@ -224,12 +245,16 @@ export function puzzlesChapterSection(puzzles: PuzzleEntry[], n: number, chapter
     parts.push(`Plant these clues in this chapter, each as one CLUE line (the sentence is what it must mean):\n${plant.map(({ p, id }) => `- ${p.key}/${id}: ${p.text[id] ?? ''}`).join('\n')}`)
   }
   for (const p of here) {
-    const lines = [`Puzzle ${nice(p)} is solved at the end of this chapter: write the line PUZZLE: ${p.key} where the player stops to solve it, after all its clues. The truth: ${solutionWords(p) || 'see the testimony'}. ${legend(p)}`]
+    const lines = [`Puzzle ${nice(p)} is solved at the end of this chapter: write the line PUZZLE: ${p.key} where the player stops to solve it, after all its clues. The truth: ${solutionWords(p) || 'see the testimony'}. Keep every line of the prose true to it, but do not state it or hint at it before the PUZZLE line. ${legend(p)}`]
     if (p.text.murder) lines.push(`The note of the puzzle: ${p.text.murder}`)
     if (p.testimony) {
       lines.push(`Testimony of ${p.testimony.witness}: write TESTIMONY: ${p.testimony.witness}, the statements, END TESTIMONY, then the PUZZLE line. Statement ${p.testimony.breaks.map((b) => `${b.statement} is broken by the evidence "${b.evidence}"`).join('; ')}: it must be a lie or a mistake that this evidence shows. Plant the evidence before: ${evidenceKeysOf(p).map((k) => `EVIDENCE: ${k}: ${p.testimony!.evidence.find((e) => e.key === k)?.description ?? ''}`).join(' | ')}`)
     }
     parts.push(lines.join('\n'))
+  }
+  // a puzzle solved in an earlier chapter: its answer is now known to the story, and the prose must not contradict it
+  for (const p of puzzles.filter((x) => x.chapter !== undefined && x.chapter < n && solutionWords(x))) {
+    parts.push(`Puzzle ${nice(p)} was solved in chapter ${p.chapter}. The truth, which the story now knows and must never contradict: ${solutionWords(p)}. ${legend(p)}`)
   }
   if (!plant.length && !here.length) parts.push('No clue of a puzzle is planted in this chapter, and no puzzle is solved: write the story as the outline says. Earlier CLUE lines stay as they are.')
   return parts.join('\n\n')
@@ -237,7 +262,23 @@ export function puzzlesChapterSection(puzzles: PuzzleEntry[], n: number, chapter
 
 /** For every reviewer of a puzzle book. */
 export const PUZZLE_REVIEW_NOTE =
-  'Lines that start with CLUE:, EVIDENCE:, PUZZLE: or TESTIMONY:, and END TESTIMONY lines, belong to the book\'s logic puzzles. They are made and checked by code: do not review them as prose and do not ask for changes in their form or ids. A clue line should read naturally in the story. Judge whether the mystery is fair: the clues are found in the story before the puzzle, and the story does not give the answer away.'
+  'Lines that start with CLUE:, EVIDENCE:, PUZZLE: or TESTIMONY:, and END TESTIMONY lines, belong to the book\'s logic puzzles. They are made and checked by code: do not review them as prose and do not ask for changes in their form or ids. A clue line should read naturally in the story. Judge whether the mystery is fair: the clues are found in the story before the puzzle, and the story does not give the answer away. The CLUE lines are fixed puzzle clues, proved solvable by code: never report one as a contradiction (of another clue, of the prose or of itself) and never ask for one to be changed. Clues that look as if they clash, or that say "either ... or", are expected: that is the deduction. Two clues that seem to put one object or person in two places are the puzzle, not a continuity error.'
+
+/**
+ * Review problems that ask to change a puzzle clue or call it a contradiction (`winter_garden/c3`, "clue c3", "CLUE:" with "change", "contradicts" ...).
+ * The clues are fixed by the puzzle core, so the continuity review drops such a problem: a rewrite could only break the puzzle.
+ */
+export function dropClueChangeProblems(problems: string[], puzzles: PuzzleEntry[]): { kept: string[]; dropped: string[] } {
+  const ids = [...new Set(puzzles.flatMap((p) => clueIdsOf(p)))]
+  const keys = puzzles.map((p) => p.key)
+  const alt = (list: string[]) => (list.length ? list.map((x) => x.replace(/[^A-Za-z0-9_-]/g, '')).join('|') : '(?!)')
+  const ref = new RegExp(`\\b(?:${alt(keys)})/(?:${alt(ids)})\\b|\\bclues?\\s+\\W?(?:${alt(ids)})\\b|\\bCLUE:`, 'i')
+  const asks = /\b(chang\w*|alter\w*|reword\w*|rewrit\w*|replac\w*|remov\w*|contradict\w*|conflict\w*|clash\w*|inconsisten\w*|cannot both|can't both|both hold|break\w*)\b/i
+  const kept: string[] = []
+  const dropped: string[] = []
+  for (const x of problems) (ref.test(x) && asks.test(x) ? dropped : kept).push(x)
+  return { kept, dropped }
+}
 
 /** For the humanizer of a puzzle book. */
 export const PUZZLE_HUMANIZER_NOTE =

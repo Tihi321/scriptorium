@@ -176,6 +176,11 @@ export const formatEntrySchema = z.looseObject({
   /** Writers list research questions before each chapter (a prep step, one model call per chapter). See also factory.research_prep_genres. */
   research_prep: z.boolean().default(false),
   /**
+   * `false`: the book needs no real-world facts (a read-aloud bedtime story): no `research_plan` call and no `research_prep` steps.
+   * Not set: research as usual, except for the `bedtime-*` formats (so a data folder made before this flag behaves the same).
+   */
+  research: z.boolean().optional(),
+  /**
    * The non-fiction variant: research for every chapter, a fact base instead of a story bible, non-fiction prompts,
    * the fact-checker as a reviewer (in place of the continuity checker) and a references section at the end.
    */
@@ -351,8 +356,8 @@ export const bookSchema = z.looseObject({
   standfirst: z.string().optional(),
   /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
   humanize: z.boolean().optional(),
-  /** The year the story is set in: the architect's outline sets it, you may set it by hand. The reviewers get the calendar of that year. */
-  story_year: z.number().int().optional(),
+  /** The year the story is set in: the architect's outline sets it, you may set it by hand. The reviewers get the calendar of that year. `null`: the architect said the story has no fixed year (nothing is guessed from the texts); missing: an older book. */
+  story_year: z.number().int().nullable().optional(),
   age_band: z.string().nullable().default(null),
   target_words: z.number().int().positive(),
   author: z.string().nullable().default(null),

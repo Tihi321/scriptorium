@@ -6,6 +6,7 @@ import { isCommand } from '../shared/protocol'
 import type { EngineEvent } from '../shared/protocol'
 import { BOOK_SCHEME } from '../renderer/hostApi'
 import { renderCover } from './cover'
+import { reportSecondInstance } from './secondInstance'
 import { startEngine } from './engineClient'
 import { bookUrlToPath, readFileInside, resolveInside, tailFileInside } from './files'
 
@@ -156,6 +157,8 @@ function setLoginItem(on: boolean): boolean {
 }
 
 if (!app.requestSingleInstanceLock()) {
+  // not silent: say why this start quits (the running one may have MCP off)
+  reportSecondInstance(process.argv)
   app.quit()
 } else {
   app.on('second-instance', () => showWindow())

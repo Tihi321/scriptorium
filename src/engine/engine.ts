@@ -136,6 +136,12 @@ export class Engine {
       void this.snapshot().then((s) => this.emit(s))
       this.scheduler.kick()
     }
+    // a model the provider retired or does not know: say so once, with the provider's text; jobs use their next model from now on
+    this.router.onModelRetired = (m, message) => {
+      this.log(`models: ${m.ref} is retired or unknown at ${m.provider.id}, jobs use the next model in their role until the engine restarts. Provider said: ${message.slice(0, 300)}`)
+      this.emit({ type: 'engine.warning', message: `${m.ref} is retired or unknown at its provider: jobs use their next model. Remove it from config/settings.md or config/models.md.` })
+      this.scheduler.kick()
+    }
     this.jobs = new JobStore(dir)
     this.agents = new AgentStore(dir)
     this.logs = new LogWriter(dir)
@@ -261,7 +267,7 @@ export class Engine {
     if (this.slotTimer) clearInterval(this.slotTimer)
     await this.pipeline.stop()
     await this.scheduler.stop()
-    await this.logs.flush()
+    await this.logs.close()
     await this.budget.flush().catch(() => undefined)
     this.memory.close()
   }

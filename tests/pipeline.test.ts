@@ -25,7 +25,17 @@ afterEach(async () => {
 })
 
 const parseMdFile = async (f: string) => parseMd(await readFile(f, 'utf8'))
-const bookMd = async (e: Env, slug: string) => parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8'))
+// book.md is replaced by a rename; a read in that instant can find no file (Windows), so the read tries again a few times
+const bookMd = async (e: Env, slug: string) => {
+  for (let i = 0; ; i++) {
+    try {
+      return parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8'))
+    } catch (err) {
+      if (i >= 4 || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
+}
 const firstBook = async (e: Env) => (await readdir(path.join(e.dir, 'books')))[0]
 const stageOf = async (e: Env) => {
   try {
@@ -494,6 +504,8 @@ describe('choosing what to write', () => {
     const slug = (await waitFor(async () => (await firstBook(env!)) ?? null, 30000, 'first book'))!
     const { data } = await bookMd(env, slug)
     expect(data.idea).toBe('my-own')
+    // the idea is marked used a moment after the book folder appears
+    await waitFor(async () => (await env!.engine.ideas.list()).find((i) => i.slug === 'my-own')?.data.status === 'used', 30000, 'the idea to be marked used')
     const mine = (await env.engine.ideas.list()).find((i) => i.slug === 'my-own')!
     expect(mine.data).toMatchObject({ status: 'used', book: slug, source: 'user' })
     expect(mine.title).toBe('The Hedgehog Who Counted Stars')

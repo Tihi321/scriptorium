@@ -248,15 +248,15 @@ describe('a screenplay through the pipeline (mock models)', () => {
     })
     try {
       const prompts: string[] = []
-      const shots = (words: number) => {
+      const shots = (seconds: number) => {
         const lines = ['SCENE: Hay Barn, night', 'Moonlight on straw.', 'MUSIC: soft strings']
-        for (let i = 1; lines.join(' ').split(/\s+/).length < words; i++) lines.push(`SHOT (medium, static, 4s): The fox turns ${i}.`, 'ON SCREEN: Fox (soft orange)', 'FOX (sleepy): The moon hums to the little hay bed tonight.')
+        for (let i = 1; i * 4 <= seconds; i++) lines.push(`SHOT (medium, static, 4s): The fox turns ${i}.`, 'ON SCREEN: Fox (soft orange)', 'FOX (sleepy): The moon hums to the little hay bed tonight.')
         return lines.join('\n')
       }
       e.mock.on({ task: 'draft_chapter' }, (req) => {
         const t = req.messages.filter((m) => m.role === 'user').pop()!.content
         prompts.push(t)
-        return shots(Number(/chapter should be about (\d+) words/.exec(t)?.[1] ?? 100))
+        return shots(Number(/chapter should run about (\d+) seconds/.exec(t)?.[1] ?? 60))
       })
       await e.engine.addStory({ ...emptyBrief(), title: 'The Humming Moon', premise: 'A fox and a humming moon.', format: 'short-film' })
       const slug = await waitFor(async () => {
