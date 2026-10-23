@@ -6,7 +6,7 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
 
 - **Merged:** SCP-08 to SCP-19 (SCP-16 to SCP-18 in PR #10; master 5801f09). The HUB-04 live check ran on a8cf243 (SCP-14, SCP-19).
 - **SCP-16 to SCP-18 (merged, PR #10):** SCP-16 (VN media lines and aliases), SCP-17 (the screenplay writer) and SCP-18 (mystery with puzzles); the details are in `.claude/tickets/SCP-16-vn-media-lines/`, `SCP-17-screenplay-writer/` and `SCP-18-mystery-puzzles/` (each `changelog.md`).
-- **SCP-20 to SCP-25 (done in code, not merged):** the fixes for the findings of the HUB-04 live check, one commit each on `SCP-20-25_fixes` (below; plan in `.claude/tickets/SCP-20-25-hub-fixes/plan.md`).
+- **SCP-20 to SCP-28 (done in code, not merged):** the fixes for the findings of the HUB-04 live check (SCP-20 to SCP-25) and of the hub's live run when every book start was blocked (SCP-26 to SCP-28), one commit each on `SCP-20-25_fixes` (below; plan in `.claude/tickets/SCP-20-25-hub-fixes/plan.md`).
 - **SCP-19 (merged):** every item this roadmap listed then.
   - Fallbacks as an open list, and `last_resort_model`.
   - `story_year` in every outline, and the revise follow-up for the outline, act and thread reviews.
@@ -31,6 +31,14 @@ A book (`the-umbrella-conductor`, a short story) was written over MCP on the mas
 - **SCP-23 (done): the pitch limit.** A pitch over 300 words by more than 3 percent gets one tighten request; whatever comes back is accepted (the shorter answer, else the first).
 - **SCP-24 (done): research for a bedtime story.** The format flag `research: false` (set on `bedtime-toddler` and `bedtime-story`; a `bedtime-*` format without the line counts as false, so older data folders behave the same) skips `research_plan` and `research_prep`.
 - **SCP-25 (done): a second instance quit silently.** It now writes "another Scriptorium is running (engine pid N, data folder X); this start was not needed" to stderr and `logs/app.log`, and says the running one must have MCP on when this start asked for it. The message code is unit-tested; the quit path was not run (it needs a second Electron start).
+
+## Done: the hub's live run with every book start blocked (2026-10-23)
+
+OpenRouter retired a `:free` model that was first in the user's `fallbacks`; the editor-in-chief used it, every `start_book` failed, and after 3 failed `eic--start--` jobs no book started at all. Fixed on `SCP-20-25_fixes`, one commit each, with tests; not merged yet.
+
+- **SCP-26 (done): a retired model is skipped for the engine run.** A 404 was already not retried on the same model; what was missing is that every later call asked the dead model first. The router now marks a model retired or unknown (`has been retired`, `No endpoints found`, a 404 saying the model is not found) for the engine run, logs it once with the provider's text and leaves it out of every job's list (the last model of a chain stays, so the error shows). A restart asks again.
+- **SCP-27 (done): one story that cannot start no longer blocks the others.** Failed `eic--start--` jobs are counted per story (the job's `idea`); a story with 3 is skipped by `pickNext` with a warning naming it. Removing its failed jobs, or editing the story after the failures, makes it eligible again. Starts with no story keep one shared count.
+- **SCP-28 (done): an adaptation starts without a model call.** With its format settled (the owner fixed it, or one script format is open) `start_book` decides nothing a model is needed for, so it takes the title and genre from the source book and the length from the format and makes no editor-in-chief request: `adapt_book {models}` needs no `editor-in-chief` entry. Also fixed on the way: `start_book` read the adapted book through `sourceOf`, which looks up the source of a book, so for a story it was always null (the "adapts the owner's book" line and the genre/title defaults never applied).
 
 ## Models
 
