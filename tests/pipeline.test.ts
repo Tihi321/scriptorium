@@ -494,6 +494,8 @@ describe('choosing what to write', () => {
     const slug = (await waitFor(async () => (await firstBook(env!)) ?? null, 30000, 'first book'))!
     const { data } = await bookMd(env, slug)
     expect(data.idea).toBe('my-own')
+    // the idea is marked used a moment after the book folder appears
+    await waitFor(async () => (await env!.engine.ideas.list()).find((i) => i.slug === 'my-own')?.data.status === 'used', 30000, 'the idea to be marked used')
     const mine = (await env.engine.ideas.list()).find((i) => i.slug === 'my-own')!
     expect(mine.data).toMatchObject({ status: 'used', book: slug, source: 'user' })
     expect(mine.title).toBe('The Hedgehog Who Counted Stars')
