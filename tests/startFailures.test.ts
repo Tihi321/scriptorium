@@ -51,7 +51,9 @@ describe('SCP-27: a story whose start fails does not block the others', () => {
   }
   const startedFrom = async (e: TestEnv) => {
     const slug = await waitFor(async () => (await readdir(path.join(e.dir, 'books')).catch(() => []))[0], 30000, 'a book')
-    return parseMd(await readFile(path.join(e.dir, 'books', slug, 'brief.md'), 'utf8')).data.idea
+    // the engine makes the book folder (book.md) first and the brief.md copy a moment later, so wait for the file
+    const brief = await waitFor(async () => (await readFile(path.join(e.dir, 'books', slug, 'brief.md'), 'utf8').catch(() => null)), 30000, 'the brief of the book')
+    return parseMd(brief!).data.idea
   }
 
   it('story A failed 3 times: story B still gets its start, and A is named in a warning', async () => {
