@@ -10,6 +10,7 @@ formats:
     words: [300, 800]
     chapters: [1, 1]
     read_aloud: true
+    research: false
     guidance: |
       A very gentle read-aloud story for a child who is almost two, up to four. Use repetition and a steady rhythm.
       Short sentences, simple everyday words, and a refrain the child can join in with. Sounds and soft actions are welcome.
@@ -24,6 +25,7 @@ formats:
     words: [600, 2000]
     chapters: [1, 1]
     read_aloud: true
+    research: false
     guidance: |
       A calm read-aloud story for a child of three to six. Clear, warm language with some rhythm and repetition.
       Small gentle adventures are fine, with only mild, quickly solved worries. A kind, quiet ending that helps a child settle to sleep.
@@ -364,6 +366,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `long`: use the book memory (see below). `max_rounds`: rewrite rounds for this format (default: `quality.max_rounds`).
 - `nonfiction`: the non-fiction variant. Research for every chapter (required), a fact base in `factbase/` instead of a story bible, non-fiction prompts (`*_nf.md` in `prompts/`), the fact-checker in place of the continuity checker (it must pass), and a references section at the end of the EPUB and the reader. Non-fiction formats are short books (not `long`).
 - `article`: a newspaper article (one chapter, `chapters: [1, 1]`, with `nonfiction: true`). It is researched like a non-fiction book, with the `_article` prompts (`pitch_article.md`, `research_plan_article.md`, `outline_article.md`, `draft_chapter_article.md`, `rewrite_chapter_article.md`, `humanize_chapter_article.md`, `publish_article.md`; roles without an `_article` prompt use their `_nf` one), a search for recent news, and research notes that belong to the article alone (never reused from or added to the shared library notes). It gets no cover, no EPUB and no Kindle: the publisher writes `out/article.html` (a styled page with headline, standfirst, byline, date, text and numbered references) and `out/article.md`. Articles are for topics of kind `article` (the sections of the newspaper, in `topics.md`) and never for another kind, and they have their own limit, `max_articles_in_progress` in `config/factory.md`.
+- `research: false`: the book needs no real-world facts (the bedtime formats): the architect makes no research plan and the writer no prep, so those model calls are saved. Without it a format is researched as usual; a `bedtime-*` format with no `research` line counts as `false`.
 - `research_prep`: the writer lists research questions before each chapter (one short model call per chapter, answered by the researcher before the chapter is written). `false` by default; books whose genre or topic contains a word of `research_prep_genres` in `config/factory.md` get it too, whatever the format says.
 - `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel formats are for topics of kind `visual-novel` and `juvenile-visual-novel`, so they are never picked for an ordinary fiction topic.
 - `screenplay`: a screenplay for a short film or cartoon (with `script: true`, so it keeps the SCENE places of the bible, the tighten text, adaptation through `adapt_book` and the script layout of the EPUB and the reader). Chapters are sequences of the film, written as shots (`SHOT (framing, move, 6s): what we see`, `ON SCREEN:`, `MUSIC:`, `SFX:`, `TITLE:`, `NARRATOR:` and `NAME (V.O.):` voice-over, `NAME (delivery):` dialogue). The architect, writer and line editor use the `_sp` prompts (`outline_sp.md`, `draft_chapter_sp.md`, `rewrite_chapter_sp.md`, `review_sp.md`; a role without one uses its plain prompt, never the `_vn` one), and `get_screenplay` returns the parsed film. The screenplay formats are for topics of kind `video` and `juvenile-video` (all switched off in `topics.md`) and for a story that fixes the format (`add_story` with `format`, `adapt_book`): they are never picked for a story with no topic. Leave `humanize: false`. See `docs/screenplay.md`.

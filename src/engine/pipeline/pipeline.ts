@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { parseMd } from '../../shared/md'
 import { COVER_HEIGHT, COVER_WIDTH, genreClass, writeCoverHtml } from '../publish/cover'
 import type { Scheduler } from '../queue/scheduler'
-import { advance, chaptersToRewrite, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
+import { advance, chaptersToRewrite, needsResearch, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
 import { findMarkers } from '../research/markers'
 import type { BookState, ChapterScores, ReviewSummary } from './advance'
 import { countBooksInProgress, countInProgress } from './books'
@@ -324,7 +324,7 @@ export class Pipeline {
     const factory = this.o.getFactory()
     const genreText = `${d.genre ?? ''} ${d.topic_name ?? ''}`.toLowerCase()
     const adaptation = typeof d.source_book === 'string' && d.source_book !== ''
-    const prepEnabled = !adaptation && (format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase())))
+    const prepEnabled = !adaptation && needsResearch(format) && (format.research_prep || format.nonfiction || factory.research_prep_genres.some((g) => g.trim() && genreText.includes(g.trim().toLowerCase())))
     const tensionDoc = await this.books.readText(slug, 'reports', 'tension.md')
     const tensionData = tensionDoc ? parseMd(tensionDoc).data : {}
     for (const [c, v] of Object.entries((tensionData.tension as Record<string, number> | undefined) ?? {})) {

@@ -13,6 +13,11 @@ export function reviewersFor(format: FormatEntry): string[] {
   return list
 }
 
+/** False for a format that needs no real-world facts (`research: false`, and the `bedtime-*` formats unless they say otherwise): no research plan, no writer prep. */
+export function needsResearch(format: Pick<FormatEntry, 'id' | 'research'>): boolean {
+  return format.research ?? !format.id.startsWith('bedtime-')
+}
+
 /** The job task of a reviewer: the fact-checker has its own (it reads the notes and the fact base), every other reviewer uses `review`. */
 export const reviewTask = (role: string) => (role === 'fact-checker' ? 'fact_check' : 'review')
 
@@ -322,7 +327,7 @@ export function advance(s: BookState): Plan {
   }
   if (s.outlineChapters === null) {
     // the architect decides whether the book needs facts, and the research jobs run before the outline
-    if (!s.researchPlan && !s.adaptation) {
+    if (!s.researchPlan && !s.adaptation && needsResearch(s.format)) {
       return { patch: stageOf('outline'), jobs: [{ id: jobId(slug, 'researchplan', 'book', 0), task: 'research_plan', role: 'architect', book: slug, unit: 'book' }] }
     }
     if (s.researchPlan && pendingAny(s, s.researchPlan.jobs)) return { patch: stageOf('outline'), jobs: [] }

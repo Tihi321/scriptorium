@@ -176,6 +176,11 @@ export const formatEntrySchema = z.looseObject({
   /** Writers list research questions before each chapter (a prep step, one model call per chapter). See also factory.research_prep_genres. */
   research_prep: z.boolean().default(false),
   /**
+   * `false`: the book needs no real-world facts (a read-aloud bedtime story): no `research_plan` call and no `research_prep` steps.
+   * Not set: research as usual, except for the `bedtime-*` formats (so a data folder made before this flag behaves the same).
+   */
+  research: z.boolean().optional(),
+  /**
    * The non-fiction variant: research for every chapter, a fact base instead of a story bible, non-fiction prompts,
    * the fact-checker as a reviewer (in place of the continuity checker) and a references section at the end.
    */
