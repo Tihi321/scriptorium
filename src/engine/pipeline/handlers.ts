@@ -131,11 +131,12 @@ export interface NextPick {
  * Who gets a book next: your ideas first, then generated ideas for active topics, then the emptiest active topic.
  * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
  * `prefer` is the slug of the story a start job was queued for (its models were chosen for that story): it is picked when it can still start.
+ * `skip` are stories whose start failed too often: they are never picked, so the others still start.
  */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string): NextPick | null {
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string, skip: ReadonlySet<string> = new Set()): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
   const waiting = waitingStories(ideas, books)
-  const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug))
+  const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug) && !skip.has(i.slug))
   // an article needs a free article slot and a book a free book slot: the two limits are separate
   const slot = (article: boolean) => (article ? room.articles : room.books)
   const ok = (topic?: TopicRow, idea?: IdeaFile) => {
