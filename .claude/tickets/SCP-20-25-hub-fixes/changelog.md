@@ -1,5 +1,14 @@
 # SCP-20 to SCP-25 changelog
 
+## 2026-10-23 (latest): SCP-29, and three test races
+
+Same branch `SCP-20-25_fixes`. Committed, not pushed.
+
+- **SCP-29** (ff0df6e, 20b6e7a, 21d24e0): a screenplay format's length is its runtime. The length gate (`src/engine/pipeline/advance.ts`) compares shot seconds (`parseScreenplay`/`runtimeOf` in `pipeline.ts`) against the runtime range with the same 15 % band; a film inside its range gets no length rewrite whatever its words, and the request reads "about N seconds", add or cut shots. The tighten step (`handlers.ts` `tightenRuntime`) cuts a chapter over 120 % of its share of the runtime, in seconds. Seed prompts `writer/draft_chapter_sp.md` and `rewrite_chapter_sp.md` name seconds only (`yarn seed:hashes`, old hashes in `seedHistory.ts`, so untouched prompts upgrade). Docs: `docs/screenplay.md`, `docs/design.md`. Tests in `tests/lengths.test.ts`; the screenplay pipeline test's mock writer now writes shots by seconds. Not tested at pipeline level: the tighten request itself (the mock writer writes prose).
+- **Test races** (three `SCP-27: ...` commits): `tests/startFailures.test.ts` read `brief.md` before `start_book` wrote it; `tests/pipeline.test.ts` ("your ideas are picked before generated ones") checked `status: used` before the engine set it; `tests/recovery.test.ts` saw a job in both `done/` and `running/` (the engine's crash-safe order, unchanged). Each test now waits for the state it checks. The engine has no matching race.
+
+Verification: full `yarn test` three runs in a row, 598/598 plus recovery 1/1 each; `yarn typecheck`, `yarn lint` clean. Seen once and not reproduced: `tests/blockers.test.ts` (embeddings server) failed in one full run.
+
 ## 2026-10-23 (later): SCP-26 to SCP-28, found when every book start was blocked in the hub's productions
 
 Same branch `SCP-20-25_fixes`. Committed, not pushed.
