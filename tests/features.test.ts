@@ -270,6 +270,8 @@ describe('reader', () => {
   it('rebuild-reader writes it again for existing books', async () => {
     const { rebuildReader } = await import('../src/engine/cli')
     const { rm } = await import('node:fs/promises')
+    // the factory may have started a second book before the topic was switched off; rebuild-reader rewrites its reader too, so it must not be publishing at the same time
+    await waitFor(async () => (await env.engine.snapshot()).books.filter((b) => b.slug.startsWith('the-sleepy-fox')).every((b) => b.stage === 'published') && env.engine.scheduler.runningJobs().length === 0, 20000, 'no book in progress')
     await rm(path.join(env.dir, 'books', slug, 'out', 'reader'), { recursive: true, force: true })
     await sleep(10)
     expect(await rebuildReader(['--data', env.dir])).toBe(0)
