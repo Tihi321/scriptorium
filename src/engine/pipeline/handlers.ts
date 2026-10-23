@@ -408,7 +408,9 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it
-    const source = idea?.data.source_book ? await sourceOf(d, idea.data.source_book) : null
+    // the story's `source_book` is the book it adapts (sourceOf reads the source of a *book*, which is not what is wanted here)
+    const sourceRead = idea?.data.source_book ? await d.books.read(idea.data.source_book) : null
+    const source = sourceRead ? { title: sourceRead.data.title, genre: sourceRead.data.genre } : null
     let allowed = formatsForKind(formats, topic?.kind ?? null).filter((f) => !idea?.data.source_book || f.script)
     // a story with no topic that fixes an article format is an article of no section
     if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.article && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
@@ -427,26 +429,36 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       if (!fixedFormat) d.log(`the story "${idea!.title}" asks for the format "${brief.format}", which ${topic ? 'the topic does not allow' : 'is not enabled'}: the editor chooses`)
     }
     const ideaText = brief ? briefPromptText(brief) : idea?.body ?? ''
-    const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', articleStory ? 'start_book_article' : 'start_book', {
-      source: idea
-        ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
-          (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
-          (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '') +
-          (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into ${allowed.every((f) => f.screenplay) && allowed.length > 0 ? 'a screenplay for a short film' : 'a visual novel script'}: keep the book's genre, and take the title from the book if the owner gave none.` : '')
-        : 'No idea was picked: choose a fresh premise that fits the topic.',
-      topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
-      formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
-    })
-    run.version = version
-    const schema = z.object({
-      format: z.string(),
-      title: z.string().min(2),
-      genre: z.string().default(''),
-      target_words: z.number().optional(),
-      notes: z.string().default('')
-    })
-    const r = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
-    run.addJson(r.cost, r.chat.model)
+    // An adaptation whose format is settled (the owner fixed it, or only one script format is open) leaves the editor-in-chief nothing to decide:
+    // the title comes from the book (or the owner), the genre from the book and the length from the format. No model call, so the start needs no model of its own.
+    const direct = !!source && !!(fixedFormat ?? (allowed.length === 1 ? allowed[0] : undefined))
+    let r: { value: { format: string; title: string; genre: string; target_words?: number; notes: string } }
+    if (direct) {
+      d.log(`start_book: "${idea!.title}" adapts "${source!.title}" and its format is settled: started without asking the editor-in-chief`)
+      r = { value: { format: (fixedFormat ?? allowed[0])!.id, title: source!.title, genre: '', notes: '' } }
+    } else {
+      const { messages, version } = await buildMessages(d.dataDir, ctx, 'editor-in-chief', articleStory ? 'start_book_article' : 'start_book', {
+        source: idea
+          ? `An idea from the bucket (${fromOwner ? 'from the owner' : 'generated'}):${fixedTitle ? '' : ` "${idea.title}"`}\n${ideaText}` +
+            (fixedTitle ? '\nThe owner fixed the title: use it as it is.' : '') +
+            (fixedFormat ? `\nThe owner fixed the format: use "${fixedFormat.id}" (${fixedFormat.name}).` : '') +
+            (source ? `\nThis story adapts the owner's published book "${source.title}" (genre: ${source.genre || 'none'}) into ${allowed.every((f) => f.screenplay) && allowed.length > 0 ? 'a screenplay for a short film' : 'a visual novel script'}: keep the book's genre, and take the title from the book if the owner gave none.` : '')
+          : 'No idea was picked: choose a fresh premise that fits the topic.',
+        topic: topic ? `${topic.topic} (${topic.kind}), ${topic.done + topic.inProgress} books so far` : 'no topic given',
+        formats: allowed.map((f) => `- ${f.id}: ${f.name}, ${f.words[0]}-${f.words[1]} words, ${f.chapters[0]}-${f.chapters[1]} chapter(s), age band ${f.age_band ?? 'general'}`).join('\n')
+      })
+      const schema = z.object({
+        format: z.string(),
+        title: z.string().min(2),
+        genre: z.string().default(''),
+        target_words: z.number().optional(),
+        notes: z.string().default('')
+      })
+      run.version = version
+      const got = await chatJson(ctx, messages, schema, { maxTokens: 6000 })
+      run.addJson(got.cost, got.chat.model)
+      r = got
+    }
     const fmt = fixedFormat ?? allowed.find((f) => f.id === r.value.format) ?? allowed[0]
     if (!fmt) throw new Error(idea?.data.source_book ? 'no enabled visual novel format for this adaptation' : 'no enabled format for this topic')
     const target = clamp(Math.round(r.value.target_words ?? (fmt.words[0] + fmt.words[1]) / 2), fmt.words[0], fmt.words[1])

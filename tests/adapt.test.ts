@@ -17,6 +17,7 @@ import type { BookRef } from '../src/engine/store/series'
 import { briefOf, emptyBrief } from '../src/shared/brief'
 import { parseMd } from '../src/shared/md'
 import type { FormatEntry } from '../src/shared/schemas'
+import { ProviderError } from '../src/engine/models/types'
 import { makePipelineEnv, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
 
@@ -419,6 +420,22 @@ describe('an adaptation in the pipeline', () => {
     await e.engine.books.update('moon-lamp', () => ({ stage: 'published' }))
     e.engine.pipeline.kick()
     await waitFor(async () => (await e.engine.books.slugs()).length === 2, 30000, 'the script book to start')
+  }, 60000)
+
+  it('starts without asking the editor-in-chief: an adaptation with its format fixed decides nothing for a model', async () => {
+    const e = await adaptEnv()
+    env = e
+    // a model that fails here would fail the start, as the retired model did for the hub: this start must not call it
+    e.mock.on({ task: 'start_book' }, () => {
+      throw new ProviderError('HTTP 404: The `:free` variant has been retired', 404)
+    })
+    await e.engine.adaptBook({ book: 'moon-lamp', format: 'visual-novel' })
+    const slug = await waitFor(async () => (await e.engine.books.slugs()).find((s) => s !== 'moon-lamp') ?? null, 30000, 'the script book to start')
+    const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
+    expect(book).toMatchObject({ title: 'The Moon Lamp', format: 'visual-novel', source_book: 'moon-lamp', script: true })
+    expect(Number(book.target_words)).toBe(2600) // the middle of the format's 1200 to 4000
+    expect(e.counters.calls.start_book ?? 0).toBe(0)
+    expect(e.logs.some((l) => l.includes('started without asking the editor-in-chief'))).toBe(true)
   }, 60000)
 
   it('a story with choices keeps the source ending as the canon path', async () => {
