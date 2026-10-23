@@ -667,7 +667,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       await writeMd(d.books.file(slug, 'bible', 'bible.md'), { kind: 'bible' }, '\n' + bible)
     }
     const year = Math.round(Number(r.value.story_year))
-    if (Number.isInteger(year) && year >= 1000 && year <= 2999 && book.story_year === undefined) await d.books.update(slug, () => ({ story_year: year }))
+    // no valid year from the architect means no fixed year: recorded as null, so the calendar does not guess one from the texts
+    if (book.story_year === undefined) await d.books.update(slug, () => ({ story_year: Number.isInteger(year) && year >= 1000 && year <= 2999 ? year : null }))
     if (fmt.article) {
       // the headline and the standfirst of the article, kept in book.md (the publisher makes them final)
       const headline = r.value.headline.replace(/^["'“”]+|["'“”]+$/g, '').replace(/\s+/g, ' ').trim()
