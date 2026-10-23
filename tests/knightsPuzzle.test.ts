@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clueChapters, clueIdsOf, placePuzzles, puzzlesChapterSection, puzzlesOutlineSection } from '../src/engine/pipeline/puzzles'
+import { clueChapters, clueIdsOf, placePuzzles, puzzlesChapterSection, puzzlesOutlineSection, solutionWords } from '../src/engine/pipeline/puzzles'
 import { parsePuzzleEntries } from '../src/shared/puzzles'
 import type { PuzzleEntry } from '../src/shared/puzzles'
 
@@ -66,5 +66,34 @@ describe('SCP-30: the statements of a knights puzzle go to the puzzle chapter', 
 
   it('a Murdle still spreads its clues over the chapters before its puzzle', () => {
     expect(clueChapters(MURDLE, 3)).toEqual({ c1: 1, c2: 1, c3: 2, c4: 2, c5: 3 })
+  })
+})
+
+describe('SCP-31: the writer is told who is a knight and who a knave', () => {
+  it('says the solution in words, with the rule that a knave lies in every line', () => {
+    const words = solutionWords(BELFRY)
+    expect(words).toContain('Brother Anselm is a knight')
+    expect(words).toContain('Brother Tobias is a knave')
+    expect(words).toContain('Sister Odile is a knave')
+    expect(words).toContain('always lies')
+  })
+
+  it('the puzzle chapter gets the answer with "do not reveal it before PUZZLE"; later chapters get it as settled fact; earlier ones get nothing', () => {
+    const placed = placePuzzles([BELFRY], 4, { belfry: 3 })
+    const ch3 = puzzlesChapterSection(placed, 3, 4)
+    expect(ch3).toContain('Brother Anselm is a knight')
+    expect(ch3).toContain('do not state it or hint at it before the PUZZLE line')
+    expect(ch3).not.toContain('The truth: see the testimony')
+    const ch4 = puzzlesChapterSection(placed, 4, 4)
+    expect(ch4).toContain('was solved in chapter 3')
+    expect(ch4).toContain('Brother Tobias is a knave')
+    expect(ch4).toContain('never contradict')
+    expect(puzzlesChapterSection(placed, 2, 4)).not.toContain('is a knave')
+    expect(puzzlesOutlineSection(placed, [3, 8])).toContain('Sister Odile is a knave')
+  })
+
+  it('a Murdle solved in an earlier chapter is told to the later chapters too', () => {
+    const placed = placePuzzles([MURDLE], 4, { winter_garden: 2 })
+    expect(puzzlesChapterSection(placed, 3, 4)).toContain('suspect: Madame Verac')
   })
 })

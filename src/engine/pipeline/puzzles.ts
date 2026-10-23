@@ -40,9 +40,22 @@ export function evidenceKeysOf(p: PuzzleEntry): string[] {
 
 const nameOf = (p: PuzzleEntry, id: string) => p.names[id] ?? id
 
-/** The solution of a puzzle in words, for the writers (never to be stated before the puzzle). Empty when the core has no murder answer. */
+/** The solution of a knights puzzle in words: who is a knight (always tells the truth) and who a knave (always lies). Empty for any other core. */
+function knightsWords(p: PuzzleEntry): string {
+  if (p.kind !== 'knights' && p.core?.kind !== 'knights') return ''
+  const sol = p.core?.solution
+  if (!sol || typeof sol !== 'object') return ''
+  const parts = Object.entries(sol as Record<string, unknown>)
+    .filter(([, v]) => v === 'knight' || v === 'knave')
+    .map(([who, v]) => `${nameOf(p, who)} is a ${String(v)}`)
+  return parts.length ? `${parts.join(', ')}. A knight always tells the truth and a knave always lies, in every line they speak, also outside the puzzle` : ''
+}
+
+/** The solution of a puzzle in words, for the writers (never to be stated before the puzzle). Empty when the core has no answer. */
 export function solutionWords(p: PuzzleEntry): string {
   const a = (p.core?.murder as { answer?: Record<string, string> } | undefined)?.answer
+  const knights = knightsWords(p)
+  if (knights) return knights
   if (!a) return p.testimony ? `${p.testimony.witness}'s statement ${p.testimony.breaks.map((b) => `${b.statement} is broken by the evidence ${b.evidence}`).join('; ')}` : ''
   const parts = Object.entries(a).map(([cat, item]) => `${cat}: ${nameOf(p, item)}`)
   return parts.join(', ')
@@ -232,12 +245,16 @@ export function puzzlesChapterSection(puzzles: PuzzleEntry[], n: number, chapter
     parts.push(`Plant these clues in this chapter, each as one CLUE line (the sentence is what it must mean):\n${plant.map(({ p, id }) => `- ${p.key}/${id}: ${p.text[id] ?? ''}`).join('\n')}`)
   }
   for (const p of here) {
-    const lines = [`Puzzle ${nice(p)} is solved at the end of this chapter: write the line PUZZLE: ${p.key} where the player stops to solve it, after all its clues. The truth: ${solutionWords(p) || 'see the testimony'}. ${legend(p)}`]
+    const lines = [`Puzzle ${nice(p)} is solved at the end of this chapter: write the line PUZZLE: ${p.key} where the player stops to solve it, after all its clues. The truth: ${solutionWords(p) || 'see the testimony'}. Keep every line of the prose true to it, but do not state it or hint at it before the PUZZLE line. ${legend(p)}`]
     if (p.text.murder) lines.push(`The note of the puzzle: ${p.text.murder}`)
     if (p.testimony) {
       lines.push(`Testimony of ${p.testimony.witness}: write TESTIMONY: ${p.testimony.witness}, the statements, END TESTIMONY, then the PUZZLE line. Statement ${p.testimony.breaks.map((b) => `${b.statement} is broken by the evidence "${b.evidence}"`).join('; ')}: it must be a lie or a mistake that this evidence shows. Plant the evidence before: ${evidenceKeysOf(p).map((k) => `EVIDENCE: ${k}: ${p.testimony!.evidence.find((e) => e.key === k)?.description ?? ''}`).join(' | ')}`)
     }
     parts.push(lines.join('\n'))
+  }
+  // a puzzle solved in an earlier chapter: its answer is now known to the story, and the prose must not contradict it
+  for (const p of puzzles.filter((x) => x.chapter !== undefined && x.chapter < n && solutionWords(x))) {
+    parts.push(`Puzzle ${nice(p)} was solved in chapter ${p.chapter}. The truth, which the story now knows and must never contradict: ${solutionWords(p)}. ${legend(p)}`)
   }
   if (!plant.length && !here.length) parts.push('No clue of a puzzle is planted in this chapter, and no puzzle is solved: write the story as the outline says. Earlier CLUE lines stay as they are.')
   return parts.join('\n\n')
