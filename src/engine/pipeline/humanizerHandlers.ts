@@ -306,7 +306,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     if (problem) ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
     let body = problem ? current.body : revised
     // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently), and a place the bible lacks is added to it
-    if (!problem && fmt.script) body = await settleScenePlaces(d, slug, n, body, (m) => ctx.log(`humanizer: ${m}`))
+    if (!problem && fmt.script) body = await settleScenePlaces(d, slug, n, body, (m) => ctx.log(`humanizer: ${m}`), { cues: !fmt.screenplay })
     // the round is the chapter's own (it stays), `humanized` says in which book round the pass ran: a pass that was refused counts too, so it is not asked again
     await d.books.writeChapter(slug, {
       n,

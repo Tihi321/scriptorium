@@ -3,7 +3,7 @@ import { writeMd } from '../store/atomic'
 import type { BookStore } from './books'
 import { lightBibleEntries } from './series'
 import { parseScript } from '../publish/script'
-import { SCENE } from '../publish/xhtml'
+import { cueOf, SCENE } from '../publish/xhtml'
 
 const WEEKDAY = /^(?:mon|tues?|wednes|thurs?|fri|satur|sun)day$/i
 
@@ -74,6 +74,46 @@ export function placeDescriptions(body: string, unknown: string[]): Map<string, 
   return out
 }
 
+const BREAK = /^(\*\s*){3,}$|^-{3,}$|^_{3,}$|^#$/
+const HEADING = /^#{1,6}\s+/
+
+/**
+ * A picture or sound cue (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:` with a text) that is the last thing of its scene (right before `---`, the next `SCENE:`
+ * or the end of the chapter) has no beat after it to play with: VN Studio drops it with a warning. Each such cue is moved to just before the scene's
+ * last beat (the last line that is not a cue), so it plays with that beat. A scene made of cues only is left as it is. `END CG`, `CG: none` and
+ * `AMBIENCE: none` stop a picture or sound and are fine at the end.
+ */
+export function moveTrailingCues(body: string): { body: string; moved: string[] } {
+  const lines = body.replace(/\r\n/g, '\n').split('\n')
+  const moved: string[] = []
+  const isBoundary = (l: string) => BREAK.test(l) || HEADING.test(l) || SCENE.test(l)
+  const playable = (l: string) => {
+    const c = cueOf(l)
+    return !!c && c.text !== null && c.text !== ''
+  }
+  let i = 0
+  while (i < lines.length) {
+    // the scene is lines[i, end): up to the next boundary line (or the end)
+    let end = i
+    while (end < lines.length && !isBoundary(lines[end]!.trim())) end++
+    // the tail is the blank lines and playable cues at its end: lines[k, end)
+    let k = end
+    while (k > i && (!lines[k - 1]!.trim() || playable(lines[k - 1]!.trim()))) k--
+    const tail = lines.slice(k, end)
+    const cues = tail.filter((l) => l.trim())
+    // the last beat: the last line before the tail that is not blank and not a cue; a scene of cues only is left as it is
+    let b = k - 1
+    while (b >= i && (!lines[b]!.trim() || cueOf(lines[b]!.trim()))) b--
+    if (cues.length && b >= i) {
+      const replacement = [...lines.slice(i, b), ...cues, ...lines.slice(b, k), ...tail.filter((l) => !l.trim())]
+      lines.splice(i, end - i, ...replacement)
+      moved.push(...cues.map((l) => l.trim()))
+    }
+    i = end + 1
+  }
+  return { body: lines.join('\n'), moved }
+}
+
 /** Every reviewer of a script book gets this: the cue lines are for the game, not prose. */
 export const SCRIPT_CUES_NOTE =
   'Lines that start with CG:, INSERT:, SFX: or AMBIENCE:, and END CG lines, are picture and sound cues for the visual novel app. They are not text the reader sees: do not review them as prose.'
@@ -114,7 +154,13 @@ export function addPlacesToBible(bible: string, entries: { place: string; text: 
  * A visual novel script of chapter `n`: its SCENE places become the bible's names, and the places the bible lacks are added to the light bible
  * (under "## Places", with the chapter number). A structured bible keeps its places in files: the script is left as it is. Returns the script.
  */
-export async function settleScenePlaces(d: { books: BookStore }, slug: string, n: number, body: string, log: (message: string) => void): Promise<string> {
+export async function settleScenePlaces(d: { books: BookStore }, slug: string, n: number, body: string, log: (message: string) => void, opts: { cues?: boolean } = {}): Promise<string> {
+  // a visual novel: a cue that would be the last line of its scene is moved before the scene's last beat (not for a screenplay: its SFX line is a shot's own)
+  if (opts.cues) {
+    const cues = moveTrailingCues(body)
+    if (cues.moved.length) log(`${cues.moved.length} cue line(s) at the end of a scene moved before its last beat: ${cues.moved.join(' | ')}`)
+    body = cues.body
+  }
   const bible = await d.books.bible(slug)
   if (!bible) return body
   const places = lightBibleEntries(bible).filter((e) => e.group === 'places').map((e) => e.name)

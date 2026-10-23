@@ -390,7 +390,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
   }
 
   /** A visual novel script: its SCENE places are the bible's names, and the places the bible lacks are added to it (see scriptPlaces.ts). */
-  const settlePlaces = (ctx: JobContext, slug: string, n: number, body: string): Promise<string> => settleScenePlaces(d, slug, n, body, ctx.log)
+  const settlePlaces = (ctx: JobContext, slug: string, n: number, body: string, cues: boolean): Promise<string> => settleScenePlaces(d, slug, n, body, ctx.log, { cues })
 
   sched.register('generate_ideas', async (ctx) => {
     const run = new Run(ctx)
@@ -872,7 +872,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       }
     }
     // a script: the SCENE places are the bible's names, and a new place is added to the bible
-    if (fmt.script) body = await settlePlaces(ctx, slug, n, body)
+    if (fmt.script) body = await settlePlaces(ctx, slug, n, body, !fmt.screenplay)
     // [RESEARCH: question] markers (any model can write them): each becomes a research job. A fix-up job replaces the sentences when the notes are in.
     const asked: string[] = []
     for (const m of findMarkers(body).slice(0, MAX_MARKERS_PER_CHAPTER)) {
@@ -1158,7 +1158,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         body = stripMarkers(out.body)
       }
     }
-    if (fmt.script) body = await settlePlaces(ctx, slug, n, body)
+    if (fmt.script) body = await settlePlaces(ctx, slug, n, body, !fmt.screenplay)
     await d.books.writeChapter(slug, { n, title: current.title, round, body, agent: ctx.agent.id, model: r.model.ref, fixes: isLength ? [...current.fixes, 'len'] : isCheck ? [...current.fixes, 'chk'] : current.fixes })
     await made(slug, run)
     return { result: `chapter ${n} rewritten (round ${round}): ${countWords(body)} words`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
