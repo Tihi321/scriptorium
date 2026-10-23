@@ -50,14 +50,29 @@ Evidence: `C:\projects\Personal\creative-hub\runs\the-winter-garden-clock.md` "F
 - [x] **SCP-33: characters from the brief are added twice.** When the outline names characters by short names (Dec, Inès, Pichon, Moreau) and the brief has full names (Declan Hartley, Inès Varga ...), the bible gets both as separate characters (4 duplicates removed by hand). Match outline characters to brief characters by full name, surname, first name, alias or the brief's short name before adding, and keep one entry (the brief's full name, with the short name as an alias).
   - Result: Done `aa50cd1`. Cause confirmed: `withBriefCharacters` matched only the whole name, case-insensitively, so Dec/Inès/Pichon/Moreau were not found among Declan Hartley/Inès Varga/Commissaire Albert Pichon/Gaspard Moreau. New `briefCast.ts` `mergeBriefCast`: matches an outline name or alias to a brief character by `sameName` (all words of the shorter name in the longer: surname, first name, "Dec Hartley") or the brief's short name ("Called Dec."); a label that fits two brief characters matches neither; one entry, named as the brief names it, the outline's name and aliases as aliases, the outline's description and voice kept. An outline entry that already has the brief's name is untouched. A short story's light bible shows aliases as "also called" (they were not shown at all). Tests: `tests/briefCast.test.ts`.
 
+## Added 2026-10-23 (hub HUB-06 production, same branch)
+
+Evidence: `C:\projects\Personal\creative-hub\runs\the-lighthouse-that-kept-lists-vn.md` "Found"; the book `the-lighthouse-that-kept-lists-vn` in `~/Scriptorium/books/` (read only).
+
+- [x] **SCP-34: the SCENE place fixer drops the weekday.** `SCENE: Ferry deck, Monday, late afternoon` was written as `SCENE: Ferry deck, late afternoon` (`log.md`: SCENE place "Ferry deck, Monday" written as the bible's "Ferry deck"). The fixer that snaps a SCENE place to the bible's name must keep the other comma parts (weekday, time). Test.
+  - Result: Done `b7bde0f`. Cause confirmed: `placeOf` split at the last comma, so for `Ferry deck, Monday, late afternoon` the place was "Ferry deck, Monday", which matched the bible's "Ferry deck" through `sameName` and was rewritten without the weekday (an unknown such place was also added to the bible with the weekday in its name). A weekday just before the last comma now goes to the time. Tests: `tests/sceneWeekday.test.ts`.
+- [x] **SCP-35: catch a cue as the last line of a scene.** The ch02 `SFX:` sat right before `---`; the humanizer guard, line editor and reviewers passed it, and `get_script` shows a `cue` beat followed by a `break` beat. VN Studio drops such a cue. Add a deterministic check (after drafting/rewrites, or in the line editor's form check) that moves a trailing cue line before the scene's last beat, or asks for a fix; and make `get_script` checks skip `break` beats when looking for "last beat". Test.
+  - Result: Done `d4db9b9`. `moveTrailingCues` (`scriptPlaces.ts`) finds the cues (CG, INSERT, SFX, AMBIENCE with a text) at the end of a scene (before `---`, a SCENE line or the end of the chapter) and puts them right before the scene's last non-cue line; END CG, none cues and cue-only scenes stay. It runs inside `settleScenePlaces` (`cues: true` for visual novels, not screenplays) after a draft, a rewrite and a humanizer pass, and logs the move: the "move it" option of the plan, not "ask for a fix". Deviation: `get_script` has no check of the last beat, so there was nothing to make skip `break` beats; the check is on the text, where `---` is a boundary. Tests: `tests/trailingCue.test.ts` (the hub's padlock case, read back through `parseScript`).
+- [x] **SCP-36: the humanizer's repeated-phrase counter counts cue lines.** Its list counts `AMBIENCE:` texts, `SCENE:` places and `ON SCREEN:` lines (`ambience wind pushing at`, `scene the back room`, `on screen mara raincoat`), which the same prompt says to keep word for word. Exclude script control lines (SCENE, ON SCREEN, CG, INSERT, SFX, AMBIENCE, and the puzzle lines) from the counter. Test.
+  - Result: Done `85a61a2`. `analyzeRepetition` (`memory/repetition.ts`) drops SCENE, ON SCREEN, the picture and sound cue lines and the puzzle lines before counting (`withoutControlLines`, built on the parser's own regexes); the `repetition_report` job gets it too. Tests: `tests/repetitionCues.test.ts` (fails without the fix).
+- [x] **SCP-37: an adaptation's length target follows its source.** A VN adaptation of a 5,900-word short story got the visual-novel format target (18,000 words), so every chapter went through a length rewrite (10,212 -> about 13,600 words). For `adapt_book`, set the target from the source book's length (for example the source's words times a format factor, clamped to the format's range), recorded in the book, and documented. Test.
+  - Result: Done `cc4a1db`. `start_book` sets a visual novel adaptation's `target_words` to the source's words (all its chapters) times `ADAPT_WORD_FACTOR` 1.7 (the hub's 10,212 / 5,900), clamped to the format's range; `book.md` records `target_from_source_words`; logged. A screenplay keeps its target. The existing adapt test that expected the format's middle now expects the clamped minimum. Tests: `tests/adapt.test.ts` (a 1,410-word source gives 2,397; `adaptTargetWords` clamps, and the hub's 5,900 gives 10,030). Docs: `docs/visual-novel.md` "Adapting a book".
+
 ## Verification
 
-- SCP-30 to SCP-33: no seed prompt changed (the puzzle prompt text is in `src/engine/pipeline/puzzles.ts`), so no `yarn seed:hashes` / `seedHistory.ts` change.
+- SCP-30 to SCP-37: no seed prompt changed (the puzzle prompt text is in `src/engine/pipeline/puzzles.ts`), so no `yarn seed:hashes` / `seedHistory.ts` change.
 
 - `yarn test` (vitest + recovery), `yarn typecheck`, `yarn lint` in the worktree after each ticket or at least at the end; all must pass. `yarn seed:hashes` if a seed prompt changed (SCP-20 / SCP-23 prompt edits need a prompt upgrade migration like earlier tickets; follow how SCP-16 to SCP-18 did it).
 - Not run here: a real model run, `yarn test:electron`.
 
 ## Evidence (2026-10-23)
+
+- After SCP-34 to SCP-37: three full `yarn test` runs in a row, 51 files, 629 tests plus the recovery test, all passed; `yarn typecheck` and `yarn lint` clean. Not run: a real model, `yarn test:electron`.
 
 - After SCP-30 to SCP-33 and the test-race fixes (three full `yarn test` runs in a row: 48 files, 613 tests plus the recovery test, all passed): `yarn typecheck` and `yarn lint` clean. Not run: a real model, `yarn test:electron`, a new run of the hub's book.
 
@@ -68,4 +83,4 @@ Evidence: `C:\projects\Personal\creative-hub\runs\the-winter-garden-clock.md` "F
 
 ## Done when
 
-Fourteen ticket commits (SCP-20 to SCP-33) plus two docs commits on `SCP-20-25_fixes`; the checklist above ticked with the test evidence; `ROADMAP.md` moves SCP-20 to SCP-25 to done (merged-state lines corrected: SCP-16 to SCP-18 are merged, PR #10).
+Eighteen ticket commits (SCP-20 to SCP-37) plus two docs commits on `SCP-20-25_fixes`; the checklist above ticked with the test evidence; `ROADMAP.md` moves SCP-20 to SCP-25 to done (merged-state lines corrected: SCP-16 to SCP-18 are merged, PR #10).

@@ -1,6 +1,18 @@
 # SCP-20 to SCP-25 changelog
 
-## 2026-10-23 (latest): SCP-30 to SCP-33, found in the hub's puzzle production
+## 2026-10-23 (latest): SCP-34 to SCP-37, found in the hub's VN adaptation
+
+Same branch `SCP-20-25_fixes`. Committed, not pushed. Evidence: `creative-hub/runs/the-lighthouse-that-kept-lists-vn.md` "Found" and the book's `log.md`.
+
+- **SCP-34** (b7bde0f): `placeOf` (`scriptPlaces.ts`) treats a weekday before the last comma as part of the time, so `SCENE: Ferry deck, Monday, late afternoon` keeps "Monday" when its place is renamed to the bible's name.
+- **SCP-35** (d4db9b9): `moveTrailingCues` moves a CG, INSERT, SFX or AMBIENCE line that ends its scene to just before the scene's last beat; `settleScenePlaces` runs it (visual novels only) after a draft, a rewrite and a humanizer pass and logs it. `get_script` has no last-beat check, so nothing changed there.
+- **SCP-36** (85a61a2): `analyzeRepetition` drops SCENE, ON SCREEN, cue and puzzle lines before counting (`withoutControlLines`).
+- **SCP-37** (cc4a1db): `adaptTargetWords`: a visual novel adaptation's `target_words` is the source's words times 1.7 within the format's range (`target_from_source_words` in `book.md`). The old adapt test's expected target (the format's middle) changed.
+- Docs: `ROADMAP.md`, `docs/design.md`, `docs/visual-novel.md` "Adapting a book", this ticket's `plan.md`.
+
+Verification (after the last code commit): full `yarn test` three runs in a row, each 51 files, 629 tests plus the recovery test (1), all passed; `yarn typecheck` and `yarn lint` clean. No test race appeared in these nine runs of the new code (the earlier ones were fixed in the SCP-30 to SCP-33 round). No seed prompt changed. Not run: a real model run, `yarn test:electron`, a new run of the hub book.
+
+## 2026-10-23 (earlier): SCP-30 to SCP-33, found in the hub's puzzle production
 
 Same branch `SCP-20-25_fixes`. Committed, not pushed. Evidence: `creative-hub/runs/the-winter-garden-clock.md` "Found" and the book's `log.md`, `bible/puzzles.md`.
 

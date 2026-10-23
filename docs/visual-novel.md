@@ -319,6 +319,8 @@ Scriptorium can turn a published prose book into a visual novel script (the scri
 - The writer gets the full text of the source chapters of the chapter it writes (cut from the middle when it would not fit the model's window), and writes it as script scenes: the events, order, names and places stay, inner monologue and long description go.
 - With choices, the source's ending stays as one canon path through the map (`prompts/_choices.md`, section `adapt`); the other paths branch off it.
 - The humanizer runs on the script like on any visual novel. The book card and the whiteboard show "Adapted from <title>".
+- **Length:** the book's `target_words` is the source's words (all its chapters) times 1.7 (`ADAPT_WORD_FACTOR`: a script has a line per speaker and its scene and cue lines, the hub's 5,900-word story came out at 10,212), within the format's word range; `book.md` keeps the source's words as `target_from_source_words`. A screenplay is held to its runtime and keeps the format's middle as target.
+- **Trailing cue:** a `CG:`, `INSERT:`, `SFX:` or `AMBIENCE:` line that would be the last line of its scene is moved before the scene's last beat after every draft, rewrite and humanizer pass (VN Studio drops a cue with no beat after it). In `SCENE: Place, Weekday, time` the weekday is part of the time and survives the place fixer.
 - `SCENE:` places use the bible's names: the writer is given the bible's places, a place written differently is renamed to the bible's name after the answer, and a new place is added to the bible's `## Places` (with the first narration line of its scene), so every scene maps to a place at import.
 
 ## In Scriptorium

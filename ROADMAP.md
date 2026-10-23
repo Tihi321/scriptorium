@@ -6,7 +6,7 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
 
 - **Merged:** SCP-08 to SCP-19 (SCP-16 to SCP-18 in PR #10; master 5801f09). The HUB-04 live check ran on a8cf243 (SCP-14, SCP-19).
 - **SCP-16 to SCP-18 (merged, PR #10):** SCP-16 (VN media lines and aliases), SCP-17 (the screenplay writer) and SCP-18 (mystery with puzzles); the details are in `.claude/tickets/SCP-16-vn-media-lines/`, `SCP-17-screenplay-writer/` and `SCP-18-mystery-puzzles/` (each `changelog.md`).
-- **SCP-20 to SCP-33 (done in code, not merged):** the fixes for the findings of the HUB-04 live check (SCP-20 to SCP-25) and of the hub's live run when every book start was blocked (SCP-26 to SCP-28) and of the hub's film production (SCP-29) and puzzle production (SCP-30 to SCP-33), one commit each on `SCP-20-25_fixes` (below; plan in `.claude/tickets/SCP-20-25-hub-fixes/plan.md`).
+- **SCP-20 to SCP-37 (done in code, not merged):** the fixes for the findings of the HUB-04 live check (SCP-20 to SCP-25) and of the hub's live run when every book start was blocked (SCP-26 to SCP-28) and of the hub's film production (SCP-29) puzzle production (SCP-30 to SCP-33) and VN adaptation (SCP-34 to SCP-37), one commit each on `SCP-20-25_fixes` (below; plan in `.claude/tickets/SCP-20-25-hub-fixes/plan.md`).
 - **SCP-19 (merged):** every item this roadmap listed then.
   - Fallbacks as an open list, and `last_resort_model`.
   - `story_year` in every outline, and the revise follow-up for the outline, act and thread reviews.
@@ -44,6 +44,10 @@ OpenRouter retired a `:free` model that was first in the user's `fallbacks`; the
 - **SCP-31 (done): the writer is told who is a knight and who a knave.** `solutionWords` knew Murdle and testimony only. It now says who is a knight and who a knave (a knave lies in every line, also outside the puzzle). The puzzle chapter gets it with "do not state it or hint at it before the PUZZLE line"; every chapter after a solved puzzle (any kind) gets the answer as settled fact.
 - **SCP-32 (done): the continuity review leaves CLUE lines alone.** The reviewer note says the CLUE lines are fixed, that either/or and clashing-looking clues are the deduction, and never to ask for a change. The note alone did not hold (the hub's book was asked twice to change c3), so `dropClueChangeProblems` also drops review problems that name a clue and ask to change it or call it a contradiction; a revise that rested only on those is a pass.
 - **SCP-33 (done): a brief character the outline names by a short name is not added twice.** `mergeBriefCast` (`briefCast.ts`) matches outline characters to brief characters by full name, surname, first name, alias or the brief's short name ("Called Dec."); a label that fits two brief characters matches neither. One entry, named as the brief names it, the outline's name and aliases as aliases.
+- **SCP-34 (done): the SCENE place fixer keeps the weekday.** `placeOf` took everything before the last comma as the place, so `Ferry deck, Monday, late afternoon` lost its weekday when "Ferry deck, Monday" was matched to the bible's "Ferry deck". A weekday before the last comma is now part of the time.
+- **SCP-35 (done): a cue as the last line of a scene is moved.** `moveTrailingCues` puts a trailing CG, INSERT, SFX or AMBIENCE line before the scene's last beat after a draft, a rewrite and a humanizer pass (VN Studio dropped it).
+- **SCP-36 (done): the repetition counter skips script control lines.** SCENE, ON SCREEN, the cue lines and the puzzle lines are no longer counted as repeated phrases.
+- **SCP-37 (done): an adaptation's length target follows its source.** A visual novel adaptation's target is the source's words times 1.7 within the format's range (recorded as `target_from_source_words`), instead of the format's middle.
 
 ## Models
 
