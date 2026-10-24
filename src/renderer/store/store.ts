@@ -6,6 +6,7 @@ import {
   groupOf,
   handoverAlpha,
   providerOf,
+  setProviderNames,
   titleFromSlug,
   type AgentView,
   type BookView,
@@ -46,6 +47,11 @@ export interface OfficeState {
   formats: FormatSummary[]
   settings: SettingsSummary | null
   secretsSet: string[]
+  /** The key names the engine reports for providers (Settings' key select). */
+  keyNames: string[]
+  /** Answer to the last Test in the Add provider form, and to the last save or removal of a custom provider. */
+  providerTest: { baseUrl: string; ok: boolean; count?: number; error?: string; at: string } | null
+  providerSaved: { id?: string; removed?: boolean; error?: string; at: string } | null
   /** The MCP server's address while it listens. */
   mcp: { url: string } | null
   /** Result of the last Send to Kindle per book. */
@@ -124,6 +130,9 @@ function initial(): OfficeState {
     formats: [],
     settings: null,
     secretsSet: [],
+    keyNames: [],
+    providerTest: null,
+    providerSaved: null,
     mcp: null,
     kindle: {},
     view: 'office',
@@ -205,6 +214,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
     case 'engine.warning':
       return { warnings: [...s.warnings.slice(-19), e.message] }
     case 'snapshot': {
+      setProviderNames(e.providers ?? []) // custom providers show their name wherever a provider is labelled
       const agents: Record<string, AgentView> = {}
       for (const a of e.agents) agents[a.id] = agentFromSummary(a, s.agents[a.id], now)
       for (const r of e.running) {
@@ -229,6 +239,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         servers: e.servers ?? [],
         settings: e.settings,
         secretsSet: e.secretsSet,
+        keyNames: e.keyNames ?? [],
         mcp: e.mcp ?? null,
         selectedAgent: s.selectedAgent && agents[s.selectedAgent] ? s.selectedAgent : null
       }
@@ -268,6 +279,10 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       return { kindle: { ...s.kindle, [e.book]: e.ok ? { state: 'ok' } : { state: 'error', error: e.error } } }
     case 'secrets.updated':
       return { secretsSet: e.secretsSet }
+    case 'provider.tested':
+      return { providerTest: { baseUrl: e.baseUrl, ok: e.ok, count: e.count, error: e.error, at: e.at } }
+    case 'provider.saved':
+      return { providerSaved: { id: e.id, removed: e.removed, error: e.error, at: e.at } }
     case 'models.catalog':
       return { catalogs: { ...s.catalogs, [e.provider]: { models: e.models, error: e.error, at: e.at } } }
     case 'agent.state': {

@@ -5,13 +5,13 @@ import { officeStore } from '../store/store'
 import type { SettingsSummary } from '../../shared/protocol'
 
 const SMTP_PASSWORD = 'SCRIPTORIUM_SMTP_PASSWORD'
-/** Provider key variables the engine usually knows. The engine refuses names that are not in providers.md. */
-const KEY_NAMES = ['DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY']
 
 export function SettingsDialog() {
   const open = useOffice((s) => s.settingsOpen)
   const settings = useOffice((s) => s.settings)
   const secretsSet = useOffice((s) => s.secretsSet)
+  /** The key names the engine reports (`api_key_env` of every provider in providers.md, custom ones too). */
+  const keyNames = useOffice((s) => s.keyNames)
   const [form, setForm] = useState<SettingsSummary>({
     kindleAddress: '',
     fromAddress: '',
@@ -27,7 +27,7 @@ export function SettingsDialog() {
     maxBooksInProgress: 3
   })
   const [password, setPassword] = useState('')
-  const [keyName, setKeyName] = useState(KEY_NAMES[0]!)
+  const [keyChoice, setKeyName] = useState('')
   const [keyValue, setKeyValue] = useState('')
   const [login, setLogin] = useState<boolean | null>(null)
 
@@ -71,6 +71,7 @@ export function SettingsDialog() {
       <input type="number" value={form[key]} onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })} data-testid={`set-${key}`} />
     </div>
   )
+  const keyName = keyNames.includes(keyChoice) ? keyChoice : (keyNames[0] ?? '')
   const keySet = secretsSet.includes(keyName)
   return (
     <div className="dialog-backdrop" onClick={() => close()}>
@@ -110,7 +111,7 @@ export function SettingsDialog() {
         <div className="dim">Provider API key</div>
         <div className="row">
           <select value={keyName} onChange={(e) => setKeyName(e.target.value)} style={{ flex: 1 }}>
-            {[...new Set([...KEY_NAMES, ...secretsSet.filter((n) => n !== SMTP_PASSWORD)])].map((n) => (
+            {keyNames.map((n) => (
               <option key={n} value={n}>
                 {n}
                 {secretsSet.includes(n) ? ' (set)' : ''}
@@ -121,7 +122,7 @@ export function SettingsDialog() {
         <div className="row" style={{ marginTop: 4 }}>
           <input type="password" autoComplete="off" style={{ flex: 1 }} value={keyValue} placeholder={keySet ? 'Key is set. Type to replace' : 'Paste the key'} onChange={(e) => setKeyValue(e.target.value)} data-testid="set-key-value" />
           <button
-            disabled={!keyValue}
+            disabled={!keyValue || !keyName}
             data-testid="set-key-save"
             onClick={() => {
               sendCommand({ type: 'setSecret', name: keyName, value: keyValue })

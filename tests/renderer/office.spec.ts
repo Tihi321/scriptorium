@@ -347,6 +347,52 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   expect(await commands(page)).toContainEqual(expect.objectContaining({ type: 'saveSettings', lmstudioParallel: 2 }))
   await expect(page.getByTestId('models-dialog')).toHaveCount(0)
 
+  // Add provider (SCP-44): the form tests the address, saves a custom provider that shows under its name and as its own kind, Edit fills the form, Remove asks first
+  await page.getByTestId('models-open').click()
+  await page.getByTestId('provider-add').click()
+  await expect(page.getByTestId('provider-form')).toBeVisible()
+  await expect(page.getByTestId('provider-save')).toBeDisabled() // a name and an http(s) address first
+  await expect(page.getByTestId('provider-schema')).not.toBeChecked() // Send JSON schema is off by default
+  await expect(page.getByTestId('provider-free')).toBeChecked()
+  await page.getByTestId('provider-name').fill('ACP proxy (home)')
+  await page.getByTestId('provider-url').fill('ftp://nowhere')
+  await expect(page.getByTestId('provider-test')).toBeDisabled()
+  await page.getByTestId('provider-url').fill('http://127.0.0.1:7461/nowhere')
+  await page.getByTestId('provider-test').click()
+  await expect(page.getByTestId('provider-test-result')).toContainText('Failed')
+  await page.getByTestId('provider-url').fill('http://127.0.0.1:7461/v1')
+  await page.getByTestId('provider-test').click()
+  await expect(page.getByTestId('provider-test-result')).toContainText('Reachable, 3 models')
+  await page.getByTestId('provider-key').fill('sk-test')
+  await page.getByTestId('provider-parallel').fill('2')
+  await page.getByTestId('provider-save').click()
+  expect(await commands(page)).toContainEqual({ type: 'saveCustomProvider', name: 'ACP proxy (home)', baseUrl: 'http://127.0.0.1:7461/v1', apiKey: 'sk-test', free: true, jsonSchema: false, concurrency: 2, enabled: true })
+  await expect(page.getByTestId('provider-form')).toHaveCount(0)
+  await expect(page.getByTestId('models-provider-acp-proxy-home')).toContainText('ACP proxy (home)') // its name, not the id
+  await expect(page.getByTestId('provider-custom-bar')).toContainText('acp-proxy-home')
+  await expect(page.getByTestId('provider-remove')).toBeVisible()
+  // a seed provider can't be edited or removed here
+  await page.getByTestId('models-provider-lmstudio').click()
+  await expect(page.getByTestId('provider-custom-bar')).toHaveCount(0)
+  await page.getByTestId('models-provider-acp-proxy-home').click()
+  await page.getByTestId('provider-edit').click()
+  await expect(page.getByTestId('provider-name')).toHaveValue('ACP proxy (home)')
+  await expect(page.getByTestId('provider-key')).toHaveValue('') // the key is never shown again
+  await expect(page.getByTestId('provider-parallel')).toHaveValue('2')
+  await page.getByTestId('provider-cancel').click()
+  await page.getByTestId('provider-remove').click()
+  await expect(page.getByTestId('models-provider-acp-proxy-home')).toBeVisible() // asks first
+  await page.getByTestId('provider-remove-confirm').click()
+  expect(await commands(page)).toContainEqual({ type: 'removeCustomProvider', id: 'acp-proxy-home' })
+  await expect(page.getByTestId('models-provider-acp-proxy-home')).toHaveCount(0)
+  await page.getByTestId('models-close').click()
+
+  // Settings' Provider API key select lists the key names the engine reports
+  await page.getByTestId('settings-open').click()
+  await expect(page.locator('option', { hasText: 'DEEPSEEK_API_KEY (set)' })).toHaveCount(1)
+  await expect(page.locator('option', { hasText: 'ANTHROPIC_API_KEY' })).toHaveCount(1)
+  await page.getByTestId('settings-close').click()
+
   // the idea bucket
   await page.getByTestId('tool-idea').click()
   await page.getByTestId('idea-text').fill('A book about a clockwork heron')

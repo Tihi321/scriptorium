@@ -44,6 +44,10 @@ export const providerModelSchema = z.looseObject({
 
 export const providerEntrySchema = z.looseObject({
   id: z.string().min(1),
+  /** Label shown in the UI. Defaults to the id. */
+  name: z.string().optional(),
+  /** Added in the Models dialog (SCP-44): the dialog may edit and remove it; it is always its own kind in the fallback list. */
+  custom: z.boolean().default(false),
   /** `client`: no model server. A request waits in the engine's client task queue until an MCP client (Claude Code) answers it. */
   kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock', 'search', 'client']),
   enabled: z.boolean().default(true),

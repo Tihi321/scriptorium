@@ -6,7 +6,7 @@ import { briefOf, briefPromptText, emptyBrief, renderBrief } from '../../shared/
 import type { BriefCharacter, StoryBrief } from '../../shared/brief'
 import type { BookSummary } from '../../shared/protocol'
 import { ROLES } from '../../shared/schemas'
-import { DEFAULT_LEASE_MS } from '../models/client'
+import { DEFAULT_CLIENT, DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
 import { parseLightBible, parseScript } from '../publish/script'
@@ -245,11 +245,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
       inputSchema: {
         slug: z.string().describe('A story slug or a book slug'),
         timeout_seconds: z.number().int().min(1).max(900).optional().describe('Default 60'),
-        stop_on_client_task: z.boolean().optional().describe('Return as soon as a model request of this book waits for you (default true)')
+        stop_on_client_task: z.boolean().optional().describe('Return as soon as a model request of this book waits for you (default true)'),
+        client: z.string().optional().describe('The named client you are (default claude-code): only its tasks count as waiting for you')
       },
       annotations: READ
     },
-    run(async ({ slug, timeout_seconds, stop_on_client_task }: { slug: string; timeout_seconds?: number; stop_on_client_task?: boolean }, extra) => {
+    run(async ({ slug, timeout_seconds, stop_on_client_task, client }: { slug: string; timeout_seconds?: number; stop_on_client_task?: boolean; client?: string }, extra) => {
       if (!validSlug(slug)) fail(`no book or story "${slug}"`)
       const started = Date.now()
       const deadline = started + (timeout_seconds ?? 60) * 1000
@@ -263,7 +264,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         let bookSlug: string | null = story ? ((await engine.ideas.list()).find((i) => i.slug === story)?.data.book ?? null) : slug
         if (bookSlug && !(await engine.books.read(bookSlug))) bookSlug = null
         const summary = bookSlug ? await bookSummary(engine.books, bookSlug, await topics()) : null
-        const tasks = engine.clientQueue.list()
+        const tasks = engine.clientQueue.list().filter((t) => t.client === (client || DEFAULT_CLIENT))
         const mine = (t: { book: string }) => !!bookSlug && t.book === bookSlug
         const startTask = (t: { role: string; task: string }) => !bookSlug && t.role === 'editor-in-chief' && t.task === 'start_book'
         const waiting = tasks.filter((t) => t.state === 'waiting' && (mine(t) || startTask(t))).length
@@ -870,23 +871,34 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'list_client_tasks',
     {
-      description: 'The model requests that wait for you: jobs whose model is a `client` one (for example client/claude-code). Oldest first, with their age. Take one with get_client_task.',
+      description:
+        'The model requests that wait for you: jobs whose model is a `client` one (for example client/claude-code, client/antigravity). Oldest first, with their age and `client`. Without `client` every named client tasks are listed; get_client_task without `client` only takes claude-code ones. Take one with get_client_task (Antigravity: pass client: "antigravity").',
+      inputSchema: { client: z.string().optional().describe('Only the tasks of this named client, e.g. claude-code or antigravity') },
       annotations: READ
     },
-    run(async () => ({ ...engine.clientQueue.counts(), tasks: engine.clientQueue.list() }))
+    run(async ({ client }: { client?: string }) => {
+      const tasks = engine.clientQueue.list().filter((t) => !client || t.client === client)
+      const waiting = tasks.filter((t) => t.state === 'waiting').length
+      return { waiting, leased: tasks.length - waiting, tasks }
+    })
   )
 
   server.registerTool(
     'get_client_task',
     {
       description:
-        'Take the oldest waiting model request (optionally of one role, book or task; `role: "searcher"` takes the web searches the researcher waits for, see docs/mcp.md "Do the web research yourself") and hold it for 30 minutes. `system` holds the instructions and `user` is the turn to answer; `messages` (the conversation without the system turns) is there only when there is more than one turn, for example a repair round. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
-      inputSchema: { role: z.string().optional(), book: z.string().optional().describe('Book slug'), task: z.string().optional().describe('Job task, e.g. draft_chapter, review, outline') },
+        'Take the oldest waiting model request of your named client (`client`, default claude-code; Antigravity: pass client: "antigravity") (optionally of one role, book or task; `role: "searcher"` takes the web searches the researcher waits for, see docs/mcp.md "Do the web research yourself") and hold it for 30 minutes. `system` holds the instructions and `user` is the turn to answer; `messages` (the conversation without the system turns) is there only when there is more than one turn, for example a repair round. Answer it with submit_client_task. Several sessions can each take one at a time. Returns {none: true, waiting} when nothing matches.',
+      inputSchema: {
+        client: z.string().optional().describe('Which named client you are: only its tasks are given (the model client/<name>). Default claude-code. Antigravity: pass client: "antigravity"'),
+        role: z.string().optional(),
+        book: z.string().optional().describe('Book slug'),
+        task: z.string().optional().describe('Job task, e.g. draft_chapter, review, outline')
+      },
       annotations: WRITE
     },
-    run(async (f: { role?: string; book?: string; task?: string }) => {
+    run(async (f: { client?: string; role?: string; book?: string; task?: string }) => {
       const t = engine.clientQueue.lease(f, DEFAULT_LEASE_MS)
-      if (!t) return { none: true, waiting: engine.clientQueue.counts().waiting }
+      if (!t) return { none: true, waiting: engine.clientQueue.list().filter((x) => x.state === 'waiting' && x.client === (f.client || DEFAULT_CLIENT)).length }
       // `user` is the turn to answer. A plain task (one user turn, nothing said before) has no `messages`: sending the prompt in
       // both fields put every task in the client's context twice. A repair or follow-up round has the whole conversation there.
       const turns = t.messages.filter((m) => m.role !== 'system')
@@ -894,7 +906,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       const lastUser = [...turns].reverse().find((m) => m.role === 'user') ?? turns.at(-1)
       return {
         taskId: t.id,
-        meta: { job: t.job, call: t.call, role: t.role, task: t.task, book: t.book, agent: t.agent, unit: t.unit },
+        meta: { job: t.job, call: t.call, role: t.role, task: t.task, book: t.book, agent: t.agent, unit: t.unit, client: t.client },
         system: t.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
         user: lastUser?.content ?? '',
         ...(plain ? {} : { messages: turns.map((m) => ({ role: m.role, content: m.content })) }),

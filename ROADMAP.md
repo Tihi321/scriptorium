@@ -63,6 +63,7 @@ Found on the VN adaptation `the-local-patch-2` (hub run log `runs/the-local-patc
 ## Models
 
 - **Antigravity models** (user decision, 2026-10-22): no Antigravity login of Scriptorium's own. If they are wanted, they come through the ACP proxy (hub ticket HUB-09).
+- **SCP-44 (done in code, branch `SCP-44_custom-providers`, not merged; same in Book Translator BTT-21 and VN Studio VNO-39): custom OpenAI-compatible providers, the ACP proxy and named MCP clients.** The Models panel has **Add provider** (Name, Base URL, key, Free (local), Send JSON schema, Parallel, Enabled, Test), and Edit and Remove for the providers it added (`custom: true` in `config/providers.md`, key `CUSTOM_<ID>_API_KEY` in the credential store, each one its own kind in the fallback list). The seed has an `acp` provider (the api-acp-proxy at `127.0.0.1:7461`, off), and `client/antigravity` sits next to `client/claude-code`: client tasks carry `client`, and `get_client_task` / `list_client_tasks` / `wait_for_book` take an optional `client` (none means `claude-code`). Plan and checklist in `.claude/tickets/SCP-44-custom-openai-compatible-providers-acp-proxy/plan.md`; docs in `docs/design.md` (rows "Custom providers (SCP-44)" and "Named MCP clients (SCP-44)") and `docs/mcp.md` ("Antigravity CLI as a client"). Open: the live check (a custom provider on LM Studio, the ACP proxy once HUB-09 runs, `get_client_task {client: "antigravity"}` over MCP).
 
 ## After SCP-19 is merged
 

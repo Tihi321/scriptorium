@@ -173,7 +173,14 @@ export function providerSummaries(registry: ModelRegistry, limiter: ProviderLimi
     .filter((p) => p.kind !== 'search' && p.kind !== 'mock')
     .map((p) => ({
       id: p.id,
+      name: p.name,
+      custom: p.custom,
       kind: p.kind,
+      enabled: p.enabled,
+      baseUrl: p.baseUrl,
+      apiKeyEnv: p.apiKeyEnv,
+      hasKey: !!p.apiKeyEnv && registry.hasKey(p.apiKeyEnv),
+      jsonSchema: p.jsonSchema,
       // a client provider (Claude Code over MCP) is local and free, never paid or down
       local: p.local || p.kind === 'client',
       available: p.available,

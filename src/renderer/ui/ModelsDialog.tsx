@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
 import { officeStore } from '../store/store'
@@ -35,9 +36,39 @@ function todayText(p: ProviderSummary): string {
   return `Today: ${p.requestsToday}${p.rpd ? ` of ${p.rpd}` : ''} requests. The day starts again at ${at} (midnight UTC).`
 }
 
-/** The name of a kind on screen: `paid` is every API model, any other kind is its provider's id. */
-function kindLabel(kind: string): string {
-  return kind === 'paid' ? 'API' : kind
+/** The name of a kind on screen: `paid` is every API model, any other kind is its provider's id (a custom provider shows its name). */
+function kindLabel(kind: string, providers: ProviderSummary[]): string {
+  if (kind === 'paid') return 'API'
+  const p = providers.find((x) => x.id === kind)
+  return p?.custom ? p.name : kind
+}
+
+/** The Add provider form: a custom OpenAI-compatible provider (config/providers.md, `custom: true`). `id` is set when editing one. */
+interface ProviderForm {
+  id?: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  free: boolean
+  jsonSchema: boolean
+  /** A number, or `auto`. */
+  parallel: string
+  enabled: boolean
+  /** The key is stored already (an edit): an empty field keeps it. */
+  hasKey: boolean
+}
+
+const EMPTY_FORM: ProviderForm = { name: '', baseUrl: '', apiKey: '', free: true, jsonSchema: false, parallel: '4', enabled: true, hasKey: false }
+
+function formOf(p: ProviderSummary): ProviderForm {
+  return { id: p.id, name: p.name, baseUrl: p.baseUrl ?? '', apiKey: '', free: p.local, jsonSchema: p.jsonSchema, parallel: p.concurrencyAuto ? 'auto' : String(p.concurrency), enabled: p.enabled, hasKey: p.hasKey }
+}
+
+function parallelOf(text: string): number | 'auto' | undefined {
+  const t = text.trim().toLowerCase()
+  if (t === 'auto') return 'auto'
+  const n = Number(t)
+  return t !== '' && Number.isInteger(n) && n >= 1 ? n : undefined
 }
 
 /** The kind a fallback row has: the one its model summary says, else from its provider (`paid` for an API provider or an unknown one). */
@@ -45,7 +76,7 @@ function rowKind(ref: string, models: ModelSummary[], providers: ProviderSummary
   const m = models.find((x) => x.ref === ref)
   if (m) return m.kind
   const p = providers.find((x) => x.id === ref.split('/')[0])
-  return p?.local ? p.id : 'paid'
+  return p?.local || p?.custom ? p.id : 'paid'
 }
 
 /** A short word for why a provider can't be used: its key is missing, or it is switched off. */
@@ -84,6 +115,14 @@ export function ModelsDialog() {
   const models = useOffice((s) => s.models)
   const catalogs = useOffice((s) => s.catalogs)
   const settings = useOffice((s) => s.settings)
+  const providerTest = useOffice((s) => s.providerTest)
+  const providerSaved = useOffice((s) => s.providerSaved)
+  const [form, setForm] = useState<ProviderForm | null>(null)
+  /** Waiting for the engine to say it saved the form (`provider.saved`), and what it said when it refused. */
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  /** The provider whose Remove asks "are you sure". */
+  const [removing, setRemoving] = useState<string | null>(null)
   const [provider, setProvider] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [freeOnly, setFreeOnly] = useState(false)
@@ -103,6 +142,21 @@ export function ModelsDialog() {
   const local = !!current?.local
   // kind client: an MCP client (Claude Code) answers the requests, so it is local and free, never paid or down
   const client = current?.kind === 'client'
+
+  // the engine answers a save or a removal: close the form and show the provider, or show why it was refused
+  useEffect(() => {
+    if (!providerSaved || (!saving && !removing)) return
+    setSaving(false)
+    setRemoving(null)
+    if (providerSaved.error) setFormError(providerSaved.error)
+    else {
+      setFormError(null)
+      setForm(null)
+      if (providerSaved.id && !providerSaved.removed) setProvider(providerSaved.id)
+      if (providerSaved.removed) setProvider(null)
+    }
+    // only a new answer matters
+  }, [providerSaved])
 
   // today's request counts are fresh when the panel opens
   useEffect(() => {
@@ -172,7 +226,7 @@ export function ModelsDialog() {
   const ticked = models.filter((m) => m.shown !== false && m.enabled)
   /** The kinds a row may have: API, local providers, then client providers; only those with a ticked model (and the row's own). */
   const kindsFor = (own: string): string[] => {
-    const kinds = ['paid', ...providers.filter((p) => p.local && p.kind !== 'client').map((p) => p.id), ...providers.filter((p) => p.kind === 'client').map((p) => p.id)]
+    const kinds = ['paid', ...providers.filter((p) => (p.local || p.custom) && p.kind !== 'client').map((p) => p.id), ...providers.filter((p) => p.kind === 'client').map((p) => p.id)]
     return kinds.filter((k) => k === own || ticked.some((m) => m.kind === k))
   }
   const kindsOfRows = fallbacks.map((r) => rowKind(r, models, providers))
@@ -202,7 +256,7 @@ export function ModelsDialog() {
         >
           {kindsFor(kind).map((k) => (
             <option key={k} value={k}>
-              {kindLabel(k)}
+              {kindLabel(k, providers)}
             </option>
           ))}
         </select>
@@ -225,6 +279,98 @@ export function ModelsDialog() {
       </div>
     )
   }
+  const parallel = form ? parallelOf(form.parallel) : undefined
+  const urlOk = !!form && /^https?:\/\/\S+$/i.test(form.baseUrl.trim())
+  const canSaveForm = !!form && form.name.trim() !== '' && urlOk && parallel !== undefined && !saving
+  const saveForm = () => {
+    if (!form || !canSaveForm || parallel === undefined) return
+    setSaving(true)
+    setFormError(null)
+    sendCommand({
+      type: 'saveCustomProvider',
+      id: form.id,
+      name: form.name.trim(),
+      baseUrl: form.baseUrl.trim(),
+      apiKey: form.apiKey.trim() || undefined,
+      free: form.free,
+      jsonSchema: form.jsonSchema,
+      concurrency: parallel,
+      enabled: form.enabled
+    })
+  }
+  const testForm = () => {
+    if (!form || !urlOk) return
+    sendCommand({ type: 'testCustomProvider', baseUrl: form.baseUrl.trim(), apiKey: form.apiKey.trim() || undefined, id: form.id })
+  }
+  const openForm = (next: ProviderForm | null) => {
+    setForm(next)
+    setFormError(null)
+    setRemoving(null)
+  }
+  const testResult = form && providerTest && providerTest.baseUrl === form.baseUrl.trim() ? providerTest : null
+  const formField = (label: string, input: ReactNode) => (
+    <div style={{ flex: 1 }}>
+      <label>{label}</label>
+      {input}
+    </div>
+  )
+  const providerForm = form && (
+    <div className="models-pane" data-testid="provider-form">
+      <div className="panel-title">{form.id ? `Edit ${form.name || form.id}` : 'Add provider'}</div>
+      <div className="dim">Any OpenAI-compatible server. Saved in config/providers.md; the key goes to the Windows credential store, never to a file.</div>
+      {formField(
+        'Name',
+        <input value={form.name} placeholder="e.g. ACP proxy (home)" onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="provider-name" />
+      )}
+      {formField(
+        'Base URL',
+        <input value={form.baseUrl} placeholder="http://127.0.0.1:7461/v1" onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} data-testid="provider-url" />
+      )}
+      {formField(
+        form.hasKey ? 'API key (stored, not shown: leave empty to keep it)' : 'API key (optional)',
+        <input type="password" autoComplete="off" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} data-testid="provider-key" />
+      )}
+      <div className="row" style={{ gap: 12 }}>
+        <label className="inline" title="Local or free: no key needed, never counted against the budget. Without it the provider is paid: each model needs its price.">
+          <input type="checkbox" checked={form.free} onChange={(e) => setForm({ ...form, free: e.target.checked })} data-testid="provider-free" />
+          Free (local)
+        </label>
+        <label className="inline" title="Send the JSON schema as response_format. Leave off for servers that reject it.">
+          <input type="checkbox" checked={form.jsonSchema} onChange={(e) => setForm({ ...form, jsonSchema: e.target.checked })} data-testid="provider-schema" />
+          Send JSON schema
+        </label>
+        <label className="inline">
+          <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} data-testid="provider-enabled" />
+          Enabled
+        </label>
+      </div>
+      {formField(
+        'Parallel (a number, or auto)',
+        <input value={form.parallel} onChange={(e) => setForm({ ...form, parallel: e.target.value })} style={{ width: 90 }} data-testid="provider-parallel" />
+      )}
+      <div className="row" style={{ gap: 8 }}>
+        <button disabled={!urlOk} onClick={testForm} data-testid="provider-test">
+          Test
+        </button>
+        <span className={testResult && !testResult.ok ? 'warn' : 'dim'} data-testid="provider-test-result">
+          {testResult ? (testResult.ok ? `Reachable, ${testResult.count} model${testResult.count === 1 ? '' : 's'}` : `Failed: ${testResult.error}`) : ''}
+        </span>
+      </div>
+      {formError && (
+        <div className="warn" data-testid="provider-error">
+          {formError}
+        </div>
+      )}
+      <div className="row" style={{ gap: 8 }}>
+        <button className="primary" disabled={!canSaveForm} onClick={saveForm} data-testid="provider-save">
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button onClick={() => openForm(null)} data-testid="provider-cancel">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
   const addRow = () => {
     const first = ticked.find((m) => m.kind === 'paid') ?? ticked[0]
     if (first) save([...fallbacks, first.ref])
@@ -303,13 +449,51 @@ export function ModelsDialog() {
                 data-testid={`models-provider-${p.id}`}
                 title={p.available ? undefined : p.reason}
               >
-                <span>{p.id}</span>
+                <span>{p.name}</span>
                 <span className="dim">{p.available ? `${models.filter((m) => m.provider === p.id && m.shown !== false).length} ticked` : shortReason(p.reason)}</span>
               </button>
             ))}
+            <button onClick={() => openForm({ ...EMPTY_FORM })} data-testid="provider-add">
+              Add provider
+            </button>
           </div>
-          {current ? (
+          {providerForm ? (
+            providerForm
+          ) : current ? (
             <div className="models-pane">
+              {current.custom && (
+                <div className="row" style={{ gap: 8 }} data-testid="provider-custom-bar">
+                  <span className="dim" style={{ flex: 1 }}>
+                    Custom provider {current.id}: {current.baseUrl}
+                  </span>
+                  <button onClick={() => openForm(formOf(current))} data-testid="provider-edit">
+                    Edit
+                  </button>
+                  {removing === current.id ? (
+                    <>
+                      <button
+                        className="primary"
+                        onClick={() => {
+                          sendCommand({ type: 'removeCustomProvider', id: current.id })
+                        }}
+                        data-testid="provider-remove-confirm"
+                      >
+                        Remove for good
+                      </button>
+                      <button onClick={() => setRemoving(null)}>Keep</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setRemoving(current.id)} title="Removes the provider, its key, its ticked models and its fallback rows" data-testid="provider-remove">
+                      Remove
+                    </button>
+                  )}
+                </div>
+              )}
+              {!form && formError && (
+                <div className="warn" data-testid="provider-error">
+                  {formError}
+                </div>
+              )}
               {!local && (
                 <>
                   <div className="row" style={{ gap: 8 }} data-testid="provider-limits">

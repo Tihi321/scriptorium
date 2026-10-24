@@ -9,7 +9,9 @@ import type { FactoryConfig, FormatEntry, QualityConfig, SettingsConfig } from '
 import { AgentStore } from './agents/agents'
 import { Budget } from './budget/spend'
 import { LogWriter } from './logs/logs'
-import { resolveKey, setStoredKey } from './models/keys'
+import { deleteStoredKey, resolveKey, setStoredKey } from './models/keys'
+import { checkBaseUrl, removeCustomEntry, saveCustomEntry } from './models/customProviders'
+import { OpenAiCompatClient } from './models/openaiCompat'
 import { ClientTaskQueue } from './models/client'
 import { ModelRegistry, guessFamily, modelDefaultsOf } from './models/registry'
 import type { ListedModel } from './models/openaiCompat'
@@ -393,6 +395,105 @@ export class Engine {
     if (now) this.router.limiter.wakeAll(now)
   }
 
+  private providersFile(): string {
+    return path.join(this.dataDir, 'config', 'providers.md')
+  }
+
+  /**
+   * Adds a custom OpenAI-compatible provider (`custom: true`) to config/providers.md, or edits it when `cmd.id` is given, then stores its key
+   * in the credential store. An empty key on an edit keeps the stored one. Answers with `provider.saved`.
+   */
+  async saveCustomProvider(cmd: Extract<Command, { type: 'saveCustomProvider' }>): Promise<void> {
+    const at = new Date().toISOString()
+    try {
+      const apiKey = cmd.apiKey?.trim() || undefined
+      const r = await saveCustomEntry(this.providersFile(), { ...cmd, withKey: !!apiKey })
+      this.log(`providers: ${r.created ? 'added' : 'changed'} custom provider ${r.id}`)
+      if (apiKey) {
+        try {
+          setStoredKey(r.apiKeyEnv, apiKey)
+          this.log(`stored secret ${r.apiKeyEnv}`) // never the value
+        } catch (err) {
+          this.log(`could not store ${r.apiKeyEnv}: ${(err as Error).message}`)
+          this.emit({ type: 'engine.warning', message: `The provider was saved, but its key could not be stored: ${(err as Error).message}` })
+        }
+      }
+      await this.registry.load()
+      this.warnAliases()
+      this.emit(await this.snapshot())
+      this.emit({ type: 'secrets.updated', secretsSet: this.secretsSet() })
+      this.emit({ type: 'provider.saved', id: r.id, at })
+      this.scheduler.changeModel()
+      this.scheduler.kick()
+      void this.discoverModels() // a provider that was just added lists its models
+    } catch (err) {
+      this.log(`saveCustomProvider: ${(err as Error).message}`)
+      this.emit({ type: 'provider.saved', error: (err as Error).message, at })
+    }
+  }
+
+  /**
+   * Removes a custom provider: its entry in providers.md, its stored key, its refs in config/models.md (`picked`, `hidden`, `limits`) and its rows in
+   * the fallback list of settings.md. Role lists in roles.md that name it stay: they show as unknown models, like any removed model.
+   */
+  async removeCustomProvider(id: string): Promise<void> {
+    const at = new Date().toISOString()
+    try {
+      const { apiKeyEnv } = await removeCustomEntry(this.providersFile(), id)
+      if (deleteStoredKey(apiKeyEnv)) this.log(`deleted secret ${apiKeyEnv}`)
+      // the fallback rows and the last resort model of settings.md
+      const file = this.settingsFile()
+      try {
+        const doc = await readMd(file)
+        const rows = Array.isArray(doc.data.fallbacks) ? (doc.data.fallbacks as string[]) : []
+        const left = rows.filter((r) => !r.startsWith(`${id}/`))
+        const lastResort = typeof doc.data.last_resort_model === 'string' && doc.data.last_resort_model.startsWith(`${id}/`)
+        if (left.length !== rows.length || lastResort) {
+          const next: Record<string, unknown> = { ...doc.data }
+          if (left.length > 0) next.fallbacks = left
+          if (lastResort) next.last_resort_model = ''
+          await writeMd(file, next, doc.body)
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.log(`removeCustomProvider: settings.md: ${(err as Error).message}`)
+      }
+      await this.loadSettings()
+      await this.editModelChoices((picked, hidden, limits) => {
+        for (let i = picked.length - 1; i >= 0; i--) if (picked[i]!.provider === id) picked.splice(i, 1)
+        for (const ref of [...hidden]) if (ref.startsWith(`${id}/`)) hidden.delete(ref)
+        delete limits[id]
+      })
+      this.catalogs.delete(id)
+      this.log(`providers: removed custom provider ${id}`)
+      this.warnAliases()
+      this.scheduler.changeModel()
+      this.emit({ type: 'secrets.updated', secretsSet: this.secretsSet() })
+      this.emit({ type: 'provider.saved', id, removed: true, at })
+    } catch (err) {
+      this.log(`removeCustomProvider: ${(err as Error).message}`)
+      this.emit({ type: 'provider.saved', id, error: (err as Error).message, at })
+    }
+  }
+
+  /** `GET /models` of an address, with the given key (or the stored key of provider `cmd.id`), for the form's Test button. Answers with `provider.tested`. */
+  async testCustomProvider(cmd: { baseUrl: string; apiKey?: string; id?: string }): Promise<void> {
+    const at = new Date().toISOString()
+    try {
+      const baseUrl = checkBaseUrl(cmd.baseUrl)
+      const env = cmd.id ? this.registry.providers.get(cmd.id)?.apiKeyEnv : undefined
+      const apiKey = cmd.apiKey?.trim() || (env ? resolveKey(env) : undefined)
+      const client = new OpenAiCompatClient({ id: 'test', baseUrl, apiKey, fetchImpl: this.opts.registry?.fetchImpl })
+      const listed = await client.listModelInfo()
+      this.emit({ type: 'provider.tested', baseUrl: cmd.baseUrl, ok: true, count: listed.length, at })
+    } catch (err) {
+      const e = err as Error & { cause?: { code?: string; errors?: { code?: string }[] } }
+      // a refused or unknown address only says "fetch failed": add its reason
+      const code = e.cause?.code ?? e.cause?.errors?.find((x) => x.code)?.code
+      const message = e.message === 'fetch failed' ? `network error: ${e.message}${code ? ` (${code})` : ''}` : e.message
+      this.emit({ type: 'provider.tested', baseUrl: cmd.baseUrl, ok: false, error: message, at })
+    }
+  }
+
   /** Reads `picked` and `hidden` of config/models.md, lets `change` edit them, writes the file and sends the pickers the result. */
   private async editModelChoices(change: (picked: Record<string, unknown>[], hidden: Set<string>, limits: Record<string, Record<string, number>>) => void): Promise<void> {
     const file = this.registry.modelsFile()
@@ -681,6 +782,11 @@ export class Engine {
     const names = new Set(['SCRIPTORIUM_SMTP_PASSWORD'])
     for (const p of this.registry.providers.values()) if (p.apiKeyEnv) names.add(p.apiKeyEnv)
     return [...names]
+  }
+
+  /** The key names the UI may set for providers (every `api_key_env`), for the Settings key select. */
+  keyNames(): string[] {
+    return this.allowedSecrets().filter((n) => n !== 'SCRIPTORIUM_SMTP_PASSWORD')
   }
 
   secretsSet(): string[] {
@@ -1135,6 +1241,15 @@ export class Engine {
       case 'setProviderLimits':
         await this.setProviderLimits(cmd)
         return
+      case 'saveCustomProvider':
+        await this.saveCustomProvider(cmd)
+        return
+      case 'removeCustomProvider':
+        await this.removeCustomProvider(cmd.id)
+        return
+      case 'testCustomProvider':
+        await this.testCustomProvider(cmd)
+        return
       case 'setSecret': {
         if (!this.allowedSecrets().includes(cmd.name)) {
           this.log(`setSecret: "${cmd.name}" is not a name the app may store`)
@@ -1200,6 +1315,7 @@ export class Engine {
       running: this.scheduler.runningJobs(),
       settings: this.settingsSummary(),
       secretsSet: this.secretsSet(),
+      keyNames: this.keyNames(),
       mcp: this.mcpUrl ? { url: this.mcpUrl } : null,
       at: new Date().toISOString()
     }

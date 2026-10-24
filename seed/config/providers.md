@@ -122,6 +122,18 @@ providers:
     concurrency: 1
     discover: true
     models: []
+  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-compatible server. Off until you start the proxy.
+  # See "The ACP proxy" below. Any other OpenAI-compatible server is added in the Models dialog (Add provider).
+  - id: acp
+    name: ACP proxy
+    kind: openai-compat
+    enabled: false
+    local: true
+    base_url: http://127.0.0.1:7461/v1
+    concurrency: 2
+    json_schema: false
+    discover: true
+    models: []
   # Claude Code (or any MCP client) does the model work: a request waits in the engine until the client answers it (see docs/mcp.md).
   # Switched off here so a new install never routes to it: set `enabled: true`, then point one agent or role at client/claude-code.
   - id: client
@@ -133,6 +145,11 @@ providers:
       - id: claude-code
         family: claude
         context: 200000
+        vision: true
+      # Antigravity CLI as a client: it takes its own tasks with get_client_task {client: "antigravity"} (see docs/mcp.md).
+      - id: antigravity
+        family: gemini
+        context: 1000000
         vision: true
   # Search services for the researcher (kind: search). They have no models. The order is search_order at the end of the list.
   # price_per_request is logged to the spend files for every answered request (USD, to verify on the provider's pricing page).
@@ -196,6 +213,8 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 
 ## Fields of a provider
 
+- `name`: optional label shown in the app (the Models panel, the fallback rows). Defaults to the id.
+- `custom`: `true` marks a provider added with **Add provider** in the Models panel. Only those can be edited and removed there (Remove also deletes the stored key and the provider's ticked models and fallback rows); a custom provider is always its own kind in the fallback list, named by its id, whether it is free (`local: true`) or paid. Its key is `CUSTOM_<ID>_API_KEY` in the Windows credential store. The seed providers have no `custom` flag: edit them here.
 - `id`: the name used in model references. A model is written `provider/model`, for example `lmstudio/nail-qwen3.6-35b-a3b-mtp`.
 - `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `client` (no model server: an MCP client such as Claude Code answers, see below), `mock` (scripted answers, only for the tests: the app's own config has none, so the model pickers never offer one) or `search` (web search for the researcher: `engine` names the service, see below).
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
@@ -220,6 +239,16 @@ Strata (`D:\Strata`) is a fast local server for Qwen3.8-Flash-Next with an OpenA
 - `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. That would be retried and then sent to a paid model, while the engine's own parse-and-repair step already copes with a loose JSON answer.
 - No key is needed. `STRATA_API_KEY` is only sent if you set it.
 
+## The ACP proxy
+
+`acp` points at the api-acp-proxy (`http://127.0.0.1:7461/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API. It is off until you start the proxy and set `enabled: true` (or switch it on in the Models panel). It is local (free, its own kind `acp` in the fallback list); press **Detect models** to list what the proxy offers and tick the ones you want.
+
+- Start the proxy with `PROXY_IGNORE_SAMPLING=1`: Scriptorium sends `temperature`, `max_tokens` and `stream_options`, which the proxy has to ignore.
+- It is text only: no vision.
+- `PROXY_TIMEOUT_MS` (5 minutes by default) must cover your longest request: a chapter can take a while.
+- Terms risk: driving Antigravity this way may break its terms of use. Read the section "Antigravity models and the ACP proxy" of the creative-hub ROADMAP before you rely on it.
+- A data folder that already exists gets the entry at the next start, once (before the `client` provider), without changing the entries, comments and order you have.
+
 ## OpenRouter
 
 One key (`OPENROUTER_API_KEY`, stored in the app's settings) gives many models. `discover: free` adds every free one OpenRouter lists, with its context and output limit, so they show in the model pickers as `openrouter/<maker>/<model>:free` (19 on 2026-10-12, `openrouter/openrouter/free` among them: OpenRouter picks a free model for each request). Free models cost nothing and never count against the caps. OpenRouter limits them to 20 requests a minute and 50 a day, or 1000 a day once the account has bought $10 of credit. A rate-limited request is retried with backoff, then the next model in the role takes it. For a paid OpenRouter model, tick it in the app's Models panel (the Models button in the top bar; Detect models lists them all), or add it there by its id: it is saved in `config/models.md` with the price OpenRouter lists. You can also add it to the list here with its price from openrouter.ai/models, or set `discover: true` to add all of them (about 450) with the prices OpenRouter lists. The Models panel also unticks models you don't want in the pickers.
@@ -235,6 +264,7 @@ Claude Code (or another MCP client) does the model work. A request to `client/cl
 - Use it for one book: `add_story {models: {writer: "client/claude-code"}}` or `set_book_model` puts that book's jobs of a role on it, so the factory's own ideas keep using their models and never wait for you. Or set a whole role to it with `set_model`. (An agent pinned to a book with `assign_agent` only prefers its jobs.)
 - A role left on `client` when nobody is answering stalls every book that needs it: switch it back when you are done.
 - `context: 200000`: Claude's window. It sizes the memory context (45%) and source excerpts (30%); without it Scriptorium uses its smaller defaults.
+- Named clients: the models are `client/claude-code` and `client/antigravity`. A task carries the model it was made for, and a client only takes its own: `get_client_task` without `client` gives `claude-code` tasks, Antigravity CLI passes `client: "antigravity"` (see `docs/mcp.md`, "Antigravity CLI as a client"). Add another client with "Add a model by its id" on the `client` provider.
 - `vision: true` on the model is for clients that can look at images (VN Studio sends images to its art critic; Scriptorium's jobs send none).
 - Tasks live in memory only. If the engine restarts, the jobs that waited are requeued and make new tasks.
 
