@@ -18,6 +18,10 @@ import type { ProviderClient } from './types'
 
 export interface ProviderInfo {
   id: string
+  /** Label for the UI (`name` of providers.md, else the id). */
+  name: string
+  /** Added in the Models dialog (`custom: true`). */
+  custom: boolean
   kind: ProviderEntry['kind']
   enabled: boolean
   local: boolean
@@ -164,6 +168,8 @@ export class ModelRegistry {
       const limit = (v: number | undefined, fallback: number | undefined) => (v === undefined ? fallback : v > 0 ? v : undefined)
       const info: ProviderInfo = {
         id: p.id,
+        name: p.name?.trim() || p.id,
+        custom: p.custom,
         kind: p.kind,
         enabled: p.enabled,
         // a client provider is the owner's own Claude Code: local, free, no key, never budget-checked
@@ -238,6 +244,11 @@ export class ModelRegistry {
       const prov = this.providers.get(d.provider.id)
       if (prov && !this.models.has(d.ref) && !skipsDiscovered(prov, d.id)) this.models.set(d.ref, { ...d, provider: prov })
     }
+  }
+
+  /** A key is stored or in the environment (read through the registry's key resolver). */
+  hasKey(envName: string): boolean {
+    return !!(this.opts.keys ?? resolveKey)(envName)
   }
 
   modelsFile(): string {
@@ -466,10 +477,10 @@ export class ModelRegistry {
     return this.defaults.fallbacks
   }
 
-  /** The kind of a row or model, by its provider: the provider's id for a local one (a client too), `paid` for an API provider or one that providers.md does not have. */
+  /** The kind of a row or model, by its provider: the provider's id for a local or custom one (a client too), `paid` for an API provider or one that providers.md does not have. */
   private kindOfRef(ref: string): string {
     const p = this.providers.get(ref.split('/')[0]!)
-    return p?.local ? p.id : 'paid'
+    return p?.local || p?.custom ? p.id : 'paid'
   }
 
   /** The kind of an alias or a `provider/model`: `paid` for every API model, otherwise the provider's id. */

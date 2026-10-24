@@ -354,6 +354,26 @@ describe('MCP client tasks and reopen_book', () => {
     for (const n of ['list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'reopen_book']) expect(names).toContain(n)
   })
 
+  it('get_client_task and list_client_tasks take a named client: no client means claude-code (SCP-44)', async () => {
+    env = await makeEnv({ providers: [{ id: 'client', kind: 'client', models: ['claude-code', 'antigravity'] }], paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    const q = env.engine.clientQueue
+    const msgs = [{ role: 'user' as const, content: 'go' }]
+    q.add({ messages: msgs, client: 'antigravity' }, { job: 'ag1', role: 'writer', book: 'b' })
+    expect((await call(c, 'get_client_task')).data).toEqual({ none: true, waiting: 0 })
+    expect((await call(c, 'get_client_task', { client: 'claude-code' })).data).toEqual({ none: true, waiting: 0 })
+    q.add({ messages: msgs, client: 'claude-code' }, { job: 'cc1', role: 'writer', book: 'b' })
+    const all = (await call(c, 'list_client_tasks')).data
+    expect(all).toMatchObject({ waiting: 2, tasks: [{ id: 'ag1#1', client: 'antigravity' }, { id: 'cc1#1', client: 'claude-code' }] })
+    expect((await call(c, 'list_client_tasks', { client: 'antigravity' })).data).toMatchObject({ waiting: 1, leased: 0, tasks: [{ id: 'ag1#1' }] })
+    const cc = (await call(c, 'get_client_task')).data
+    expect(cc).toMatchObject({ taskId: 'cc1#1', meta: { client: 'claude-code' } })
+    const ag = (await call(c, 'get_client_task', { client: 'antigravity' })).data
+    expect(ag).toMatchObject({ taskId: 'ag1#1', meta: { client: 'antigravity' } })
+    expect((await call(c, 'get_client_task', { client: 'antigravity' })).data).toEqual({ none: true, waiting: 0 })
+  })
+
   it('takes a model request, answers it over MCP, and the job completes', async () => {
     env = await makeEnv({ providers: [{ id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['client/claude-code'] }, agents: [{ role: 'writer', name: 'Ann' }] })
     mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })

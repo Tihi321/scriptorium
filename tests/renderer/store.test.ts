@@ -84,6 +84,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     running: [],
     settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 },
     secretsSet: [],
+    keyNames: [],
     mcp: null,
     at: 'now',
     ...extra

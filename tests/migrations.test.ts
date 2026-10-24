@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { initDataFolder } from '../src/engine/store/dataFolder'
-import { migrateClientProvider, migrateFallbacks, migrateSeedPrompts } from '../src/engine/store/migrations'
+import { migrateAcpProvider, migrateAntigravityClient, migrateClientProvider, migrateFallbacks, migrateSeedPrompts } from '../src/engine/store/migrations'
 import { SEED_HISTORY, seedHash } from '../src/engine/store/seedHistory'
 import { parseMd } from '../src/shared/md'
 import { seedDir } from './helpers'
@@ -256,5 +256,84 @@ describe('migrateFallbacks (SCP-19)', () => {
     expect(first.migrated.filter((l) => l.includes('fallbacks'))).toHaveLength(1)
     expect((await read(old)).data).toMatchObject({ fallbacks: ['strata/qwen3.8-flash-next', 'deepseek/deepseek-v4-pro', 'lmstudio/gemma'], fallback_shared: true })
     expect((await initDataFolder(old, seedDir)).migrated.filter((l) => l.includes('fallbacks'))).toHaveLength(0)
+  })
+})
+
+describe('migrateAcpProvider (SCP-44)', () => {
+  it('adds the acp provider once, before the client provider, keeps comments and CRLF, and the registry loads it switched off', async () => {
+    const withClient = [...OLD_PROVIDERS.slice(0, 8), '  # my client note', '  - id: client', '    kind: client', '    models: []', ...OLD_PROVIDERS.slice(8)]
+    const dir = await providersFolder(withClient, '\r\n')
+    const res = await migrateAcpProvider(dir, seedDir)
+    expect(res.changes).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:7461/v1, switched off)'])
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await readFile(file, 'utf8')
+    expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/)
+    const ids = [...text.matchAll(/^ {2}- id: (\S+)/gm)].map((m) => m[1])
+    expect(ids).toEqual(['lmstudio', 'acp', 'client', 'tavily'])
+    expect(text).toContain('  # my client note')
+    expect(text).toContain('  # my own note about search')
+    expect((await migrateAcpProvider(dir, seedDir)).changes).toEqual([])
+    expect(await readFile(file, 'utf8')).toBe(text)
+    await writeFile(path.join(dir, 'config', 'roles.md'), ['---', 'kind: roles', 'roles: {}', '---', ''].join('\n'))
+    const registry = new ModelRegistry(dir, { keys: () => undefined })
+    await registry.load()
+    expect(registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, baseUrl: 'http://127.0.0.1:7461/v1', concurrency: 2, jsonSchema: false, discover: true, custom: false, name: 'ACP proxy', available: false })
+    expect(registry.kindOf('acp/any')).toBe('acp')
+  })
+
+  it('works without a seed, leaves a folder that has an acp provider, and does not touch a folder without the file', async () => {
+    const dir = await providersFolder(OLD_PROVIDERS)
+    expect((await migrateAcpProvider(dir, undefined)).changes).toHaveLength(1)
+    const text = await readFile(path.join(dir, 'config', 'providers.md'), 'utf8')
+    expect(text.indexOf('- id: acp')).toBeLessThan(text.indexOf('- id: tavily'))
+    expect((await migrateAcpProvider(dir, undefined)).changes).toEqual([])
+    const own = await providersFolder([...OLD_PROVIDERS.slice(0, 8), '  - id: acp', '    name: Mine', '    custom: true', '    kind: openai-compat', '    base_url: http://localhost:9/v1', '    models: []', ...OLD_PROVIDERS.slice(8)])
+    expect((await migrateAcpProvider(own, seedDir)).changes).toEqual([])
+    expect(await readFile(path.join(own, 'config', 'providers.md'), 'utf8')).toContain('name: Mine')
+    const none = await tmp()
+    expect((await migrateAcpProvider(none, seedDir)).changes).toEqual([])
+    expect(existsSync(path.join(none, 'config'))).toBe(false)
+  })
+
+  it('initDataFolder adds it to an old folder once, and a fresh folder has it from the seed', async () => {
+    const fresh = await tmp()
+    const first = await initDataFolder(fresh, seedDir)
+    expect(first.migrated.filter((m) => /acp|antigravity/.test(m))).toEqual([])
+    const file = path.join(fresh, 'config', 'providers.md')
+    const seedText = await readFile(file, 'utf8')
+    expect(seedText).toContain('  - id: acp')
+    expect(seedText).toContain('      - id: antigravity')
+    const from = seedText.indexOf('  # The ACP proxy')
+    const to = seedText.indexOf('  # Claude Code')
+    expect(from).toBeGreaterThan(0)
+    await writeFile(file, seedText.slice(0, from) + seedText.slice(to))
+    const again = await initDataFolder(fresh, seedDir)
+    expect(again.migrated).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:7461/v1, switched off)'])
+    expect((await initDataFolder(fresh, seedDir)).migrated).toEqual([])
+  })
+})
+
+describe('migrateAntigravityClient (SCP-44)', () => {
+  const withClient = (models: string[]) => [...OLD_PROVIDERS.slice(0, 8), '  - id: client', '    kind: client', '    enabled: true', '    models:', ...models, ...OLD_PROVIDERS.slice(8)]
+
+  it('adds the antigravity model after claude-code once, and leaves a folder that has it or has no client provider', async () => {
+    const dir = await providersFolder(withClient(['      - id: claude-code', '        family: claude', '        context: 200000', '        vision: true']))
+    expect((await migrateAntigravityClient(dir)).changes).toEqual(['config/providers.md: added the client/antigravity model (context 1000000)'])
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await readFile(file, 'utf8')
+    expect(text).toContain('        vision: true\n      # Antigravity CLI as a client')
+    expect(text).toContain('      - id: antigravity\n        family: gemini\n        context: 1000000\n        vision: true\n  # my own note about search')
+    expect(text).toContain('    enabled: true') // a provider the user switched on stays on
+    expect((await migrateAntigravityClient(dir)).changes).toEqual([])
+    expect(await readFile(file, 'utf8')).toBe(text)
+    const registry = new ModelRegistry(dir, { keys: () => undefined })
+    await writeFile(path.join(dir, 'config', 'roles.md'), ['---', 'kind: roles', 'roles: {}', '---', ''].join('\n'))
+    await registry.load()
+    expect(registry.getModel('client/antigravity')?.context).toBe(1000000)
+    expect(registry.getModel('client/claude-code')?.context).toBe(200000)
+    const has = await providersFolder(withClient(['      - id: claude-code', '      - id: antigravity', '        context: 5']))
+    expect((await migrateAntigravityClient(has)).changes).toEqual([])
+    expect((await migrateAntigravityClient(await providersFolder(OLD_PROVIDERS))).changes).toEqual([])
+    expect((await migrateAntigravityClient(await tmp())).changes).toEqual([])
   })
 })

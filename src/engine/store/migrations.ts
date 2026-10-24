@@ -362,6 +362,97 @@ export async function migrateClientProvider(dataDir: string, seedDir: string | u
   return { changes }
 }
 
+/** The ACP proxy provider as the seed has it, for a data folder whose seed can't be read. */
+const ACP_PROVIDER_BLOCK = [
+  '  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-compatible server. Off until you start the proxy.',
+  '  # See "The ACP proxy" below. Any other OpenAI-compatible server is added in the Models dialog (Add provider).',
+  '  - id: acp',
+  '    name: ACP proxy',
+  '    kind: openai-compat',
+  '    enabled: false',
+  '    local: true',
+  '    base_url: http://127.0.0.1:7461/v1',
+  '    concurrency: 2',
+  '    json_schema: false',
+  '    discover: true',
+  '    models: []'
+]
+
+/**
+ * SCP-44: the seed has an `acp` provider (the api-acp-proxy at 127.0.0.1:7461, switched off). A data folder from before gets it once, in
+ * config/providers.md: the seed's block (with its comments) before the client provider, else before the first search provider. A file that
+ * has a provider with the id `acp` (a custom one with that name too) is left alone. Everything else stays as it is, including comments and
+ * line endings. Running it again changes nothing. A folder without the file is not touched.
+ */
+export async function migrateAcpProvider(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  const changes: string[] = []
+  const file = path.join(dataDir, 'config', 'providers.md')
+  if (!existsSync(file)) return { changes }
+  const text = await fs.readFile(file, 'utf8')
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (lines[0]?.trim() !== '---' || end < 0) return { changes }
+  const isAcp = (block: string) => /^ {2}- id:\s*acp\s*$/.test(block.split('\n')[0]!)
+  if (providerRange(lines, end, isAcp)) return { changes }
+  let block = ACP_PROVIDER_BLOCK
+  const seedFile = seedDir ? path.join(seedDir, 'config', 'providers.md') : ''
+  if (seedFile && existsSync(seedFile)) {
+    const seedLines = (await fs.readFile(seedFile, 'utf8')).split(/\r?\n/)
+    const seedEnd = seedLines.findIndex((l, i) => i > 0 && l.trim() === '---')
+    const r = seedEnd > 0 ? providerRange(seedLines, seedEnd, isAcp) : null
+    if (r) block = seedLines.slice(r.from, r.to)
+  }
+  const client = providerRange(lines, end, (b) => /^ {4}kind:\s*client\b/m.test(b))
+  const search = providerRange(lines, end, (b) => /^ {4}kind:\s*search\b/m.test(b))
+  const orderAt = lines.findIndex((l, i) => i > 0 && i < end && /^search_order:/.test(l))
+  lines.splice(client ? client.from : search ? search.from : orderAt >= 0 ? orderAt : end, 0, ...block)
+  await atomicWrite(file, lines.join(eol))
+  changes.push('config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:7461/v1, switched off)')
+  return { changes }
+}
+
+/**
+ * SCP-44: the client provider has a second named client, `antigravity` (Antigravity CLI takes its own tasks, see `docs/mcp.md`). A
+ * client provider that has a `claude-code` model and no `antigravity` one gets the seed's `antigravity` model (context 1000000) right after
+ * it, at every start; running it again changes nothing. A folder with no client provider or no file is not touched.
+ */
+export async function migrateAntigravityClient(dataDir: string): Promise<MigrationResult> {
+  const changes: string[] = []
+  const file = path.join(dataDir, 'config', 'providers.md')
+  if (!existsSync(file)) return { changes }
+  const text = await fs.readFile(file, 'utf8')
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (lines[0]?.trim() !== '---' || end < 0) return { changes }
+  const have = providerRange(lines, end, (b) => /^ {4}kind:\s*client\b/m.test(b) || /^ {2}- id:\s*client\s*$/.test(b.split('\n')[0]!))
+  if (!have) return { changes }
+  if (lines.slice(have.from, have.to).some((l) => /^\s+- id:\s*antigravity\s*$/.test(l))) return { changes }
+  for (let i = have.from; i < have.to; i++) {
+    const m = new RegExp(String.raw`^(\s+)- id:\s*${CLIENT_MODEL_ID}\s*$`).exec(lines[i]!)
+    if (!m) continue
+    const indent = m[1]!.length
+    let to = i + 1
+    while (to < have.to && (!lines[to]!.trim() || /^\s*/.exec(lines[to]!)![0].length > indent)) to++
+    while (to > i + 1 && !lines[to - 1]!.trim()) to--
+    const pad = ' '.repeat(indent)
+    lines.splice(
+      to,
+      0,
+      `${pad}# Antigravity CLI as a client: it takes its own tasks with get_client_task {client: "antigravity"} (see docs/mcp.md).`,
+      `${pad}- id: antigravity`,
+      `${pad}  family: gemini`,
+      `${pad}  context: 1000000`,
+      `${pad}  vision: true`
+    )
+    await atomicWrite(file, lines.join(eol))
+    changes.push('config/providers.md: added the client/antigravity model (context 1000000)')
+    break
+  }
+  return { changes }
+}
+
 /**
  * Seed prompts and templates are only copied when missing, so an improved seed prompt never reached a data folder that had the old
  * one. At every start, for each file the history knows: when the data file is not the current seed file, but is an earlier seed

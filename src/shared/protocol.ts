@@ -52,7 +52,20 @@ export interface ModelSummary {
 /** A model provider for the Models dialog (search services are left out). */
 export interface ProviderSummary {
   id: string
+  /** Label for the lists (`name` of providers.md, else the id). */
+  name: string
+  /** Added in the Models dialog: it can be edited and removed there, and is always its own kind in the fallback list. */
+  custom: boolean
   kind: string
+  /** The switch in providers.md (`available` also needs a key). */
+  enabled: boolean
+  baseUrl?: string
+  /** Name of the key (`CUSTOM_<ID>_API_KEY` for a custom provider). */
+  apiKeyEnv?: string
+  /** A key is stored or in the environment. */
+  hasKey: boolean
+  /** Send the JSON schema as `response_format`. */
+  jsonSchema: boolean
   local: boolean
   /** Switched on and usable (has a key, or is local). */
   available: boolean
@@ -289,6 +302,8 @@ export interface SnapshotEvent {
   settings: SettingsSummary
   /** Names of secrets that are set (never their values): the SMTP password and provider key variables. */
   secretsSet: string[]
+  /** The key names the UI may set for providers (`api_key_env` of every provider), for the Settings key select. */
+  keyNames: string[]
   /** The MCP server's address while it listens (`http://127.0.0.1:7341/mcp`), else null. */
   mcp: { url: string } | null
   at: string
@@ -300,6 +315,10 @@ export type EngineEvent =
   | { type: 'pong'; id?: string; at: string }
   | SnapshotEvent
   | { type: 'engine.warning'; message: string }
+  /** Answer to `testCustomProvider`: `GET /models` of the address worked (`count` models) or failed (`error`). */
+  | { type: 'provider.tested'; baseUrl: string; ok: boolean; count?: number; error?: string; at: string }
+  /** `saveCustomProvider` or `removeCustomProvider` was refused (`error`), or went through (`id`). */
+  | { type: 'provider.saved'; id?: string; removed?: boolean; error?: string; at: string }
   /** Asks Electron main to render an HTML cover to a PNG and answer with a `coverRendered` command. */
   | { type: 'cover.render'; book: string; htmlPath: string; outPath: string; width: number; height: number }
   | { type: 'agent.state'; agent: string; role: string; state: AgentState; jobId?: string; task?: string; book?: string }
@@ -420,6 +439,15 @@ export type Command =
    * per minute and per day. 0 for `rpm` or `rpd` means no limit; a field left out keeps its value.
    */
   | { type: 'setProviderLimits'; provider: string; concurrency?: number; rpm?: number; rpd?: number }
+  /**
+   * Adds a custom OpenAI-compatible provider to config/providers.md (`custom: true`), or edits it when `id` is given. `free`: local, no
+   * budget. An empty `apiKey` on an edit keeps the stored key. `concurrency` is a number or `auto`.
+   */
+  | { type: 'saveCustomProvider'; id?: string; name: string; baseUrl: string; apiKey?: string; free: boolean; jsonSchema: boolean; concurrency: number | 'auto'; enabled: boolean }
+  /** Removes a custom provider: its entry, stored key, models.md refs and fallback rows. */
+  | { type: 'removeCustomProvider'; id: string }
+  /** Calls `GET /models` of an address (with the key when given) and answers with `provider.tested`. */
+  | { type: 'testCustomProvider'; baseUrl: string; apiKey?: string; id?: string }
   /** The model defaults, LM Studio fields and book limit may be left out: they keep their value. */
   | ({ type: 'saveSettings' } & Omit<SettingsSummary, ModelSettingKey> & Partial<Pick<SettingsSummary, ModelSettingKey>>)
   /** Stores a secret in the Windows credential store. Only the SMTP password and the provider key variables are allowed. */
@@ -462,6 +490,9 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   showModels: true,
   addModel: true,
   setProviderLimits: true,
+  saveCustomProvider: true,
+  removeCustomProvider: true,
+  testCustomProvider: true,
   snapshot: true,
   ping: true,
   coverRendered: true,

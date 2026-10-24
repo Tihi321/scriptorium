@@ -6,6 +6,9 @@ import type { ChatEvent, ChatMessage, ChatRequest, ProviderClient, RequestMeta }
 /** Default lease: how long a client has to answer a task it took before the task goes back to waiting. */
 export const DEFAULT_LEASE_MS = 30 * 60 * 1000
 
+/** The client a task or a lease filter without a `client` stands for: Claude Code (the model `client/claude-code`). */
+export const DEFAULT_CLIENT = 'claude-code'
+
 /** An image in a request (VN Studio's art critic). Scriptorium's own jobs send none. */
 export interface ClientImage {
   type: 'image'
@@ -26,6 +29,8 @@ export interface ClientTask {
   book: string
   agent: string
   unit: string
+  /** The named client that may take it: the id of the `client` model the job asked for (`claude-code`, `antigravity` ...). */
+  client: string
   messages: ChatMessage[]
   /** JSON schema the answer must match (a structured request). */
   schema?: Record<string, unknown>
@@ -48,12 +53,15 @@ export interface ClientTaskSummary {
   book: string
   agent: string
   unit: string
+  client: string
   state: 'waiting' | 'leased'
   ageMs: number
   leaseMsLeft?: number
 }
 
 export interface ClientTaskFilter {
+  /** Which named client takes it. Missing means `claude-code`, so Claude Code never takes Antigravity's jobs and its old prompts keep working. */
+  client?: string
   role?: string
   book?: string
   task?: string
@@ -66,6 +74,8 @@ export interface ClientTaskRequest {
   schema?: Record<string, unknown>
   maxTokens?: number
   images?: ClientImage[]
+  /** The named client the task is for (`req.model` of the request). Missing means `claude-code`. */
+  client?: string
 }
 
 interface Entry {
@@ -112,6 +122,7 @@ export class ClientTaskQueue {
       book: meta.book ?? '',
       agent: meta.agent ?? '',
       unit: meta.unit ?? '',
+      client: req.client || DEFAULT_CLIENT,
       messages: req.messages,
       ...(req.schema ? { schema: req.schema } : {}),
       ...(req.maxTokens ? { maxTokens: req.maxTokens } : {}),
@@ -136,6 +147,7 @@ export class ClientTaskQueue {
       book: k.book,
       agent: k.agent,
       unit: k.unit,
+      client: k.client,
       state: k.leaseUntil === undefined ? ('waiting' as const) : ('leased' as const),
       ageMs: t - k.createdAt,
       ...(k.leaseUntil === undefined ? {} : { leaseMsLeft: Math.max(0, k.leaseUntil - t) })
@@ -154,6 +166,7 @@ export class ClientTaskQueue {
     this.expire()
     for (const { task } of this.entries.values()) {
       if (task.leaseUntil !== undefined) continue
+      if (task.client !== (filter.client || DEFAULT_CLIENT)) continue
       if (filter.role && task.role !== filter.role) continue
       if (filter.book && task.book !== filter.book) continue
       if (filter.task && task.task !== filter.task) continue
@@ -289,7 +302,7 @@ export class ClientProvider implements ProviderClient {
 
   async *chat(req: ChatRequest): AsyncGenerator<ChatEvent, void, void> {
     if (req.signal?.aborted) throw abortError()
-    const { task, done } = this.queue.add({ messages: req.messages, schema: req.schema, maxTokens: req.maxTokens }, req.meta)
+    const { task, done } = this.queue.add({ messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, client: req.model }, req.meta)
     const onAbort = () => void this.queue.cancel(task.id)
     req.signal?.addEventListener('abort', onAbort, { once: true })
     if (req.signal?.aborted) onAbort()

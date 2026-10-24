@@ -173,14 +173,26 @@ describe('migration: the client search provider for an existing data folder', ()
   it('adds the entry and the search_order slot after tavily, keeps everything else, and does it once', async () => {
     const { dir, text, file } = await oldFolder('\n')
     const first = await initDataFolder(dir, seedDir)
-    expect(first.migrated).toEqual([expect.stringMatching(/providers\.md: added the client web search provider.*search_order after tavily/)])
+    // SCP-44: the old folder also gets the client's antigravity model and the acp provider, once
+    expect(first.migrated).toEqual([
+      expect.stringMatching(/providers\.md: added the client web search provider.*search_order after tavily/),
+      expect.stringMatching(/client\/antigravity/),
+      expect.stringMatching(/added the acp provider/)
+    ])
     const after = await readFile(file, 'utf8')
     const parsed = providersSchema.parse(parseMd(after).data)
     expect(parsed.search_order).toEqual(['tavily', 'client-search', 'wikipedia', 'brave'])
     expect(parsed.providers.find((p) => p.id === 'client-search')).toMatchObject({ kind: 'search', engine: 'client', enabled: true, wait_minutes: 10 })
-    expect(parsed.providers.map((p) => p.id)).toEqual(['client', 'tavily', 'wikipedia', 'brave', 'client-search'])
+    expect(parsed.providers.map((p) => p.id)).toEqual(['acp', 'client', 'tavily', 'wikipedia', 'brave', 'client-search'])
     expect(after).toContain('# my own order')
-    expect(after.startsWith(text.slice(0, text.indexOf('# my own order')))).toBe(true)
+    // every line of the old file is still there, in order (the migrations only insert lines)
+    const rest = after.split('\n')
+    const oldLines = text.split('\n')
+    let at = 0
+    for (const line of oldLines.slice(0, oldLines.indexOf('# my own order'))) {
+      at = rest.indexOf(line, at)
+      expect(at, line).toBeGreaterThanOrEqual(0)
+    }
     const second = await initDataFolder(dir, seedDir)
     expect(second.migrated).toEqual([])
     expect(await readFile(file, 'utf8')).toBe(after)

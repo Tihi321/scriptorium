@@ -114,8 +114,13 @@ export function modelNameOf(model: string | null | undefined): string {
 }
 
 const PROVIDER_LABELS: Record<string, string> = { deepseek: 'DeepSeek', lmstudio: 'LM Studio', strata: 'Strata', anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', mock: 'Mock' }
+/** Names of the providers the engine reports (`name` in providers.md), for the ones PROVIDER_LABELS doesn't know: custom providers. */
+let providerNames: Record<string, string> = {}
+export function setProviderNames(providers: { id: string; name: string }[]): void {
+  providerNames = Object.fromEntries(providers.filter((p) => p.name && p.name !== p.id).map((p) => [p.id, p.name]))
+}
 export function providerLabel(provider: string): string {
-  return PROVIDER_LABELS[provider] ?? (provider === 'default' ? 'default' : provider)
+  return PROVIDER_LABELS[provider] ?? providerNames[provider] ?? (provider === 'default' ? 'default' : provider)
 }
 
 /** Colours per provider, as CSS hex strings. */
