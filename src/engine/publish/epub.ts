@@ -13,6 +13,8 @@ export interface EpubChapter {
   screenplay?: boolean
   /** A mystery with puzzles: the puzzles by key (title, clue texts), for the `PUZZLE:` lines. */
   puzzles?: Record<string, PuzzleView>
+  /** A script: the bible character names, so a `C1:` or `petra:` speaker token shows the character's name (SCP-45). */
+  characters?: string[]
   /** A story with choices: the choices at the end (`to` is the 1-based position of the target chapter). */
   choices?: { text: string; to: number }[]
   /** A story with choices: this chapter is an ending. */
@@ -137,7 +139,7 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
     const n = String(i + 1).padStart(2, '0')
     const file = `chapter-${n}.xhtml`
     const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
-    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
+    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles, characters: c.characters })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
     manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
     spine.push(`<itemref idref="ch${n}"/>`)
     navItems.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)

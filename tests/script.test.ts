@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseLightBible, parseScript } from '../src/engine/publish/script'
+import { detectTime, parseLightBible, parseScript, placeAndTime, sceneHead } from '../src/engine/publish/script'
 
 const EXAMPLE = [
   'SCENE: The harbour wall, dusk',
@@ -148,5 +148,48 @@ describe('parseLightBible', () => {
 
   it('gives empty lists for a text without a bible', () => {
     expect(parseLightBible('')).toEqual({ characters: [], places: [], style: '' })
+  })
+})
+
+describe('SCENE parsing (VN Studio’s parseSceneLine rule)', () => {
+  it('splits at the first full stop: place, time and the description after it', () => {
+    expect(sceneHead('A path through Dragon Land, morning. The sky is green. Bubbles pop.')).toEqual({
+      place: 'A path through Dragon Land',
+      time: 'morning',
+      rest: 'The sky is green. Bubbles pop.'
+    })
+    const { scenes } = parseScript('SCENE: The Golden Cave, afternoon. The walls sparkle like gold.\nMARA: Wow.')
+    expect(scenes[0]).toMatchObject({ place: 'The Golden Cave', time: 'afternoon', background: 'The walls sparkle like gold.' })
+  })
+
+  it('reads a place and a time, a place only, and keeps a non-time tail after the comma in the place', () => {
+    expect(sceneHead('The harbour wall, dusk')).toEqual({ place: 'The harbour wall', time: 'dusk', rest: '' })
+    expect(sceneHead('A long road')).toEqual({ place: 'A long road', time: '', rest: '' })
+    // four words, but not a time: the whole head is the place
+    expect(sceneHead('Dragon Land, near a bubble-gum volcano. The sky is green.')).toEqual({
+      place: 'Dragon Land, near a bubble-gum volcano',
+      time: '',
+      rest: 'The sky is green.'
+    })
+    // a long tail is not a time, even with a time word in it: the whole head is the place
+    expect(sceneHead('The cellar, under the old inn, beside the river')).toMatchObject({ place: 'The cellar, under the old inn, beside the river', time: '' })
+    expect(sceneHead('The cellar, under the old inn by the river, long after the midnight bell')).toMatchObject({ place: 'The cellar, under the old inn by the river, long after the midnight bell', time: '' })
+  })
+
+  it('keeps the time as written and accepts Croatian time words', () => {
+    expect(sceneHead('Grassy hill with standing stones, Dragon Land, midday')).toMatchObject({ place: 'Grassy hill with standing stones, Dragon Land', time: 'midday' })
+    expect(sceneHead('The kitchen, late afternoon')).toMatchObject({ place: 'The kitchen', time: 'late afternoon' })
+    expect(sceneHead('Šuma, ujutro')).toMatchObject({ place: 'Šuma', time: 'ujutro' })
+    expect(sceneHead('Kuća, navečer')).toMatchObject({ place: 'Kuća', time: 'navečer' })
+    expect(detectTime('late afternoon')).toBe('afternoon')
+    expect(detectTime('navečer')).toBe('evening')
+    expect(detectTime('near a bubble-gum volcano')).toBeNull()
+  })
+
+  it('leaves a ## heading on the plain last-comma rule', () => {
+    expect(placeAndTime('The attic, noon')).toEqual({ place: 'The attic', time: 'noon' })
+    const { scenes } = parseScript('## The attic, noon\nDust and a low beam.\nMARA: Hm.')
+    expect(scenes[0]).toMatchObject({ place: 'The attic', time: 'noon', background: 'Dust and a low beam.' })
+    expect(scenes[0]!.beats).toEqual([{ type: 'line', speaker: 'MARA', expression: '', text: 'Hm.' }])
   })
 })

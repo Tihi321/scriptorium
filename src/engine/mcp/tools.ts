@@ -10,6 +10,7 @@ import { DEFAULT_CLIENT, DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
 import { parseLightBible, parseScript } from '../publish/script'
+import { readVnPack, writeVnPack } from '../publish/vnPack'
 import { musicCues, parseScreenplay, runtimeOf } from '../publish/screenplay'
 import { puzzleEntrySchema } from '../../shared/puzzles'
 import type { PuzzleEntry } from '../../shared/puzzles'
@@ -338,6 +339,69 @@ export function registerTools(server: McpServer, engine: Engine): void {
             }
           }),
         puzzles: await puzzlesOf(engine, slug)
+      }
+    })
+  )
+
+  server.registerTool(
+    'build_vn_pack',
+    {
+      description:
+        'Compiles a visual novel book (a book with script: true, not a screenplay) into the language-independent VN pack (contract version 2): writes books/<slug>/vn/pack.json (the fixed template: keys, looks, scene and cue descriptions, branch targets, puzzle cores, packHash, sourceHash) and books/<slug>/vn/text/<sourceLang>.json (the source catalog: the only translatable text), and sets vn_version: 2 in book.md. The chapter files stay the authoring source; the pack is compiled from them. Returns {book, packPath, textPath, lang, packHash, sourceHash, chapters, scenes, beats, characters, places, puzzles, warnings}. A speaker line whose label matches no bible character or alias gets a synthetic character (speaker_1) and a warning; an unknown place keeps placeKey: null and its placeText; an ON SCREEN entry that is not a character or alias (a prop, a page, a crowd, a sentence) is dropped with a warning. Run it for an older visual novel that was published before the pack existed; get_vn_pack reports a pack as stale when the authored files changed since it was made.',
+      inputSchema: { book: z.string().describe('Book slug') },
+      annotations: WRITE
+    },
+    run(async ({ book: slug }: { book: string }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.screenplay === true) fail(`"${slug}" is a screenplay (its format is ${b.data.format}), not a visual novel: it has no VN pack`)
+      if (b?.data.script !== true) fail(`"${slug}" is not a visual novel script (its format is ${b?.data.format}): build_vn_pack needs a book with script: true`)
+      const r = await writeVnPack(engine.books, slug)
+      const sceneCount = r.pack.chapters.reduce((n, c) => n + c.scenes.length, 0)
+      const beatCount = r.pack.chapters.reduce((n, c) => n + c.scenes.reduce((m, s) => m + s.beats.length, 0), 0)
+      return {
+        book: slug,
+        packPath: r.packPath,
+        textPath: r.textPath,
+        lang: r.text.lang,
+        packHash: r.pack.packHash,
+        sourceHash: r.sourceHash,
+        chapters: r.pack.chapters.length,
+        scenes: sceneCount,
+        beats: beatCount,
+        characters: r.pack.characters.length,
+        places: r.pack.places.length,
+        puzzles: r.pack.puzzles.length,
+        warnings: r.warnings
+      }
+    })
+  )
+
+  server.registerTool(
+    'get_vn_pack',
+    {
+      description:
+        'The VN pack of a visual novel book (a book with script: true, not a screenplay) as JSON: {book, packPath, textPath, packHash, sourceHash, packVersion, lang, stale, problems, warnings, pack, text}. `pack` is the language-independent template (vn/pack.json: characters, places, scenes with beats and cue descriptors, choices, puzzles) and `text` is the source catalog (vn/text/<lang>.json: the only translatable text). `stale: true` means the authored files changed since the pack was made (sourceHash mismatch): run build_vn_pack again and re-translate. `problems` lists a packHash mismatch and catalog keys that are missing, extra, empty or carry a script label or an id. Refused for a book with no pack: run build_vn_pack first.',
+      inputSchema: { book: z.string().describe('Book slug') },
+      annotations: READ
+    },
+    run(async ({ book: slug }: { book: string }) => {
+      const b = await engine.books.read(await needBook(slug))
+      if (b?.data.screenplay === true) fail(`"${slug}" is a screenplay (its format is ${b.data.format}), not a visual novel: it has no VN pack`)
+      if (b?.data.script !== true) fail(`"${slug}" is not a visual novel script (its format is ${b?.data.format}): get_vn_pack needs a book with script: true`)
+      const r = await readVnPack(engine.books, slug)
+      return {
+        book: slug,
+        packPath: r.packPath,
+        textPath: r.textPath,
+        packHash: r.packHash,
+        sourceHash: r.sourceHash,
+        packVersion: r.pack.version,
+        lang: r.text.lang,
+        stale: r.stale,
+        problems: r.problems,
+        warnings: r.warnings,
+        pack: r.pack,
+        text: r.text
       }
     })
   )

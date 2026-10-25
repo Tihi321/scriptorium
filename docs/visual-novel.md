@@ -25,6 +25,8 @@ A book is a folder `books/<slug>/` in the data folder (default `~/Scriptorium`).
 | `chapters/ch-01.md` ... | Frontmatter `n`, `title`, `words`; the body is the script | The scenes and the text |
 | `outline.md` | Chapter titles and summaries; for a book with choices also the chapter map (`choices`, `ending`) | Chapter select, scene summaries, the branches |
 | `cover-brief.md` | One paragraph describing a cover picture | Title-screen image |
+| `vn/pack.json` | The language-independent VN pack (template): keys, looks, scene and cue descriptions, branch targets, puzzle cores, `packHash`, `sourceHash` (`vn_version: 2` in `book.md`) | The structure VN Studio imports; never translated, never hand-edited |
+| `vn/text/<lang>.json` | The source catalog: the only translatable text (title, titles, names, line and narration text, puzzle prose) | Book Translator's input; VN Studio's source edition |
 | `out/<slug>.epub` | The same script laid out for reading | Not needed by the app |
 
 `bible/bible.md` example:
@@ -48,7 +50,7 @@ A chapter body is read **line by line**. Empty lines mean nothing. Each line is 
 | Line | Pattern | Meaning |
 | --- | --- | --- |
 | Scene break | `---` (or `***`, `___`) | A transition inside the chapter (fade to black) |
-| Scene | `SCENE: <place>, <time>` | A new scene: a new background. Also accepted: a markdown heading `## <place>` |
+| Scene | `SCENE: <place>, <time>. <description>` | A new scene: a new background. The text is split at the **first full stop**: what follows is the scene's description. In the head before it, the **last comma** starts the time only when that tail is at most four words and names a known time (`morning`, `midday`, `late afternoon`, `dusk`, `night`, Croatian `jutro`, `podne`, `navečer` …); otherwise the whole head is the place. Also accepted: a markdown heading `## <place>` (its last comma still splits place and time) |
 | Picture | `CG: <description>` | A picture over the whole screen (a key moment). It stays until `CG: none`, `END CG` or the next `SCENE` |
 | Close-up | `INSERT: <description>` | A thing or a page shown up close (a letter, a sign, an object). Same rules as `CG:` |
 | Sound effect | `SFX: <description>` (also `SOUND:`) | One sound, played once |
@@ -60,6 +62,8 @@ A chapter body is read **line by line**. Empty lines mean nothing. Each line is 
 | Testimony | `TESTIMONY: <witness>`, speaker lines, `END TESTIMONY` | The statements of a cross-examination |
 | On screen | `ON SCREEN: Name (look), Name (look), ...` | Who is visible from now on, each with how they look right now (the bracket is optional). Only characters: a thing, a page or a crowd goes to `INSERT:` or narration |
 | Speaker line | `NAME: words` or `NAME (expression): words` | A text box with a name tag. NAME is in capitals |
+| Narrator | `NARRATION: words`, `NARRATOR (calm): words`, `N: words` | A narrator text box (no name tag). The label is not part of the text. (In a screenplay `NARRATOR:` is a voice-over speaker instead.) |
+| Speaker token | `C1: words`, `petra: words`, `petra#1 (worried): words` | A line whose speaker is the first bible character (`C<n>`), a character's key, or one of its alias keys. For a script written with stable keys instead of names; the label is never shown |
 | Narration | anything else | A narrator text box (no name tag): what the reader sees, actions, glances. Present tense |
 
 The patterns the renderer uses (`src/engine/publish/xhtml.ts`, JavaScript regular expressions):
@@ -68,12 +72,14 @@ The patterns the renderer uses (`src/engine/publish/xhtml.ts`, JavaScript regula
 const SCENE = /^\**\s*scene\s*:\s*\**\s*(.+?)\s*\**$/i
 const CAST  = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
 const LINE  = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
+const NARRATION = /^\**\s*(?:n|narration|narrator|narracja|pripovjeda[čc])\s*\**(?:\s*\([^)]*\))?\s*:\**\s*(.*)$/iu
+const SPEAKER_TOKEN = /^\**\s*(C\d+|[a-z][a-z0-9_]*(?:#[1-9]\d*)?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
 // copied from VN Studio (src/engine/vn/script.ts), which reads the same lines; Croatian keywords too
 const CUE     = /^\**\s*(CG|SLIKA|INSERT|SFX|SOUND|ZVUK|AMBIENCE|ATMOSFERA)\s*:\s*\**\s*(.*?)\s*\**$/iu
 const END_CG  = /^\**\s*(?:END\s+CG|KRAJ\s+SLIKE)\s*\**$/iu
 ```
 
-The cue lines are checked right after `SCENE` and before `ON SCREEN` and the speaker lines, so `CG:` is never a speaker called "CG". `CG: none`, `INSERT: none`, `AMBIENCE: none` (also `ništa`, `nista`) and `END CG` mean "stop". A cue with no text is ignored.
+The cue lines are checked right after `SCENE` and before `ON SCREEN` and the speaker lines, so `CG:` is never a speaker called "CG". `CG: none`, `INSERT: none`, `AMBIENCE: none` (also `ništa`, `nista`) and `END CG` mean "stop". A cue with no text is ignored. A speaker token only counts when it names a bible character: an unknown lower-case key stays narration. No cue, puzzle or narrator keyword is ever a speaker, even when its line does not fit the pattern (`CLUE: no slash` is narration). A stage direction that looks like a speaker label (`SMASH CUT TO: ...`, `FADE TO BLACK: ...`, `INT. KITCHEN: ...`) is narration too, never a character.
 
 The four puzzle lines (`CLUE`, `EVIDENCE`, `PUZZLE`, `TESTIMONY` and `END TESTIMONY`) are checked straight after the cue lines above and before `ON SCREEN` and the speaker lines, so `CLUE:` is never a speaker called "CLUE". Their regular expressions are in [Puzzles](#puzzles-mystery-with-puzzles). No puzzle keyword is a picture or sound keyword, and none is a screenplay line (`SHOT`, `MUSIC`, `SFX`, `TITLE`; [screenplay.md](screenplay.md)): a screenplay does not read the puzzle lines, and a visual novel does not read `SHOT`, `MUSIC` or `TITLE`.
 
@@ -237,6 +243,26 @@ A suggested pipeline for the app. None of it exists yet.
    - **Pixel-drawing tool**: the same descriptions go to a model that draws with the tool's commands (a small palette, a fixed canvas size such as 320x180 for backgrounds and 64x96 for sprites). The descriptions are concrete on purpose (colours, objects in view), which suits drawing step by step.
 4. **Assemble**: for every line, the background + the sprites on screen + the text box. Save as a project for a visual novel engine (for example Ren'Py, which reads a script very like this one), or play it in the app itself.
 
+## The VN pack (v2)
+
+Since SCP-45 a published visual novel also ships a **language-independent pack**: two files that structure and text kept apart, made by Scriptorium from the same authored folder. The chapter files stay the human authoring and review format; nobody edits the pack by hand.
+
+```text
+books/<slug>/
+  vn/pack.json                  # template: structure, IDs, art fields. Never translated.
+  vn/text/<sourceLang>.json     # source catalog: display text only. The only translatable document.
+```
+
+- **`vn/pack.json`** is the template: `format: "vn-pack"`, `version: 2`, `packHash`, and `book` (`slug`, `format`, `kind` `linear`/`choice`, `primaryLang`, `genre`, `style`, `author`, `coverBrief`, `sourceHash`), `characters` (`key`, `looks`, `voice`, `aliasKeys`), `places` (`key`, `name` as a bible reference, `looks`), `chapters` (`n`, `isEnding`, `choices` with `index` and `to`, `scenes`) and `puzzles`. A scene has `id`, `placeKey`, `placeText`, `time`, `description` (the background prompt: the `SCENE:` line's rest after its first full stop, the narration right after `SCENE:` and the place looks), `breakBefore` and `beats`. A beat is exactly `cast`, `line` (`speakerKey`, `expression`, an optional `aliasKey`), `narration` or `puzzle`; a line without a bracket carries the speaker's last expression in the scene (`neutral` when the speaker has none there yet), exactly as the reader keeps it; `CG`/`INSERT`/`SFX`/`AMBIENCE`/`END CG` are not beats: they attach to the next beat as descriptors (`image {display, text, key?}`, `sfx {text}`, `ambience {text}`, or `null` to hide/stop), and `---` sets `breakBefore` on the next scene. There is no display text in it: a line's words, a chapter or scene title, a name, a choice or an ending live in the catalog.
+- **`vn/text/<lang>.json`** is the catalog: `format: "vn-text"`, `version: 2`, `lang`, `packHash`, `title`, `blurb`, `chapterTitles`, `sceneTitles`, `choiceTexts` (`"1:0"`), `endings` (`"4"`), `characterNames` (character and alias keys to display names), `beats` (line and narration beat id to text) and `puzzles` (`names`, `text`). Every value is one non-empty line; keys are opaque; it carries no structure and no asset id.
+- **IDs are fixed and engine-owned** (never model-written): characters and places by VN Studio's key rule (`Petra` → `petra`, `Šime` → `sime`, `Petra's House` → `petra_s_house`, a collision gets `_2` in bible order with a warning); aliases `<charKey>#<n>` in the bible's `Aliases:` order; scenes `ch01.s01` and beats `ch01.s01.b001`, numbered only over the scenes that have a beat; choices `"<chapter>:<index>"`; endings `"<chapter>"`; puzzles and clue/evidence/testimony ids exactly as in `bible/puzzles.md`. `NARRATION:`/`NARRATOR:`/`N:` lines and narration are beats; a line spoken under an alias keeps `aliasKey` (`petra#1`) so VN Studio shows the alias as the name tag, without a name entering the template.
+- **Unknown names never fail a published book**: a speaker line whose label matches no bible character or alias gets a synthetic character (`speaker_1`, `speaker_2`, … in first-seen order, with empty looks); an unknown place keeps `placeKey: null` and its `placeText` (VN Studio draws the background from the text) and no place is invented; an `ON SCREEN:` entry that is not a bible character or alias (a prop, a page, a crowd, a whole sentence) is not a cast entry and is dropped, never made into a synthetic character. All of these are warnings.
+- **Hashes**: `packHash` is the SHA-256 of the canonical JSON of the pack without the `packHash` key (object keys sorted at every depth). `sourceHash` is the SHA-256 over `outline.md`, `bible/bible.md`, `bible/puzzles.md` (when present), `cover-brief.md` (when present) and `chapters/*.md` sorted by the first number in the file name, each as `relpath\0bytes\0`. `book.md` is not hashed: the publisher writes cover fields into it after the pack is made. The pack file is pretty-printed for diffs; the hash always uses canonical JSON.
+- **Staleness**: a pack whose `sourceHash` no longer matches the authored files is stale (a chapter, outline, bible or puzzle edited since it was made). `get_vn_pack` reports `stale: true` and warns; run `build_vn_pack` again and re-translate. A translated edition whose `packHash` does not match the pack is rejected by VN Studio.
+- **What it is not**: the game's UI strings (VN Studio's own), asset ids and files (`backgroundId`, `cg_`/`sfx_`/`amb_` keys and the prompts are VN Studio's, derived from this untranslated template), and the EPUB (a reader artifact).
+
+Publishing any visual novel (a book with `script: true`, not a screenplay) compiles the pack and writes `vn_version: 2` into `book.md`; an older book gets one with `build_vn_pack {book}`. `get_vn_pack {book}` returns the pack and catalog with both hashes and the stale check. The book's own `get_script` JSON is unchanged.
+
 ## Choices
 
 A book with choices (`format: choice-visual-novel` or `kids-choice-visual-story`) is a map of chapters instead of a line. The map is in the frontmatter of `outline.md`, never in the chapter text:
@@ -301,7 +327,7 @@ Suggested, so the parser and the image steps agree on one structure:
 }
 ```
 
-`SCENE: <place>, <time>`: the text before the last comma is the place, the rest the time. If there is no comma, the whole text is the place.
+`SCENE: <place>, <time>. <description>`: the text is split at the first full stop; what follows is the scene's description (it starts the `background`). In the head, the last comma starts the time only when that tail is at most four words and names a known time (English or Croatian); otherwise the whole head is the place and `time` is empty. The time stays as written (`midday`, `late afternoon`, `ujutro`): VN Studio canonicalises it. `## heading` scenes keep the plain last-comma rule.
 
 The MCP tool `get_script {book, chapter?}` returns this JSON for a script book at any stage (`parseScript` and `parseLightBible` in `src/engine/publish/script.ts`). A `## heading` also opens a scene, the narration right after a `SCENE:` line up to the first cast or speaker line is the scene's `background`, a `---` is a `break` beat, and speaker names are written as the bible has them when one matches (else as they were written, in capitals).
 
@@ -329,4 +355,5 @@ Scriptorium can turn a published prose book into a visual novel script (the scri
 - Choices: `prompts/_choices.md` holds the extra instructions for planning, writing and reviewing a story with choices.
 - Prompts: `architect/outline_vn.md` (looks of characters and places for the bible), `writer/draft_chapter_vn.md` and `writer/rewrite_chapter_vn.md` (the script grammar), `line-editor/review_vn.md` (dialogue, voices and the script form), `humanizer/humanize_chapter_vn.md` (livelier lines and narration with the `SCENE:`, `ON SCREEN:`, speaker and picture and sound lines kept one for one; the engine keeps the original chapter if their number or order changes, or the kinds and order of the cue lines; the cue text is asked to stay word for word, but only reworded text is let through). Other roles use their usual prompts with the format guidance. Edit them in the data folder's `prompts/` to change the style of the scripts.
 - The prompts ask for the picture and sound lines (`CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`, `END CG`, with the limits above), for `ON SCREEN:` with characters only, and, in the outline, for `aliases` per character. The outline handler writes the `Aliases:` sentence before `Voice:` (`scriptBible.ts`: `cleanAliases`, `scriptBibleLine`); an adaptation's aliases from the source book are merged in. Every reviewer of a script book gets a note that the cue lines are picture and sound cues, not prose; the line editor checks their form only. The tighten request of a script keeps them.
-- The EPUB and the in-app reader show the script with scene headings, an "On screen" line, bold speaker names, italic narration and the picture and sound lines as small grey italic notes (`Picture:`, `Close-up:`, `Sound:`, `Ambience:`; `END CG`, `CG: none` and `AMBIENCE: none` are not shown).
+- The EPUB and the in-app reader show the script with scene headings, an "On screen" line, bold speaker names, italic narration and the picture and sound lines as small grey italic notes (`Picture:`, `Close-up:`, `Sound:`, `Ambience:`; `END CG`, `CG: none` and `AMBIENCE: none` are not shown). A `NARRATION:`/`NARRATOR:`/`N:` line is shown as narration without the label, and a `C1:`/`petra:`/`petra#1:` speaker token as the character's name (`publish/xhtml.ts` gets the bible names).
+- The VN pack (see "The VN pack (v2)") is written by the publisher for every visual-novel book (`pipeline/handlers.ts`, `publish/vnPack.ts`; a failure is a warning and the book still publishes), and on demand with `build_vn_pack {book}`; `get_vn_pack {book}` reads it back with the hashes and the stale check. A failed pack (an empty catalog value, a puzzle clue with no prose) leaves the book published without a pack; fix the chapter or `bible/puzzles.md` and run the tool again.
