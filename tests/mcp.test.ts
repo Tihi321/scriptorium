@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -888,6 +888,31 @@ describe('MCP: the prompt once, waiting for a book, absolute paths, book models 
     expect((await call(c, 'get_vn_pack', { book: 'film' })).raw).toMatch(/is a screenplay/)
     await env!.engine.books.create('vn2', { title: 'VN 2', format: 'visual-novel', stage: 'drafting', target_words: 5000, script: true }, '')
     expect((await call(c, 'get_vn_pack', { book: 'vn2' })).raw).toMatch(/run build_vn_pack first/)
+  })
+
+  it('reads a picture book back through get_script and get_vn_pack (SCP-46)', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await cp(path.resolve(__dirname, 'fixtures/vn-pack/picture-book'), env!.engine.books.dir('puddle-duck'), { recursive: true })
+    const built = (await call(c, 'build_vn_pack', { book: 'puddle-duck' })).data
+    expect(built).toMatchObject({ book: 'puddle-duck', lang: 'en', chapters: 1, scenes: 14, characters: 3, places: 4, puzzles: 0 })
+    expect(built.warnings).toEqual([])
+    const got = (await call(c, 'get_vn_pack', { book: 'puddle-duck' })).data
+    expect(got.stale).toBe(false)
+    expect(got.problems).toEqual([])
+    expect(got.pack.book.format).toBe('kids-picture-book')
+    const narration = got.pack.chapters[0].scenes.flatMap((s: { beats: { id: string; type: string }[] }) => s.beats.filter((b) => b.type === 'narration'))
+    expect(narration).toHaveLength(14)
+    expect(Object.keys(got.text.beats).sort()).toEqual(narration.map((b: { id: string }) => b.id).sort())
+    const script = (await call(c, 'get_script', { book: 'puddle-duck' })).data
+    expect(script.format).toBe('kids-picture-book')
+    expect(script.chapters[0].scenes).toHaveLength(14)
+    for (const scene of script.chapters[0].scenes) {
+      expect(scene.place).toMatch(/^The (garden|path|pond|kitchen)$/)
+      expect(scene.beats.filter((b: { type: string }) => b.type === 'cue' || b.type === 'line')).toEqual([])
+      expect(scene.beats[0].type).toBe('cast')
+    }
+    expect((await call(c, 'get_screenplay', { book: 'puddle-duck' })).raw).toMatch(/not a screenplay/)
   })
 
   it('refresh_factbase refuses a fiction book', async () => {

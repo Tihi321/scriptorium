@@ -206,6 +206,13 @@ export const formatEntrySchema = z.looseObject({
    * Never picked by a topic: only a story that fixes the format gets it.
    */
   puzzles: z.boolean().default(false),
+  /**
+   * A children's picture book (needs `script: true`): one page per scene, no dialogue and no cue lines. Each page starts with a `SCENE:` line whose
+   * second sentence describes the picture, then one `ON SCREEN:` line names who is in the picture, then one to three short narration sentences go
+   * under it. The writer, architect, line editor and humanizer use the `_pb` prompts, and the publisher writes the v2 VN pack like for any script
+   * (a page is a scene). Never picked by a topic: only a story that fixes the format gets it (docs/visual-novel.md "Picture books").
+   */
+  picture_book: z.boolean().default(false),
   /** [min, max] seconds of film the whole screenplay should run (screenplay formats). */
   runtime: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
   /**

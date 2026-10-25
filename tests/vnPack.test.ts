@@ -25,7 +25,7 @@ import { scriptToXhtml } from '../src/engine/publish/xhtml'
 import { uniqueVnKey, vnKey } from '../src/engine/publish/vnKey'
 
 const FIXTURES = path.resolve(__dirname, '../tests/fixtures/vn-pack')
-const names = ['soother', 'choice', 'mystery-puzzle'] as const
+const names = ['soother', 'choice', 'mystery-puzzle', 'picture-book'] as const
 const dirOf = (name: string) => path.join(FIXTURES, name)
 
 const readJson = async <T>(file: string): Promise<T> => JSON.parse(await fs.readFile(file, 'utf8')) as T
@@ -285,6 +285,58 @@ describe('the mystery-puzzle fixture: puzzles, clues, evidence, testimony', () =
       murder: 'The body was found in the library.'
     })
     expect(catalogProblems(pack, text)).toEqual([])
+  })
+})
+
+describe('the picture-book fixture (SCP-46): one page per scene, captions only', () => {
+  it('compiles 12 to 16 pages of a kids-picture-book with no picture or sound cues and no speaker lines', async () => {
+    const { pack, text, warnings } = await compile('picture-book')
+    expect(warnings).toEqual([])
+    expect(pack.book.format).toBe('kids-picture-book')
+    expect(pack.book.kind).toBe('linear')
+    const scenes = pack.chapters.flatMap((c) => c.scenes)
+    expect(scenes.length).toBeGreaterThanOrEqual(12)
+    expect(scenes.length).toBeLessThanOrEqual(16)
+    for (const scene of scenes) {
+      // a page is a scene: a cast beat for who is in the picture, then 1-3 narration beats (the words under it)
+      expect(scene.beats.length).toBeGreaterThanOrEqual(2)
+      expect(scene.breakBefore).toBe(false)
+      expect(scene.description.length, scene.id).toBeGreaterThan(20)
+      expect(scene.beats[0]!.type).toBe('cast')
+      const narration = scene.beats.slice(1)
+      expect(narration.length).toBeLessThanOrEqual(3)
+      expect(narration.every((b) => b.type === 'narration')).toBe(true)
+      for (const beat of scene.beats) {
+        expect(beat.type === 'narration' || beat.type === 'cast').toBe(true)
+        expect(beat).not.toHaveProperty('image')
+        expect(beat).not.toHaveProperty('sfx')
+        expect(beat).not.toHaveProperty('ambience')
+      }
+    }
+    // the page captions (narration text) are in the catalog only, one value per narration beat
+    const narration = scenes.flatMap((s) => s.beats.filter((b) => b.type === 'narration').map((b) => b.id))
+    expect(Object.keys(text.beats).sort()).toEqual(narration.sort())
+    expect(pack.puzzles).toEqual([])
+    for (const id of narration) expect(text.beats[id], id).toBe(text.beats[id]!.replace(/\s+/g, ' ').trim())
+  })
+
+  it('reads the pages back as scenes with the picture in the SCENE line and the caption after ON SCREEN', async () => {
+    const { book: authored } = await compile('picture-book')
+    const body = authored.chapters[0]!.body
+    const pages = parseScript(body, ['Mira', 'Pip', 'Mama'], [
+      { name: 'Mira', aliases: [] },
+      { name: 'Pip', aliases: [] },
+      { name: 'Mama', aliases: [] }
+    ]).scenes
+    expect(pages).toHaveLength(14)
+    for (const page of pages) {
+      // the picture description is part of the place line, so it never becomes a beat
+      expect(page.place).toMatch(/^The (garden|path|pond|kitchen)$/)
+      expect(page.beats.filter((b) => b.type === 'cue')).toEqual([])
+      expect(page.beats.filter((b) => b.type === 'line')).toEqual([])
+      expect(page.beats[0]!.type).toBe('cast')
+      expect(page.beats.slice(1).every((b) => b.type === 'narration')).toBe(true)
+    }
   })
 })
 

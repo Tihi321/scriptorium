@@ -196,6 +196,29 @@ formats:
       chapter. Short chapters, simple words, vivid pictures, humour and warmth. Choices are fun and clear (the cave or the
       river, ask the owl or follow the footprints). Every ending is happy, funny or surprising in a nice way: no bad or scary
       endings, and nobody gets hurt.
+  - id: kids-picture-book
+    name: Picture book for children
+    enabled: true
+    script: true
+    picture_book: true
+    kinds: [juvenile-visual-novel]
+    juvenile: true
+    age_band: "3-6"
+    words: [150, 900]
+    chapters: [1, 1]
+    read_aloud: true
+    research: false
+    guidance: |
+      A children's picture book for ages three to six: one illustrated page after another, with one to three short sentences under
+      each picture, read aloud by an adult. Tell the story in 12 to 16 pages, one scene per page, with a clear beginning, a small
+      problem, a kind solution and a warm ending. Each page starts with a SCENE: line whose second sentence describes the picture:
+      the place and the time first, then who is in the picture, what they do and what is around them, so an illustrator can draw it.
+      Then one ON SCREEN: line names who is in the picture, with a few words on how they look on that page. Separate the people with commas
+      (a semicolon is fine too). Then one to three short narration sentences: the words under the picture, in simple everyday words a child of
+      three to six knows, present tense, with a steady read-aloud rhythm. Never write speaker lines (NAME: words): a picture book has no
+      dialogue lines, so what someone says goes into the narration or stays in the picture. Never write CG:, INSERT:, SFX: or AMBIENCE: lines,
+      and never write --- between pages: every page follows the one before it. The same child looks the same on every page. Nothing frightening
+      happens, nobody gets hurt, and every problem is solved kindly. The story is linear, with no choices.
   - id: nonfiction-short
     name: Short non-fiction book
     enabled: true
@@ -371,6 +394,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `script`: a visual novel script instead of prose: SCENE lines, short narration, ON SCREEN lines for who is shown, and speaker lines (`NAME (expression): words`). The writer and the line editor use the `_vn` prompts (`draft_chapter_vn.md`, `rewrite_chapter_vn.md`, `review_vn.md`), the other roles their plain ones with the format guidance, and the EPUB and the reader lay the chapters out as a script. The visual novel formats are for topics of kind `visual-novel` and `juvenile-visual-novel`, so they are never picked for an ordinary fiction topic.
 - `screenplay`: a screenplay for a short film or cartoon (with `script: true`, so it keeps the SCENE places of the bible, the tighten text, adaptation through `adapt_book` and the script layout of the EPUB and the reader). Chapters are sequences of the film, written as shots (`SHOT (framing, move, 6s): what we see`, `ON SCREEN:`, `MUSIC:`, `SFX:`, `TITLE:`, `NARRATOR:` and `NAME (V.O.):` voice-over, `NAME (delivery):` dialogue). The architect, writer and line editor use the `_sp` prompts (`outline_sp.md`, `draft_chapter_sp.md`, `rewrite_chapter_sp.md`, `review_sp.md`; a role without one uses its plain prompt, never the `_vn` one), and `get_screenplay` returns the parsed film. The screenplay formats are for topics of kind `video` and `juvenile-video` (all switched off in `topics.md`) and for a story that fixes the format (`add_story` with `format`, `adapt_book`): they are never picked for a story with no topic. Leave `humanize: false`. See `docs/screenplay.md`.
 - `puzzles`: a mystery with logic puzzles (with `script: true`). The puzzles are made by code (VN Studio's `vno_puzzle_generate`) and handed over in the story brief (`add_story {puzzles}`); the architect places each in a chapter (`bible/puzzles.md`), the writers plant its clues as `CLUE:` lines and write the `PUZZLE:` line, `EVIDENCE:` and `TESTIMONY:` lines, and the continuity review checks that every clue is planted before its puzzle. Scriptorium has no solver. Never picked by a topic: only a story that fixes the format gets it. Leave `humanize: false`. See `docs/visual-novel.md` "Puzzles".
+- `picture_book`: a children's picture book (with `script: true`): one page per scene, one picture per page and one to three short narration sentences under it, with no speaker lines and no `CG:`/`INSERT:`/`SFX:`/`AMBIENCE:` cues. The architect, writer, line editor and humanizer use the `_pb` prompts (`outline_pb.md`, `draft_chapter_pb.md`, `rewrite_chapter_pb.md`, `review_pb.md`, `humanize_chapter_pb.md`), and the publisher writes the v2 VN pack like for any script: a page is a scene, the picture description stays in the SCENE line and the words under the picture are the scene's narration. Never picked by a topic: only a story that fixes the format gets it (`add_story` with `format`); `adapt_book` refuses a picture-book format. See `docs/visual-novel.md` "Picture books".
 - `runtime`: `[min, max]` seconds of film a screenplay format should run. The writers are told the runtime and the chapter's share of it; `get_screenplay` reports the real one.
 - `choices`: a story with choices (a choose-your-path book or a visual novel with choices). The architect plans a map of chapters: some end with two or three choices, each leading to a later chapter, and the story has at least two endings. The writer sees only the chapters that can lead to the one it writes, the reviewers read every path, and the EPUB and the reader end those chapters with links to the chapters the choices lead to ("The End" on an ending). The extra instructions are in `prompts/_choices.md`. The choice formats are for topics of kind `interactive-fiction`, `juvenile-interactive-fiction`, `visual-novel` and `juvenile-visual-novel`. Short formats only (not `long`).
 - `reviewers`: optional list of reviewer roles to override the default set. The default set is continuity, developmental, line, copy, beta reader and originality, plus child safety for juvenile formats and read-aloud for read-aloud formats.

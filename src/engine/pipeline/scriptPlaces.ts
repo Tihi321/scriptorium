@@ -19,12 +19,22 @@ const placeOf = (text: string): { place: string; time: string } => {
   return { place: parts.slice(0, end).join(', '), time: parts.slice(end).join(', ') }
 }
 
+/**
+ * A `SCENE:` text split at its first full stop: the head (place and time) and what follows it (the scene's picture description, SCP-46). The
+ * head alone is split for place and time, so commas in the picture sentence never truncate it.
+ */
+const sceneHeadAndRest = (text: string): { head: string; rest: string } => {
+  const t = text.trim()
+  const m = /^(.*?)\.(?=\s|$)\s*(.*)$/s.exec(t)
+  return m ? { head: m[1]!.trim(), rest: m[2]!.trim() } : { head: t, rest: '' }
+}
+
 /** The place of every `SCENE:` line of a script, in order. */
 export function scenePlaces(body: string): string[] {
   const out: string[] = []
   for (const raw of body.replace(/\r\n/g, '\n').split('\n')) {
     const m = SCENE.exec(raw.trim())
-    if (m) out.push(placeOf(m[1]!).place)
+    if (m) out.push(placeOf(sceneHeadAndRest(m[1]!).head).place)
   }
   return out
 }
@@ -48,7 +58,8 @@ export function canonicalScenes(body: string, places: string[]): CanonicalScenes
   const lines = body.replace(/\r\n/g, '\n').split('\n').map((raw) => {
     const m = SCENE.exec(raw.trim())
     if (!m) return raw
-    const { place, time } = placeOf(m[1]!)
+    const { head, rest } = sceneHeadAndRest(m[1]!)
+    const { place, time } = placeOf(head)
     if (!place) return raw
     const same = places.filter((p) => entryKey(p) === entryKey(place) || sameName(p, place))
     const exact = same.filter((p) => entryKey(p) === entryKey(place))
@@ -56,7 +67,8 @@ export function canonicalScenes(body: string, places: string[]): CanonicalScenes
     if (pick) {
       if (pick === place) return raw
       renamed.push({ from: place, to: pick })
-      return `SCENE: ${pick}${time ? `, ${time}` : ''}`
+      // the whole rest after the first full stop stays (the picture description may hold any number of commas)
+      return `SCENE: ${pick}${time ? `, ${time}` : ''}${rest ? `. ${rest}` : ''}`
     }
     if (same.length === 0 && !unknown.some((u) => entryKey(u) === entryKey(place))) unknown.push(place)
     return raw
@@ -121,6 +133,10 @@ export const SCRIPT_CUES_NOTE =
 /** The same for a screenplay: its cue lines are shot and sound cues for the film. */
 export const SCREENPLAY_CUES_NOTE =
   'Lines that start with SHOT, MUSIC, SFX or TITLE are shot, music and sound cues for the film that is made from this screenplay. They are not prose: do not review them as prose. Check their form only: every scene has at least one SHOT, a shot is one camera take of 4 to 10 seconds, and the spoken words of a shot fit its length (about 2.5 words a second).'
+
+/** Every reviewer of a picture book gets this: a page is a scene, a picture and a caption, with no dialogue or cue lines. */
+export const PICTURE_BOOK_NOTE =
+  'This is a children\'s picture book: one page is one scene, 12 to 16 pages. Each page starts with a SCENE: line whose second sentence describes the picture, then one ON SCREEN: line names who is in the picture, then one to three short narration sentences are the words under the picture. The format has no speaker lines and no CG:, INSERT:, SFX: or AMBIENCE: cues: their absence is correct, so never ask for dialogue, pictures, sound or more pages. Judge the page form (one SCENE and one ON SCREEN line per page, narration only) and how the words read aloud to a child.'
 
 /** The block that tells the writer which place names the bible has. Empty when the bible has none. */
 export function placesBlock(places: string[]): string {

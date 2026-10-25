@@ -1,2 +1,4 @@
 seed/** text eol=lf
 *.md text eol=lf
+# the committed VN pack fixtures are compared byte for byte with the compiler's LF output
+tests/fixtures/** text eol=lf

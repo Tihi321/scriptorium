@@ -40,7 +40,7 @@ import { chapterNotes, otherChapters } from './rewriteContext'
 import { mergeBriefCast } from './briefCast'
 import { cleanCastAliases, scriptBibleLine } from './scriptBible'
 import { PUZZLE_REVIEW_NOTE, dropClueChangeProblems, placePuzzles, puzzleProblems, puzzlesChapterSection, puzzlesOf, puzzlesOutlineSection, writePuzzles } from './puzzles'
-import { placesBlock, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
+import { placesBlock, PICTURE_BOOK_NOTE, SCREENPLAY_CUES_NOTE, SCRIPT_CUES_NOTE, settleScenePlaces } from './scriptPlaces'
 import { appendToPrompt, buildMessages, loadChoicesSection, loadPrompt } from './prompts'
 import { calendarFor } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
@@ -105,11 +105,12 @@ export const isArticleFormat = (f: Pick<FormatEntry, 'article'> | undefined | nu
 /**
  * Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics) and the
  * screenplay formats (a screenplay is only written when a story fixes the format, or a topic of kind `video` or `juvenile-video` has it), and
- * the mystery-with-puzzles format (its puzzles come with the story, so only a story that fixes the format gets it).
+ * the mystery-with-puzzles format (its puzzles come with the story, so only a story that fixes the format gets it) and the picture-book format
+ * (a picture book is only written when a story fixes the format). A picture book is never picked at random, whatever the kind.
  */
 export function formatsForKind(formats: FormatEntry[], kind: string | null): FormatEntry[] {
   const on = enabledFormats(formats)
-  return kind ? on.filter((f) => f.kinds.includes(kind)) : on.filter((f) => !f.article && !f.screenplay && !f.puzzles)
+  return kind ? on.filter((f) => f.kinds.includes(kind) && !f.picture_book) : on.filter((f) => !f.article && !f.screenplay && !f.puzzles && !f.picture_book)
 }
 
 /** Open slots: a book can start while fewer than `max_books_in_progress` books are open, an article while fewer than `max_articles_in_progress` articles are. */
@@ -454,6 +455,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     if (!topic && idea?.data.format && formats.some((f) => f.enabled && f.screenplay && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
     // and for a mystery with puzzles: its puzzles come with the story, so only a story that fixes the format gets it (with a topic too)
     if (idea?.data.format && formats.some((f) => f.enabled && f.puzzles && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
+    // and for a picture book: it is never picked at random, so only a story that fixes the format gets it (with a topic too)
+    if (idea?.data.format && formats.some((f) => f.enabled && f.picture_book && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
     const articleStory = allowed.length > 0 && allowed.every((f) => f.article)
     // the owner's story: its title and format are theirs to fix, and the whole brief goes to the editor
     const fromOwner = idea?.data.source === 'user'
@@ -955,7 +958,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       if (fmt.choices) appendToPrompt(messages, await loadChoicesSection(d.dataDir, 'review'))
       appendToPrompt(messages, await seriesSection(d, slug))
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
-      if (fmt.script) appendToPrompt(messages, fmt.screenplay ? SCREENPLAY_CUES_NOTE : SCRIPT_CUES_NOTE)
+      if (fmt.script) appendToPrompt(messages, fmt.screenplay ? SCREENPLAY_CUES_NOTE : fmt.picture_book ? PICTURE_BOOK_NOTE : SCRIPT_CUES_NOTE)
       if (fmt.puzzles) appendToPrompt(messages, PUZZLE_REVIEW_NOTE)
       await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
       appendToPrompt(messages, await calendarFor(d, slug, bookText))
@@ -1326,9 +1329,9 @@ export function noteWantsLength(note: string): boolean {
   return /\b(longer|expand|lengthen|more (detail|words|scenes?)|add (a|an|another|more)\b|flesh out)/i.test(note)
 }
 
-/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_sp` for a screenplay, `<task>_vn` for a visual novel script, else `<task>`. */
-export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean; screenplay?: boolean }, task: string): string {
-  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.screenplay ? `${task}_sp` : fmt.script ? `${task}_vn` : task
+/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_sp` for a screenplay, `<task>_pb` for a picture book, `<task>_vn` for a visual novel script, else `<task>`. */
+export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean; screenplay?: boolean; picture_book?: boolean }, task: string): string {
+  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.screenplay ? `${task}_sp` : fmt.picture_book ? `${task}_pb` : fmt.script ? `${task}_vn` : task
 }
 
 /** Added to an outline prompt from an older data folder that does not ask for `story_year` (the seed prompts do). */
