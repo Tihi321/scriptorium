@@ -102,7 +102,7 @@ export function sceneHead(text: string): SceneHead {
   return { place: head, time: '', rest }
 }
 
-/** `Mara (soaked raincoat, worried), Tomas (grinning)`: the commas inside the brackets do not split. */
+/** `Mara (soaked raincoat, worried), Tomas (grinning)`: the commas and semicolons inside the brackets do not split. */
 export function castOf(text: string): { name: string; look: string }[] {
   const parts: string[] = []
   let depth = 0
@@ -110,7 +110,7 @@ export function castOf(text: string): { name: string; look: string }[] {
   for (const ch of text) {
     if (ch === '(') depth++
     else if (ch === ')') depth = Math.max(0, depth - 1)
-    if (ch === ',' && depth === 0) {
+    if ((ch === ',' || ch === ';') && depth === 0) {
       parts.push(cur)
       cur = ''
     } else cur += ch

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectTime, parseLightBible, parseScript, placeAndTime, sceneHead } from '../src/engine/publish/script'
+import { castOf, detectTime, parseLightBible, parseScript, placeAndTime, sceneHead } from '../src/engine/publish/script'
 
 const EXAMPLE = [
   'SCENE: The harbour wall, dusk',
@@ -16,6 +16,43 @@ const EXAMPLE = [
   'ON SCREEN: Mara (drying her hair), Tomas (sitting by the stove)',
   'TOMAS: I found something on the rocks.'
 ].join('\n')
+
+describe('castOf', () => {
+  it('splits the people on commas and on semicolons, never inside the brackets', () => {
+    // the live SCP-46 line: one person, because only commas used to split
+    expect(castOf('Lana (yellow dress); Mama (apron, bun)')).toEqual([
+      { name: 'Lana', look: 'yellow dress' },
+      { name: 'Mama', look: 'apron, bun' }
+    ])
+    expect(castOf('A; B; C')).toEqual([
+      { name: 'A', look: '' },
+      { name: 'B', look: '' },
+      { name: 'C', look: '' }
+    ])
+    // a comma still splits exactly as before, and brackets still protect their commas
+    expect(castOf('Mara (soaked raincoat, worried), Tomas (grinning)')).toEqual([
+      { name: 'Mara', look: 'soaked raincoat, worried' },
+      { name: 'Tomas', look: 'grinning' }
+    ])
+    // mixed separators work, and empty entries are dropped
+    expect(castOf('Mara (small); Tomas, Lana ;')).toEqual([
+      { name: 'Mara', look: 'small' },
+      { name: 'Tomas', look: '' },
+      { name: 'Lana', look: '' }
+    ])
+  })
+
+  it('reads every person of a semicolon ON SCREEN line as cast (SCP-46)', () => {
+    const { scenes } = parseScript('SCENE: The kitchen, morning\nON SCREEN: Lana (yellow dress); Mama (apron, bun)\nLana waves.', ['Lana', 'Mama'])
+    expect(scenes[0]!.beats[0]).toEqual({
+      type: 'cast',
+      cast: [
+        { name: 'Lana', look: 'yellow dress' },
+        { name: 'Mama', look: 'apron, bun' }
+      ]
+    })
+  })
+})
 
 describe('parseScript', () => {
   it('parses the example of docs/visual-novel.md into scenes and beats', () => {

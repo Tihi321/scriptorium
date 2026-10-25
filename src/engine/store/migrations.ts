@@ -172,6 +172,20 @@ export async function migratePuzzles(dataDir: string, seedDir: string | undefine
   return { changes: added.length ? [`config/formats.md: added the puzzle format (${added.join(', ')})`] : [] }
 }
 
+/** The format of the children's picture book. */
+export const PICTURE_BOOK_FORMAT_IDS = ['kids-picture-book']
+
+/**
+ * The children's picture book arrived after data folders existed: its format is appended to config/formats.md when its id is missing (the
+ * text of the seed's entry, so your own formats and comments stay as they are). Running it again changes nothing. A folder without the file,
+ * or a seed without the entry, is not touched.
+ */
+export async function migratePictureBooks(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  if (!seedDir) return { changes: [] }
+  const added = await appendSeedFormats(dataDir, seedDir, PICTURE_BOOK_FORMAT_IDS)
+  return { changes: added.length ? [`config/formats.md: added the picture-book format (${added.join(', ')})`] : [] }
+}
+
 /** The screenplay formats of the seed, in this order. */
 export const SCREENPLAY_FORMAT_IDS = ['short-film', 'cartoon', 'kids-cartoon']
 

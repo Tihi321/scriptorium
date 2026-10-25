@@ -1,0 +1,52 @@
+{
+  "format": "vn-text",
+  "version": 2,
+  "lang": "en",
+  "packHash": "sha256:f8e8a4a71581e44f101d801e413c2bd9e144e69f26be464268168711162ef25e",
+  "title": "Mira and the Puddle Duck",
+  "blurb": "Mira finds a tiny duckling in the big puddle in her garden and walks it home to the pond, one wet step at a time.",
+  "chapterTitles": {
+    "1": "The Puddle Duck"
+  },
+  "sceneTitles": {
+    "ch01.s01": "The garden, morning",
+    "ch01.s02": "The garden, morning",
+    "ch01.s03": "The garden, morning",
+    "ch01.s04": "The garden, morning",
+    "ch01.s05": "The path, morning",
+    "ch01.s06": "The path, morning",
+    "ch01.s07": "The path, morning",
+    "ch01.s08": "The pond, midday",
+    "ch01.s09": "The pond, midday",
+    "ch01.s10": "The pond, midday",
+    "ch01.s11": "The pond, afternoon",
+    "ch01.s12": "The kitchen, evening",
+    "ch01.s13": "The kitchen, evening",
+    "ch01.s14": "The kitchen, night"
+  },
+  "choiceTexts": {},
+  "endings": {
+    "1": "The End"
+  },
+  "characterNames": {
+    "mira": "Mira",
+    "pip": "Pip",
+    "mama": "Mama"
+  },
+  "beats": {
+    "ch01.s01.b002": "The rain has stopped. The puddle is as round as a plate.",
+    "ch01.s02.b002": "The duck has big feet and a very small tail. It peeps at Mira.",
+    "ch01.s03.b002": "Flap, flap, flap! The drops make tiny rainbows.",
+    "ch01.s04.b002": "\"You are a puddle duck,\" Mira whispers. The duck peeps again.",
+    "ch01.s05.b002": "The stones are slippery. Mira takes one slow step, then another.",
+    "ch01.s06.b002": "Pip has walked a long way for such small feet. It needs a rest.",
+    "ch01.s07.b002": "\"You are light as a feather,\" says Mira. The duck is warm and soft.",
+    "ch01.s08.b002": "The pond shines in the sun. Pip knows this water.",
+    "ch01.s09.b002": "Splash, splash! The water makes rings all the way to the reeds.",
+    "ch01.s10.b002": "The frog blinks once. Then it hops away into the reeds.",
+    "ch01.s11.b002": "\"Goodbye, puddle duck,\" says Mira. \"Come and visit my garden.\"",
+    "ch01.s12.b002": "\"You have been busy,\" says Mama. \"There is a duck in your hair too.\"",
+    "ch01.s13.b002": "The kettle sings. The cocoa is warm and sweet.",
+    "ch01.s14.b002": "The puddle glows like a little pond. \"Goodnight, puddle,\" Mira says."
+  }
+}

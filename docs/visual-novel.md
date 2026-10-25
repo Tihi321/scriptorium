@@ -333,6 +333,27 @@ The MCP tool `get_script {book, chapter?}` returns this JSON for a script book a
 
 A picture or sound line is a `cue` beat, one per line: `{ "type": "cue", "cue": "cg" | "insert" | "sfx" | "ambience", "text": "..." }`, with `text: null` for `CG: none`, `END CG` and `AMBIENCE: none` (an empty cue is left out). A cue does not end a scene's `background`, so an `AMBIENCE:` right after `SCENE:` is fine. A speaker or cast name that is one of a character's aliases is given as the character's bible name, and the line or cast entry has `alias` (the alias as the bible writes it), so the app can show it as the name tag: `{ "type": "line", "speaker": "Kessler", "alias": "the bald man", ... }`. `characters[].aliases` lists them.
 
+## Picture books
+
+A picture book is the simplest visual novel: one full-page illustration with the characters drawn into it, one to three short sentences under it, and a page turn. Scriptorium writes one as the format `kids-picture-book` (`config/formats.md`): `script: true`, `picture_book: true`, kind `juvenile-visual-novel`, ages three to six, 150 to 900 words, one chapter, `read_aloud: true`, `research: false`. A picture book is **never picked by the editor-in-chief**: only a story that fixes the format gets it (`add_story {..., format: "kids-picture-book"}`; the enabled formats are in `config/formats.md`). A book is never **adapted** into a picture book either: `adapt_book` refuses a picture-book format, because the page plan is not a compression of prose.
+
+- **Pages are scenes.** One chapter holds 12 to 16 pages, and a page is a scene: no new beat type and no parser change. The page grammar is the visual novel grammar with nothing but a scene and its narration:
+
+  ```text
+  SCENE: Petra's garden, morning. Petra kneels by a big puddle in her yellow raincoat, a duck peeking out of the water.
+  ON SCREEN: Petra (yellow raincoat, grinning)
+  Petra finds a duck in the puddle. The duck is not a bit afraid.
+  ```
+
+- The `SCENE:` line names the place and time, and its **second sentence describes the picture**: who is in it, what they do and what is around them. VN Studio draws the page from that description (it is the scene's `description`, the background material in the pack).
+- `ON SCREEN:` names who is in the picture (bible names, a few words on how they look on that page). A picture book has no sprites: VN Studio draws the characters into the illustration, and the cast keeps the same child recognisable on every page.
+- The **narration lines after `ON SCREEN:` are the words under the picture**: one to three short sentences, simple words a child of three to six knows, present tense, read aloud by an adult. They are the page's caption and live in the pack's catalog (`beats`), never in the template.
+- **No speaker lines** (`NAME: words`), **no `CG:`, `INSERT:`, `SFX:` or `AMBIENCE:` cues**, and no `---` between pages: every page follows the one before it. A cue or speaker line in a picture-book chapter is a sign the writer used the wrong format. (What someone says goes into the narration or stays in the picture.)
+- **Prompts.** The architect, writer, line editor and humanizer use the `_pb` variants (`architect/outline_pb.md`, `writer/draft_chapter_pb.md`, `writer/rewrite_chapter_pb.md`, `line-editor/review_pb.md`, `humanizer/humanize_chapter_pb.md`); the other roles use their usual prompts with the format guidance and `PICTURE_BOOK_NOTE` instead of the visual-novel cue note. The writer is told 12 to 16 pages, one scene per page, the picture in the `SCENE:` line and narration only; the line editor checks page form and read-aloud rhythm; the humanizer must keep every `SCENE:` and `ON SCREEN:` line (the engine refuses a version whose script lines differ, so the pages do not change).
+- **The pack is unchanged (v2).** A published picture book compiles `vn/pack.json` and `vn/text/<lang>.json` exactly like a visual novel: each page is a scene (`ch01.s01` … `ch01.s16`), the cast and picture descriptions stay in the template, and the caption text is in the catalog. With no cue lines a beat carries no `image`, `sfx` or `ambience` descriptor. `build_vn_pack`, `get_vn_pack` and `get_script` work as for any script; `get_screenplay` refuses it, and Book Translator translates the catalog like any other.
+- **What VN Studio does with it (VNO-47):** it imports the pack as `presentation: "picture-book"`: one illustration per scene, no sprites or CG assets, a caption band under the picture, page turns, read-aloud of the page's clips, the same language switch and save/load.
+- **Old data folders** get the format through `migratePictureBooks` at start (the seed's entry is appended to `config/formats.md` when its id is missing), and the five `_pb` prompts arrive as missing seed files.
+
 ## Adapting a book
 
 Scriptorium can turn a published prose book into a visual novel script (the script writer). In the library, open a published book's card and press **Adapt to visual novel**; the Script writer panel asks for the kind (linear, or with choices), an optional title and notes for the adapter. The same from MCP: `adapt_book {book, format, title?, notes?, models?}`. The owner picks linear or choices for every book.

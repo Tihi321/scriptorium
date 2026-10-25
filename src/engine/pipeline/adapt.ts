@@ -47,10 +47,11 @@ export const ADAPT_WORD_FACTOR = 1.7
 
 /**
  * The length an adaptation is meant to have: the source's words times `ADAPT_WORD_FACTOR`, within the format's range. Only for a visual novel script
- * (a screenplay is held to its runtime, not its words). Null when the source has no words or the format is not a visual novel.
+ * (a screenplay is held to its runtime, a picture book to its page plan, not to the source's words). Null when the source has no words or the
+ * format is not a visual novel.
  */
-export function adaptTargetWords(sourceWords: number, fmt: { words: [number, number]; script?: boolean; screenplay?: boolean }): number | null {
-  if (!fmt.script || fmt.screenplay || !(sourceWords > 0)) return null
+export function adaptTargetWords(sourceWords: number, fmt: { words: [number, number]; script?: boolean; screenplay?: boolean; picture_book?: boolean }): number | null {
+  if (!fmt.script || fmt.screenplay || fmt.picture_book || !(sourceWords > 0)) return null
   return Math.min(fmt.words[1], Math.max(fmt.words[0], Math.round(sourceWords * ADAPT_WORD_FACTOR)))
 }
 

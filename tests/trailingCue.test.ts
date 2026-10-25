@@ -71,4 +71,11 @@ describe('SCP-35: settleScenePlaces moves the cue for a visual novel, not for a 
     expect(await settleScenePlaces(stub, 'b', 1, body, () => undefined, { cues: false })).toBe(body)
     expect(await settleScenePlaces(stub, 'b', 1, body, () => undefined)).toBe(body)
   })
+
+  it('renames the place without truncating a comma-rich picture sentence (SCP-46)', async () => {
+    const withPlaces = { books: { bible: async () => '## Places\n- **Harbour Wall**: A long stone pier.\n' } } as unknown as Parameters<typeof settleScenePlaces>[0]
+    const body = 'SCENE: harbour wall, dusk. Lana sits on the wet stones, her dress yellow, Mama beside her, and the gulls call.'
+    const out = await settleScenePlaces(withPlaces, 'b', 1, body, () => undefined)
+    expect(out).toBe('SCENE: Harbour Wall, dusk. Lana sits on the wet stones, her dress yellow, Mama beside her, and the gulls call.')
+  })
 })

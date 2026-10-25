@@ -176,6 +176,19 @@ describe('the places of a script', () => {
     expect(canonicalScenes('SCENE: harbour wall', places).body).toBe('SCENE: Harbour Wall')
   })
 
+  it('keeps the whole picture sentence after the first full stop when it renames the place (SCP-46)', () => {
+    const body = 'SCENE: harbour wall, dusk. Lana sits on the wet stones, her dress yellow, Mama beside her, and the gulls call.'
+    const out = canonicalScenes(body, places)
+    expect(out.body).toBe('SCENE: Harbour Wall, dusk. Lana sits on the wet stones, her dress yellow, Mama beside her, and the gulls call.')
+    expect(out.renamed).toEqual([{ from: 'harbour wall', to: 'Harbour Wall' }])
+    expect(out.unknown).toEqual([])
+    // the commas of the picture sentence are not a place
+    expect(scenePlaces(body)).toEqual(['harbour wall'])
+    // a line that already names the bible place is still left exactly as it is
+    const exact = 'SCENE: Harbour Wall, dusk. Lana sits on the wet stones, her dress yellow.'
+    expect(canonicalScenes(exact, places).body).toBe(exact)
+  })
+
   it('adds an unknown place to the bible under Places (before Style), with the first narration line of its scene', () => {
     const bible = '# Story bible (light)\n\n## Setting\nA harbour.\n\n## Characters\n- **Mara**: A girl.\n\n## Places\n- **Harbour Wall**: A pier.\n\n## Style\nMoody.\n'
     const desc = placeDescriptions('SCENE: The cellar, midnight\nDamp stone and a single candle.\nMARA: Hello.', ['The cellar'])

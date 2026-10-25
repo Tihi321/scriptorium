@@ -913,7 +913,7 @@ export class Engine {
   /**
    * The script writer: a story that adapts a published book into a visual novel script or a screenplay (`format` is an enabled script format: a visual novel, linear or with choices, or a screenplay such as short-film).
    * The story waits until the source is published (it is, here) and a book starts from it like from any story. The title defaults to the source's.
-   * Throws when the book does not exist or is not published, the format is not an enabled script format, or the same adaptation is already waiting.
+   * Throws when the book does not exist or is not published, the format is not an enabled script format (or is a picture-book format: a picture book is written from a story that fixes it, not adapted), or the same adaptation is already waiting.
    */
   async adaptBook(input: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }): Promise<IdeaFile> {
     const src = await this.books.read(input.book)
@@ -922,8 +922,11 @@ export class Engine {
     if (src.data.stage !== 'published') throw new Error(`"${src.data.title}" is not published yet (stage ${src.data.stage}): only a finished book can be adapted`)
     const fmt = this.formats.find((f) => f.enabled && f.id === input.format)
     if (!fmt?.script) {
-      const ids = (screen: boolean) => this.formats.filter((f) => f.enabled && f.script && !!f.screenplay === screen).map((f) => f.id).join(', ') || '(none enabled)'
+      const ids = (screen: boolean) => this.formats.filter((f) => f.enabled && f.script && !f.picture_book && !!f.screenplay === screen).map((f) => f.id).join(', ') || '(none enabled)'
       throw new Error(`"${input.format}" is not a script format. Visual novel formats: ${ids(false)}. Screenplay formats: ${ids(true)}`)
+    }
+    if (fmt.picture_book) {
+      throw new Error(`"${fmt.id}" is a picture-book format: adapt_book turns a published book into a visual novel script or a screenplay, not a picture book. Write a picture book from a story that fixes the format: add_story {format: "${fmt.id}"}`)
     }
     if ((await this.ideas.list()).some((i) => i.data.status === 'open' && i.data.source_book === input.book && i.data.format === fmt.id)) {
       throw new Error(`an adaptation of "${src.data.title}" as ${fmt.id} is already waiting for its book`)
