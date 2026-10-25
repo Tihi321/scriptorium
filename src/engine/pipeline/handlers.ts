@@ -8,6 +8,7 @@ import { briefOf, briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
 import { genreClass, writeCoverHtml } from '../publish/cover'
 import { parseScreenplay, runtimeOf } from '../publish/screenplay'
+import { writeVnPack } from '../publish/vnPack'
 import type { ModelInfo } from '../models/registry'
 import type { JobStore } from '../queue/jobs'
 import type { ChatOptions, ChatResult, JobContext, Scheduler } from '../queue/scheduler'
@@ -1305,6 +1306,17 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     if (over) ctx.log(`warning: the book has ${wordTotal} words, over the format's ceiling of ${fmt.words[1]}; published anyway (length_over in book.md)`)
     await d.books.update(slug, () => ({ stage: 'published', published: new Date().toISOString(), ...(over ? { length_over: true } : {}) }))
     d.emit({ type: 'book.stage', book: slug, stage: 'published' })
+    // every published visual novel (not a screenplay) also gets the language-independent pack (SCP-45): a failure is a warning, never a
+    // failed book — `build_vn_pack` makes it once the chapter or puzzle files are fixed
+    if (fmt.script && fmt.screenplay !== true && book.screenplay !== true) {
+      try {
+        const pack = await writeVnPack(d.books, slug)
+        for (const note of pack.warnings) ctx.log(`vn pack: ${note}`)
+        ctx.log(`vn pack written: vn/pack.json ${pack.pack.packHash}, vn/text/${pack.text.lang}.json, ${pack.pack.chapters.length} chapter(s)`)
+      } catch (err) {
+        ctx.log(`warning: the VN pack of "${slug}" was not written (${(err as Error).message}); run build_vn_pack after fixing the book`)
+      }
+    }
     return { result: `published "${title}" (score ${decision.score})`, resultPath: path.relative(d.dataDir, epub).split(path.sep).join('/') }
   })
 }

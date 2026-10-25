@@ -2,8 +2,9 @@
 
 What Scriptorium still lacks on its own. Work that needs the other tools or a production run (live checks, VN lines for VN Studio, the screenplay → video chain, puzzle mysteries) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Most important first. Finished work is in `.claude/tickets/` (SCP-08 client provider, SCP-09 series, SCP-10 to SCP-13 humanizer, script writer, newspaper and client search, SCP-14 the hub roadmap fixes, SCP-16 VN media lines, SCP-17 the screenplay writer, SCP-18 mystery puzzles, SCP-19 this roadmap's own items, SCP-20 to SCP-25 the fixes for the HUB-04 live check) and in `docs/design.md`. Fix items on a ticket branch (`SCP-NN_<what>`) cut from `master`.
 
-## Where it stands (2026-10-23)
+## Where it stands (2026-10-25)
 
+- **On branch `SCP-45_vn-pack` (uncommitted):** SCP-45 writes the language-independent VN pack (`vn/pack.json` + `vn/text/<lang>.json`), `build_vn_pack`/`get_vn_pack`, narrator/`C<n>` tokens, `SCENE:` first-period/time parsing and the key helper; plan/changelog in `.claude/tickets/SCP-45-vn-pack/`, contract in the hub's `.claude/tickets/HUB-16-vn-pack/`. 679 tests + recovery, typecheck and lint green; not merged.
 - **Merged:** SCP-08 to SCP-19 (SCP-16 to SCP-18 in PR #10; master 5801f09). The HUB-04 live check ran on a8cf243 (SCP-14, SCP-19).
 - **SCP-16 to SCP-18 (merged, PR #10):** SCP-16 (VN media lines and aliases), SCP-17 (the screenplay writer) and SCP-18 (mystery with puzzles); the details are in `.claude/tickets/SCP-16-vn-media-lines/`, `SCP-17-screenplay-writer/` and `SCP-18-mystery-puzzles/` (each `changelog.md`).
 - **SCP-20 to SCP-37 (done in code, not merged):** the fixes for the findings of the HUB-04 live check (SCP-20 to SCP-25) and of the hub's live run when every book start was blocked (SCP-26 to SCP-28) and of the hub's film production (SCP-29) puzzle production (SCP-30 to SCP-33) and VN adaptation (SCP-34 to SCP-37), one commit each on `SCP-20-25_fixes` (below; plan in `.claude/tickets/SCP-20-25-hub-fixes/plan.md`).

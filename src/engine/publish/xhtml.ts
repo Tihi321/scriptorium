@@ -1,3 +1,5 @@
+import { vnKey } from './vnKey'
+
 export function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
@@ -14,6 +16,61 @@ export const SCENE = /^\**\s*scene\s*:\s*\**\s*(.+?)\s*\**$/i
 export const CAST = /^\**\s*on screen\s*:\s*\**\s*(.+?)\s*\**$/i
 /** `NAME: line` or `NAME (expression): line`. The name is in capitals, as in a script. */
 export const LINE = /^\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
+/**
+ * A narrator line: `NARRATION: words`, `NARRATOR (calm): words`, `N: words` (also Croatian `NARACIJA`, `PRIPOVJEDAČ`). It is narration, not a
+ * speaker called "Narration" (SCP-45; a book written by a model often uses it after `SCENE:`). A screenplay keeps `NARRATOR:` as its
+ * voice-over speaker, so `scriptToXhtml` only reads this for the visual novel layout.
+ */
+export const NARRATION = /^\**\s*(?:n|narration|narrator|narracja|pripovjeda[čc])\s*\**(?:\s*\([^)]*\))?\s*:\**\s*(.*)$/iu
+
+/**
+ * Screenplay directions that look like a speaker label (`SMASH CUT TO: ...`, `FADE TO BLACK: ...`, `INT. KITCHEN: ...`). They are not
+ * characters: the text after the label stays narration (the same list VN Studio's `src/engine/vn/script.ts` uses, `DIRECTION_RE`).
+ */
+const DIRECTION = /^(?:(?:(?:SMASH|MATCH|JUMP|HARD|QUICK) )?CUT(?: (?:TO|BACK TO|NA))?|FADE(?: (?:IN|OUT|TO(?: (?:BLACK|WHITE))?|U CRNO))?|DISSOLVE(?: TO)?|(?:INT|EXT)(?:[ ./].*)?|REZ(?: NA)?|PRIJELAZ(?: NA)?|ZATAMNJENJE)$/u
+
+/** True for a label (the text before the colon of a line) that is a stage direction, not a speaker. */
+export function isDirectionLabel(label: string): boolean {
+  const l = label.replace(/\*+/g, '').replace(/[.:]+$/, '').replace(/\s+/g, ' ').trim().toUpperCase()
+  return !!l && DIRECTION.test(l)
+}
+
+/**
+ * A speaker token instead of a name: `C1` is the first bible character, `petra` the key of a character, `petra#1` one of its aliases. No
+ * translated name is ever a structural token (contract §3). Only a known token is a line: `vent: he said` stays narration.
+ */
+export const SPEAKER_TOKEN = /^\**\s*(C\d+|[a-z][a-z0-9_]*(?:#[1-9]\d*)?)\**(?:\s*\(([^)]{1,120})\))?\s*:\**\s+(.+)$/u
+
+/**
+ * The labels that are never a speaker: the scene, cast, picture, sound and puzzle keywords (and the narrator words). A line that names one
+ * of them without fitting its own pattern (`CLUE: no slash`) is narration, not a speaker called "CLUE" (SCP-45).
+ */
+const RESERVED = /^(?:scene|scena|on screen|na ekranu|cg|slika|insert|sfx|sound|zvuk|ambience|atmosfera|end cg|kraj slike|clue|trag|evidence|dokaz|puzzle|zagonetka|testimony|svjedočenje|end testimony|kraj svjedočenja|n|narration|narrator|narracja|pripovjeda[čc])$/iu
+
+/** True for a label that is a script keyword and never a character ([SCP-45]). */
+export function reservedLabel(label: string): boolean {
+  return RESERVED.test(label.replace(/\*+/g, '').trim())
+}
+
+/** The speaker token a line names (`C1`, `petra`, `petra#1`), when its text is known to `known` (lower-case token -> the bible name). */
+export function speakerTokenOf(line: string, known: Map<string, string>): { name: string; expression: string; text: string } | null {
+  const m = SPEAKER_TOKEN.exec(line.trim())
+  if (!m) return null
+  const name = known.get(m[1]!.toLowerCase())
+  if (!name) return null
+  return { name, expression: m[2]?.trim() ?? '', text: m[3]!.trim() }
+}
+
+/** `C1`, `petra`, `petra#1` -> the bible name (and the alias as written for an alias token), for the lines that use a key instead of a name. */
+export function speakerTokens(characters: string[], aliases: { name: string; aliases: string[] }[] = []): Map<string, { name: string; alias?: string }> {
+  const known = new Map<string, { name: string; alias?: string }>()
+  characters.forEach((name, i) => {
+    known.set(`c${i + 1}`, { name })
+    known.set(vnKey(name), { name })
+  })
+  for (const c of aliases) c.aliases.forEach((alias, i) => known.set(`${vnKey(c.name)}#${i + 1}`, { name: c.name, alias }))
+  return known
+}
 
 /**
  * A cue line: `CG: ...`, `INSERT: ...`, `SFX: ...`, `AMBIENCE: ...` (Croatian `SLIKA`, `ZVUK`, `ATMOSFERA`); `CG: none` and `END CG` hide the picture.
@@ -92,8 +149,9 @@ const CUE_LABEL: Record<CueKind, string> = { cg: 'Picture:', insert: 'Close-up:'
  * `ON SCREEN: Name (look), ...` says who is shown, `NAME (expression): words` is a spoken line, `---` is a scene break,
  * and any other line is narration (what the reader sees or the narrator says).
  */
-export function scriptToXhtml(md: string, opts: { screenplay?: boolean; puzzles?: Record<string, PuzzleView> } = {}): string {
+export function scriptToXhtml(md: string, opts: { screenplay?: boolean; puzzles?: Record<string, PuzzleView>; characters?: string[] } = {}): string {
   const out: string[] = []
+  const tokens = opts.characters?.length ? speakerTokens(opts.characters) : null
   for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trim()
     if (!line) continue
@@ -120,18 +178,29 @@ export function scriptToXhtml(md: string, opts: { screenplay?: boolean; puzzles?
         const list = view?.clues.length ? `\n<ul>\n${view.clues.map((k) => `<li>${inline(k.text)}</li>`).join('\n')}\n</ul>` : ''
         out.push(`<div class="vn-puzzle"><p class="vn-puzzle-title"><span class="vn-label">Puzzle:</span> ${inline(view?.title ?? pz.puzzle)}</p>${list}</div>`)
       }
-    } else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
-    else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
+    } else if (!opts.screenplay && (m = NARRATION.exec(line))) {
+      if (m[1]!.trim()) out.push(`<p class="vn-narration">${inline(m[1]!.trim())}</p>`)
+    } else if (!opts.screenplay && tokens && (m = SPEAKER_TOKEN.exec(line)) && tokens.get(m[1]!.toLowerCase())) {
+      const name = tokens.get(m[1]!.toLowerCase())!.name
       const how = m[2] ? ` <span class="vn-how">(${inline(m[2])})</span>` : ''
-      out.push(`<p class="vn-line"><span class="vn-speaker">${escapeXml(m[1]!.trim())}</span>${how} ${inline(m[3]!)}</p>`)
+      out.push(`<p class="vn-line"><span class="vn-speaker">${escapeXml(name)}</span>${how} ${inline(m[3]!)}</p>`)
+    } else if ((m = CAST.exec(line))) out.push(`<p class="vn-cast"><span class="vn-label">On screen:</span> ${inline(m[1]!)}</p>`)
+    else if ((m = LINE.exec(line)) && (!reservedLabel(m[1]!) || opts.screenplay === true) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
+      if (!opts.screenplay && isDirectionLabel(m[1]!)) {
+        // a stage direction that looks like a speaker label: its text is narration, not a character
+        out.push(`<p class="vn-narration">${inline(m[3]!)}</p>`)
+      } else {
+        const how = m[2] ? ` <span class="vn-how">(${inline(m[2])})</span>` : ''
+        out.push(`<p class="vn-line"><span class="vn-speaker">${escapeXml(m[1]!.trim())}</span>${how} ${inline(m[3]!)}</p>`)
+      }
     } else out.push(`<p class="vn-narration">${inline(line.replace(/^>\s?/, ''))}</p>`)
   }
   return out.join('\n')
 }
 
 /** A small markdown subset for prose (paragraphs, headings, scene breaks, quotes, emphasis) to well-formed XHTML. */
-export function markdownToXhtml(md: string, opts: { script?: boolean; screenplay?: boolean; puzzles?: Record<string, PuzzleView> } = {}): string {
-  if (opts.script) return scriptToXhtml(md, { screenplay: opts.screenplay, puzzles: opts.puzzles })
+export function markdownToXhtml(md: string, opts: { script?: boolean; screenplay?: boolean; puzzles?: Record<string, PuzzleView>; characters?: string[] } = {}): string {
+  if (opts.script) return scriptToXhtml(md, { screenplay: opts.screenplay, puzzles: opts.puzzles, characters: opts.characters })
   const blocks = md.replace(/\r\n/g, '\n').trim().split(/\n{2,}/)
   const out: string[] = []
   for (const raw of blocks) {

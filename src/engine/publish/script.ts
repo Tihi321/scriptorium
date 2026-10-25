@@ -1,6 +1,6 @@
 import { entryKey } from '../memory/bible'
 import { lightBibleEntries, sameName } from '../pipeline/series'
-import { CAST, cueOf, LINE, puzzleLineOf, SCENE } from './xhtml'
+import { CAST, cueOf, isDirectionLabel, LINE, NARRATION, puzzleLineOf, reservedLabel, SCENE, SPEAKER_TOKEN, speakerTokens } from './xhtml'
 import type { CueKind } from './xhtml'
 
 export type ScriptBeat =
@@ -33,11 +33,73 @@ export interface LightBible {
   style: string
 }
 
-/** `a, b, c` split at the last comma outside brackets: place `a, b`, time `c`. Without a comma the whole text is the place. */
+/** `a, b, c` split at the last comma: place `a, b`, time `c`. Without a comma the whole text is the place. Used for a `## heading` scene. */
 export function placeAndTime(text: string): { place: string; time: string } {
   const at = text.lastIndexOf(',')
   if (at < 0) return { place: text.trim(), time: '' }
   return { place: text.slice(0, at).trim(), time: text.slice(at + 1).trim() }
+}
+
+/**
+ * The canonical time named in a short text, or null: the words VN Studio's `detectTime` knows (English and Croatian). A time word is
+ * recognised anywhere in the tail, so `late afternoon` is an afternoon.
+ */
+const TIME_WORDS: Record<string, string> = {
+  dawn: 'dawn', daybreak: 'dawn', sunrise: 'dawn', zora: 'dawn', zorom: 'dawn', svitanje: 'dawn',
+  morning: 'morning', jutro: 'morning', jutra: 'morning', jutru: 'morning', jutarnje: 'morning', ujutro: 'morning',
+  day: 'day', daytime: 'day', noon: 'day', midday: 'day', dan: 'day', podne: 'day', podnevu: 'day', danju: 'day',
+  afternoon: 'afternoon', poslijepodne: 'afternoon', popodne: 'afternoon',
+  evening: 'evening', vecer: 'evening', veceri: 'evening', navecer: 'evening', uvecer: 'evening',
+  dusk: 'dusk', sunset: 'dusk', twilight: 'dusk', sumrak: 'dusk', sumraku: 'dusk', zalazak: 'dusk',
+  night: 'night', midnight: 'night', noc: 'night', nocu: 'night', ponoc: 'night', noci: 'night'
+}
+
+const timeWords = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+
+/** The canonical time named in a short text (`morning`, `afternoon`), or null. */
+export function detectTime(text: string): string | null {
+  for (const token of timeWords(text)) {
+    const time = TIME_WORDS[token]
+    if (time) return time
+  }
+  return null
+}
+
+export interface SceneHead {
+  /** The place phrase: the head before its last comma, or the whole head when the tail is not a time. */
+  place: string
+  /** The time exactly as written (`morning`, `midday`, `late afternoon`, `ujutro`); VN Studio canonicalises it. Empty when there is none. */
+  time: string
+  /** What follows the head's first full stop: the scene description. */
+  rest: string
+}
+
+/**
+ * A `SCENE:` text as VN Studio's legacy `parseSceneLine` reads it (SCP-45): split at the **first full stop** into the head and the rest;
+ * in the head the **last comma** starts the time only when that tail is at most four words and names a known time (`morning`, `dusk`,
+ * `late afternoon`, `midday`, Croatian too); otherwise the whole head is the place and the time is empty. The rest is the scene
+ * description. The time is returned as written, not canonicalised.
+ */
+export function sceneHead(text: string): SceneHead {
+  const t = text.replace(/\*+/g, '').trim()
+  const m = /^(.*?)\.(?=\s|$)\s*(.*)$/s.exec(t)
+  const head = (m ? m[1]! : t).trim()
+  const rest = (m ? m[2]! : '').trim()
+  const at = head.lastIndexOf(',')
+  if (at >= 0) {
+    const tail = head.slice(at + 1).trim()
+    const words = tail.split(/\s+/).filter(Boolean)
+    if (words.length > 0 && words.length <= 4 && detectTime(tail)) return { place: head.slice(0, at).trim(), time: tail, rest }
+  }
+  return { place: head, time: '', rest }
 }
 
 /** `Mara (soaked raincoat, worried), Tomas (grinning)`: the commas inside the brackets do not split. */
@@ -86,12 +148,23 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
   }
   /** The testimony beat that is open: speaker lines go into it until `END TESTIMONY` or a line of another kind. */
   let testimony: Extract<ScriptBeat, { type: 'testimony' }> | null = null
+  /** `C1`, `petra`, `petra#1`: a speaker token that names a bible character (contract §3: no translated name is a structural token). */
+  const tokens = speakerTokens(
+    bibleNames,
+    aliases.map((c) => ({ name: c.name, aliases: c.aliases }))
+  )
   const isSpeaker = (line: string): RegExpExecArray | null => {
     const sm = LINE.exec(line)
-    return sm && !/^(scene|on screen)$/i.test(sm[1]!.trim()) && !cueOf(line) && !puzzleLineOf(line) && !SCENE.exec(line) ? sm : null
+    return sm && !/^(scene|on screen)$/i.test(sm[1]!.trim()) && !cueOf(line) && !puzzleLineOf(line) && !SCENE.exec(line) && !reservedLabel(sm[1]!) && !isDirectionLabel(sm[1]!) && !NARRATION.exec(line) ? sm : null
   }
-  const open = (text: string) => {
-    scene = { ...placeAndTime(text), background: '', beats: [] }
+  /** Opens a scene. A `SCENE:` line is read as VN Studio reads it (first full stop, then the last comma's time); a `## heading` keeps place/time. */
+  const open = (text: string, sceneLine = false) => {
+    if (sceneLine) {
+      const head = sceneHead(text)
+      scene = { place: head.place, time: head.time, background: head.rest, beats: [] }
+    } else {
+      scene = { ...placeAndTime(text), background: '', beats: [] }
+    }
     scenes.push(scene)
     background = true
   }
@@ -123,7 +196,7 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
       current().beats.push({ type: 'break' })
       background = false
     } else if ((m = /^#{1,6}\s+(.*)$/.exec(line))) open(m[1]!.replace(/\*+/g, '').trim())
-    else if ((m = SCENE.exec(line))) open(m[1]!)
+    else if ((m = SCENE.exec(line))) open(m[1]!, true)
     else if ((c = cueOf(line))) {
       if (c.text !== '') current().beats.push({ type: 'cue', cue: c.cue, text: c.text })
     } else if ((pz = puzzleLineOf(line))) {
@@ -136,6 +209,15 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
         current().beats.push(testimony)
         background = false
       }
+    } else if ((m = NARRATION.exec(line))) {
+      // `NARRATION:`, `NARRATOR (calm):`, `N:`: a narrator text box, never a speaker called "Narration" (SCP-45)
+      const text = m[1]!.trim()
+      if (text) current().beats.push({ type: 'narration', text })
+    } else if ((m = SPEAKER_TOKEN.exec(line)) && tokens.get(m[1]!.toLowerCase())) {
+      // a speaker token (`C1`, `petra`, `petra#1`) writes a name without ever making a translated name structural (SCP-45)
+      const token = tokens.get(m[1]!.toLowerCase())!
+      current().beats.push({ type: 'line', speaker: canon(token.name, token.name), expression: m[2]?.trim() ?? '', text: m[3]!.trim(), ...(token.alias ? { alias: token.alias } : {}) })
+      background = false
     } else if ((m = CAST.exec(line))) {
       current().beats.push({
         type: 'cast',
@@ -145,10 +227,16 @@ export function parseScript(body: string, bibleNames: string[] = [], aliases: { 
         })
       })
       background = false
-    } else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim())) {
-      const name = m[1]!.trim()
-      const v = viaAlias(name)
-      current().beats.push({ type: 'line', speaker: v ? v.name : canon(name, name), expression: m[2]?.trim() ?? '', text: m[3]!.trim(), ...(v ? { alias: v.alias } : {}) })
+    } else if ((m = LINE.exec(line)) && !/^(scene|on screen)$/i.test(m[1]!.trim()) && !reservedLabel(m[1]!)) {
+      if (isDirectionLabel(m[1]!)) {
+        // `SMASH CUT TO: Grumble sets the soother down.` is a stage direction, not a speaker: the text stays narration
+        const text = m[3]!.trim()
+        if (text) current().beats.push({ type: 'narration', text })
+      } else {
+        const name = m[1]!.trim()
+        const v = viaAlias(name)
+        current().beats.push({ type: 'line', speaker: v ? v.name : canon(name, name), expression: m[2]?.trim() ?? '', text: m[3]!.trim(), ...(v ? { alias: v.alias } : {}) })
+      }
       background = false
     } else {
       const text = line.replace(/^>\s?/, '')

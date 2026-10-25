@@ -75,7 +75,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'get_screenplay', 'refresh_factbase']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'get_screenplay', 'build_vn_pack', 'get_vn_pack', 'refresh_factbase']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -828,6 +828,66 @@ describe('MCP: the prompt once, waiting for a book, absolute paths, book models 
     expect((await call(c, 'get_screenplay', { book: 'prose' })).raw).toMatch(/not a screenplay \(its format is novel\)/)
     await env!.engine.books.create('vn', { title: 'VN', format: 'visual-novel', stage: 'drafting', target_words: 5000, script: true }, '')
     expect((await call(c, 'get_screenplay', { book: 'vn' })).raw).toMatch(/visual novel script, use get_script/)
+  })
+
+  it('build_vn_pack writes the pack and catalog, get_vn_pack reads them back with a stale check, and both refuse the wrong books', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await env!.engine.books.create(
+      'soother',
+      { title: 'The Soother', author: 'Culo', genre: 'Fantasy', format: 'visual-novel', stage: 'published', target_words: 800, script: true, blurb: 'A soother falls into Dragon Land.' },
+      ''
+    )
+    await writeMd(
+      env!.engine.books.file('soother', 'bible', 'bible.md'),
+      { kind: 'bible' },
+      ['## Characters', '- **Petra**: Six years old, a yellow raincoat. Aliases: the girl. Voice: bright', '- **Mango**: A small orange dragon. Voice: chatty', '', '## Places', '- **Petra’s garden**: A small cottage garden.', '', '## Style', 'Warm and giggly.'].join('\n')
+    )
+    await writeMd(env!.engine.books.file('soother', 'outline.md'), { kind: 'outline', chapters: [{ n: 1, title: 'The Throw', summary: 'Petra throws it.' }] }, '\n1. **The Throw**: Petra throws it.\n')
+    await env!.engine.books.writeChapter('soother', {
+      n: 1,
+      title: 'The Throw',
+      round: 0,
+      body: ['SCENE: Petra’s garden, morning', 'Narration: The sun is warm.', 'ON SCREEN: Petra (yellow raincoat)', 'AMBIENCE: birds', 'PETRA (grumpy): Pip will not stop crying.', 'CG: the soother over the mountains', 'THE GIRL (worried): Oops.'].join('\n')
+    })
+
+    const built = (await call(c, 'build_vn_pack', { book: 'soother' })).data
+    expect(built).toMatchObject({ book: 'soother', lang: 'en', chapters: 1, scenes: 1, beats: 4, characters: 2, places: 1, puzzles: 0 })
+    expect(built.packHash).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(built.sourceHash).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(built.packPath).toMatch(/vn[\\/]pack\.json$/)
+    expect(built.textPath).toMatch(/vn[\\/]text[\\/]en\.json$/)
+    expect(built.warnings).toEqual([])
+    expect(parseMd(await readFile(env!.engine.books.file('soother', 'book.md'), 'utf8')).data.vn_version).toBe(2)
+
+    const got = (await call(c, 'get_vn_pack', { book: 'soother' })).data
+    expect(got.packHash).toBe(built.packHash)
+    expect(got.sourceHash).toBe(built.sourceHash)
+    expect(got.packVersion).toBe(2)
+    expect(got.stale).toBe(false)
+    expect(got.problems).toEqual([])
+    expect(got.warnings).toEqual([])
+    expect(got.pack.book).toMatchObject({ slug: 'soother', kind: 'linear', primaryLang: 'en' })
+    expect(got.pack.characters[0]).toMatchObject({ key: 'petra', aliasKeys: ['petra#1'] })
+    expect(got.pack.chapters[0].scenes[0].beats.find((b: { type: string; aliasKey?: string }) => b.type === 'line' && b.aliasKey)).toMatchObject({ speakerKey: 'petra', aliasKey: 'petra#1' })
+    expect(got.text.characterNames['petra#1']).toBe('the girl')
+    expect(got.text.beats['ch01.s01.b001']).toBe('The sun is warm.')
+
+    // a chapter edit makes the pack stale: reported, not ignored
+    await env!.engine.books.writeChapter('soother', { n: 1, title: 'The Throw', round: 0, body: 'SCENE: Petra’s garden, morning\nPETRA: One more line.' })
+    const stale = (await call(c, 'get_vn_pack', { book: 'soother' })).data
+    expect(stale.stale).toBe(true)
+    expect(stale.warnings.join(' ')).toMatch(/stale/)
+
+    // refusals: a prose book, a screenplay, and a visual novel with no pack yet
+    await makeBook(env!, 'prose', 'published')
+    expect((await call(c, 'build_vn_pack', { book: 'prose' })).raw).toMatch(/not a visual novel script \(its format is novel\)/)
+    expect((await call(c, 'get_vn_pack', { book: 'prose' })).raw).toMatch(/not a visual novel script/)
+    await env!.engine.books.create('film', { title: 'Film', format: 'short-film', stage: 'published', target_words: 600, script: true, screenplay: true }, '')
+    expect((await call(c, 'build_vn_pack', { book: 'film' })).raw).toMatch(/is a screenplay/)
+    expect((await call(c, 'get_vn_pack', { book: 'film' })).raw).toMatch(/is a screenplay/)
+    await env!.engine.books.create('vn2', { title: 'VN 2', format: 'visual-novel', stage: 'drafting', target_words: 5000, script: true }, '')
+    expect((await call(c, 'get_vn_pack', { book: 'vn2' })).raw).toMatch(/run build_vn_pack first/)
   })
 
   it('refresh_factbase refuses a fiction book', async () => {
