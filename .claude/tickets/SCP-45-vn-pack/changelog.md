@@ -2,7 +2,7 @@
 
 ## 2026-10-25 — Scriptorium writes the language-independent VN pack
 
-Branch `SCP-45_vn-pack` (from `master`), uncommitted. Cross-repo plan/contract: `C:\projects\Personal\creative-hub\.claude\tickets\HUB-16-vn-pack\`.
+Branch `SCP-45_vn-pack` (from `master`), commit `ec5d6ad`, pushed to `origin/SCP-45_vn-pack`. Cross-repo plan/contract: `C:\projects\Personal\creative-hub\.claude\tickets\HUB-16-vn-pack\`.
 
 ### What changed
 
