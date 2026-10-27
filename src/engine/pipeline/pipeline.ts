@@ -26,8 +26,6 @@ export interface PipelineOptions extends Omit<PipelineDeps, 'requestCover' | 'ki
   bookChanged?: (slug: string) => void
   /** True when Electron main can render cover HTML to PNG (the engine runs as a utilityProcess). */
   coverRenderer: boolean
-  /** The one idea the factory works on (`only`), or undefined for all of them. */
-  onlyIdea?: () => string | undefined
   /** Interval of the factory tick in ms. Default 5000. */
   tickMs?: number
   /** True when an agent of this role is hired (agents/). The humanizer pass is skipped while there is none. */
@@ -459,9 +457,9 @@ export class Pipeline {
     this.o.emit({ type: 'engine.warning', message })
   }
 
-  private async pendingJobs(task: string): Promise<number> {
+  private async pendingJobs(task: string, idea?: string): Promise<number> {
     let n = 0
-    for (const state of ['queued', 'running'] as const) for (const j of await this.jobs.list(state)) if (j.data.task === task) n++
+    for (const state of ['queued', 'running'] as const) for (const j of await this.jobs.list(state)) if (j.data.task === task && (!idea || j.data.idea === idea)) n++
     return n
   }
 
@@ -519,8 +517,9 @@ export class Pipeline {
   private async startBooks(only?: string): Promise<void> {
     const factory = this.o.getFactory()
     // pending first, books second: a start job that finishes in between is then counted as a book (never missed)
-    const pending = await this.pendingJobs('start_book')
-    const open = await countInProgress(this.books)
+    // a single-idea run counts only that idea's start jobs and books: the others never run, so they must not hold it back
+    const pending = await this.pendingJobs('start_book', only)
+    const open = await countInProgress(this.books, only)
     // books and articles have separate limits: a full set of articles never holds a book back, and the other way round
     const room = { books: open.books < factory.max_books_in_progress, articles: open.articles < factory.max_articles_in_progress }
     if ((!room.books && !room.articles) || pending > 0) return

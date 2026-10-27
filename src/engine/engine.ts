@@ -215,6 +215,7 @@ export class Engine {
 
   async start(): Promise<void> {
     await this.loadFactory()
+    await this.checkOnly()
     await this.loadQualityAndFormats()
     await this.loadSettings()
     await this.registry.load()
@@ -558,6 +559,16 @@ export class Engine {
 
   /** `--only <idea>` on the command line: wins over `only` in factory.md and is never written. */
   onlyOverride?: string
+
+  /** Does the idea named by `only` exist? A missing one is warned about loudly (nothing would ever run), and false is returned. */
+  async checkOnly(): Promise<boolean> {
+    const only = this.onlyIdea()
+    if (!only || (await this.ideas.list()).some((i) => i.slug === only)) return true
+    const message = `single-idea run: there is no idea "${only}" in ideas/, so no job will run. Fix \`only\` in config/factory.md (or --only), or clear it.`
+    this.log(`WARNING: ${message}`)
+    this.emit({ type: 'engine.warning', message })
+    return false
+  }
 
   /** The one idea the factory works on (`only`), or undefined for all. */
   onlyIdea(): string | undefined {

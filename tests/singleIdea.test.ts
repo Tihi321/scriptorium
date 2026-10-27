@@ -1,7 +1,8 @@
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { emptyBrief } from '../src/shared/brief'
+import { parseMd } from '../src/shared/md'
 import { makeEnv, sleep, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
 
@@ -83,5 +84,51 @@ describe('single-idea run (only)', () => {
     expect(names.every((n) => n === mine)).toBe(true)
     expect(queued.some((n) => n.startsWith('ideas--generate--'))).toBe(false)
     expect(names).not.toContain(other)
+  })
+})
+
+describe('single-idea run: the global gates', () => {
+  it('a queued start job of another idea does not hold the chosen idea back', async () => {
+    const { e, mine, other } = await setup()
+    env = e
+    await e.engine.setOnly(mine)
+    await e.engine.jobs.enqueue({ id: 'eic--start--other--r0', task: 'start_book', role: 'editor-in-chief', idea: other, requested_by: 'engine' })
+    await e.engine.pipeline.tick()
+    const all = [...(await jobsIn(e, 'queued')), ...(await jobsIn(e, 'running')), ...(await jobsIn(e, 'done')), ...(await jobsIn(e, 'failed'))]
+    expect(all.filter((n) => n.startsWith('eic--start--') && n !== 'eic--start--other--r0').length).toBe(1)
+  })
+
+  it('open books of other ideas do not count toward max_books_in_progress', async () => {
+    const { e, mine } = await setup()
+    env = e
+    for (const n of ['a', 'b', 'c', 'd']) await e.engine.books.create(`busy-${n}`, { title: n, stage: 'drafting', format: 'short-story', target_words: 1000, idea: 'someone-else' })
+    expect((await e.engine.pipeline.countInProgress())).toBeGreaterThanOrEqual(4)
+    await e.engine.setOnly(mine)
+    await e.engine.pipeline.tick()
+    const all = [...(await jobsIn(e, 'queued')), ...(await jobsIn(e, 'running')), ...(await jobsIn(e, 'done')), ...(await jobsIn(e, 'failed'))]
+    expect(all.some((n) => n.startsWith('eic--start--'))).toBe(true)
+  })
+
+  it('setOnly persists to config/factory.md and is read back; null clears it', async () => {
+    const { e, mine } = await setup()
+    env = e
+    await e.engine.setOnly(mine)
+    expect(parseMd(await readFile(path.join(e.dir, 'config', 'factory.md'), 'utf8')).data.only).toBe(mine)
+    e.engine.factory = { ...e.engine.factory, only: undefined }
+    await e.engine.loadFactory()
+    expect(e.engine.factory.only).toBe(mine)
+    await e.engine.setOnly(null)
+    await e.engine.loadFactory()
+    expect(e.engine.factory.only).toBeUndefined()
+    expect(parseMd(await readFile(path.join(e.dir, 'config', 'factory.md'), 'utf8')).data.only).toBeUndefined()
+  })
+
+  it('checkOnly warns when the idea does not exist', async () => {
+    const { e } = await setup()
+    env = e
+    expect(await e.engine.checkOnly()).toBe(true)
+    await e.engine.setOnly('no-such-idea')
+    expect(await e.engine.checkOnly()).toBe(false)
+    expect(e.events.some((ev) => ev.type === 'engine.warning' && ev.message.includes('no-such-idea'))).toBe(true)
   })
 })

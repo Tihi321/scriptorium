@@ -31,10 +31,15 @@ export const TERMINAL_BOOK_STAGES = new Set(['published', 'rejected', 'failed'])
  * Books and articles that are not finished, counted apart: articles (`article: true` in book.md) have their own limit and do not count
  * toward `max_books_in_progress`. A folder whose book.md can't be read right now (it is being written) counts as a book in progress.
  */
-export async function countInProgress(books: BookStore): Promise<{ books: number; articles: number }> {
+export async function countInProgress(books: BookStore, onlyIdea?: string): Promise<{ books: number; articles: number }> {
   const n = { books: 0, articles: 0 }
   for (const slug of await books.slugs()) {
     const b = await books.read(slug)
+    if (onlyIdea) {
+      // a single-idea run: only the books of that idea count toward the limits
+      if (b && b.data.idea === onlyIdea && !TERMINAL_BOOK_STAGES.has(b.data.stage)) n[b.data.article === true ? 'articles' : 'books']++
+      continue
+    }
     if (!b) n.books++
     else if (!TERMINAL_BOOK_STAGES.has(b.data.stage)) n[b.data.article === true ? 'articles' : 'books']++
   }

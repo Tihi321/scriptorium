@@ -88,6 +88,12 @@ async function main(): Promise<void> {
   if (only) {
     engine.onlyOverride = only
     log(`single-idea run: only "${only}" starts and runs (--only)`)
+    if (!(await engine.checkOnly())) {
+      await lock.release()
+      process.stderr.write(`[engine] --only: no idea "${only}" in ideas/. Not starting.
+`)
+      process.exit(1)
+    }
   }
   await engine.start()
   const watcher = watchDataFolder(dataDir, (e) => {
