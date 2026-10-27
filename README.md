@@ -39,3 +39,18 @@ Data folder: `--data <dir>`, else the `SCRIPTORIUM_DATA` environment variable, e
 If `npm run dev` says "Electron uninstall", the Electron binary wasn't downloaded: run `node node_modules/electron/install.js`.
 
 The SQLite spike (`node:sqlite` + `sqlite-vec`) can be rerun with `node scripts/spike-sqlite.mjs` and `npx electron scripts/spike-electron.cjs`.
+
+## Packaging
+
+Windows builds go to `release/` (gitignored), from `electron-builder.config.cjs`:
+
+```sh
+yarn dist            # build, NSIS installer + portable exe, then verify-package
+yarn dist:installer  # release/Scriptorium-Setup-<version>-x64.exe
+yarn dist:portable   # release/Scriptorium-Portable-<version>-x64.exe
+yarn dist:dir        # unpacked app only (release/win-unpacked)
+yarn verify:package  # check release/win-unpacked (layout, seed, native files); never starts the app
+yarn icons           # regenerate build/icon.ico and build/icon.png (scripts/make-icons.mjs)
+```
+
+The app is not packed into an asar (sqlite-vec's `vec0.dll` and the keyring `.node` file must be real files). `verify:package` does not launch Scriptorium, because starting it resumes the book factory.

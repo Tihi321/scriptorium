@@ -61,6 +61,10 @@ Found on the VN adaptation `the-local-patch-2` (hub run log `runs/the-local-patc
 - **SCP-42: the length-fix note for a script asks for "repetition".** A draft at 77% of its target (10,134 of 13,129, inside the format's 8,000 to 25,000) got a grow rewrite of every chapter with "develop the scenes, add concrete detail, repetition and sensory description". For a script that is the wrong advice (more lines and beats, not repeated prose). Phrase it per medium, and consider no grow rewrite for an adaptation that is inside its format's range and within about 25% of a source-derived target.
 - **SCP-43: a short film gets two rewrite rounds.** Found on the screenplay `the-local-patch-3` (hub run log `runs/the-local-patch-3.md`, where SCP-29 held). `short-film` has `max_rounds: 1` in `seed/config/formats.md`, so round 1 at 6.73 (four reviewers, with small notes: one continuity word, dialogue too long for an 8 s shot) was rejected at once. A `reopen_book {mode: "rewrite"}` gave round 2, which passed at 7.09. Rounds are cheap for a 2-minute screenplay. Set `max_rounds: 2` for `short-film` (and check `cartoon` and `kids-cartoon`). The seed hash must change, so untouched data folders upgrade.
 
+## Packaging
+
+- **SCP-47 (done): Windows packaging scripts.** `electron-builder.config.cjs` replaces `electron-builder.yml` (output `release/`, NSIS plus portable, `asar: false` kept); `yarn dist`, `dist:installer`, `dist:portable`, `dist:dir`, `verify:package` (new `scripts/verify-package.mjs`, never starts the app) and `icons` (`build/make-icon.mjs` moved to `scripts/make-icons.mjs`). Plan in `.claude/tickets/SCP-47-packaging-scripts/`.
+
 ## Models
 
 - **Antigravity models** (user decision, 2026-10-22): no Antigravity login of Scriptorium's own. If they are wanted, they come through the ACP proxy (hub ticket HUB-09).

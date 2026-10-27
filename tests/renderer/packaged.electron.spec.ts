@@ -9,12 +9,12 @@ import { writeMd } from '../../src/engine/store/atomic'
 import { ROLES } from '../../src/shared/schemas'
 
 /**
- * Smoke test of the packaged app (`npm run dist:dir` output, dist/win-unpacked). It never runs the NSIS installer.
+ * Smoke test of the packaged app (`npm run dist:dir` output, release/win-unpacked). It never runs the NSIS installer.
  * Run through `npm run test:packaged`, which builds the unpacked app first.
  */
 const root = path.resolve(__dirname, '../..')
-const exe = path.join(root, 'dist/win-unpacked/Scriptorium.exe')
-const appDir = path.join(root, 'dist/win-unpacked/resources/app')
+const exe = path.join(root, 'release/win-unpacked/Scriptorium.exe')
+const appDir = path.join(root, 'release/win-unpacked/resources/app')
 const published = path.join(root, '.claude/temp/p3-toddler-5')
 const SLUG = 'the-moon-s-blanket'
 

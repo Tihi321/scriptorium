@@ -5,3 +5,4 @@ dist
 .claude/temp/
 .yarn/
 .pnp.*
+release/

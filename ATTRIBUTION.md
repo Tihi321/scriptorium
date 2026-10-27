@@ -23,7 +23,7 @@ The pixel-art office tiles, furniture and the five character pictures in `src/re
 
 ## App icon
 
-`build/icon.ico` and `build/icon.png` (the book with a quill, also used for the tray) are drawn by code in `build/make-icon.mjs`. They are original to this project and use no downloaded art.
+`build/icon.ico` and `build/icon.png` (the book with a quill, also used for the tray) are drawn by code in `scripts/make-icons.mjs`. They are original to this project and use no downloaded art.
 
 ## Packaging
 

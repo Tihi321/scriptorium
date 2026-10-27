@@ -21,8 +21,12 @@
     "seed:hashes": "node scripts/seed-hashes.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
-    "dist": "yarn build && electron-builder --config electron-builder.yml --win nsis --x64",
-    "dist:dir": "yarn build && electron-builder --config electron-builder.yml --win dir --x64"
+    "dist": "yarn build && electron-builder --win --x64 --config electron-builder.config.cjs && node scripts/verify-package.mjs",
+    "dist:installer": "yarn build && electron-builder --win nsis --x64 --config electron-builder.config.cjs && node scripts/verify-package.mjs",
+    "dist:portable": "yarn build && electron-builder --win portable --x64 --config electron-builder.config.cjs && node scripts/verify-package.mjs",
+    "dist:dir": "yarn build && electron-builder --win --dir --x64 --config electron-builder.config.cjs",
+    "verify:package": "node scripts/verify-package.mjs",
+    "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
