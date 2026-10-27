@@ -1,11 +1,11 @@
 // Draws the app icon (a pixel-art book with a quill) with code and writes build/icon.png and build/icon.ico.
-// Run: node build/make-icon.mjs
+// Run: yarn icons (node scripts/make-icons.mjs)
 import { deflateSync } from 'node:zlib'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const here = path.dirname(fileURLToPath(import.meta.url))
+const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'build')
 const N = 32
 const px = new Array(N * N).fill(null)
 const hex = (s) => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16), 255]
