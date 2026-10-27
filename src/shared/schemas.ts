@@ -129,6 +129,8 @@ export const rolesSchema = configBase('roles').extend({
 export const factorySchema = configBase('factory').extend({
   /** Persisted "pause all": no new jobs start while true. */
   paused: z.boolean().default(false),
+  /** Slug of one idea (story): only its jobs and its books' jobs run, whatever else is open. Unset: every idea (the default). */
+  only: z.string().optional(),
   max_books_in_progress: z.number().int().positive().default(3),
   /** How many newspaper articles (formats with `article: true`) are worked on at the same time. They do not count toward max_books_in_progress. */
   max_articles_in_progress: z.number().int().positive().default(3),

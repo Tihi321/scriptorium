@@ -159,6 +159,7 @@ export class Engine {
       pollMs: opts.pollMs,
       onAgentsChanged: () => this.syncAgents(),
       isBookPaused: (book) => this.pipeline.pausedBooks.has(book),
+      inScope: (job) => this.jobInScope(job),
       getBookModel: (book, role) => this.bookModel(book, role),
       getIdeaModel: (idea, role) => this.ideaModel(idea, role)
     })
@@ -197,6 +198,7 @@ export class Engine {
       emit: this.emit,
       log: this.log,
       coverRenderer: !!opts.coverRenderer,
+      onlyIdea: () => this.onlyIdea(),
       hasAgent: (role) => this.agents.list().some((a) => a.data.role === role),
       bookChanged: (slug) => void this.emitBookUpdated(slug),
       tickMs: opts.tickMs
@@ -552,6 +554,38 @@ export class Engine {
         ...(!p.local && m.price!.cachedIn !== undefined ? { price_cached_in: m.price!.cachedIn } : {})
       })
     }
+  }
+
+  /** `--only <idea>` on the command line: wins over `only` in factory.md and is never written. */
+  onlyOverride?: string
+
+  /** The one idea the factory works on (`only`), or undefined for all. */
+  onlyIdea(): string | undefined {
+    return this.onlyOverride || this.factory.only || undefined
+  }
+
+  /** Is the job part of the run? Always, unless `only` is set: then its idea, or its book's idea, must be that idea. */
+  async jobInScope(job: { idea?: string | null; book?: string | null }): Promise<boolean> {
+    const only = this.onlyIdea()
+    if (!only) return true
+    if (job.idea) return job.idea === only
+    if (job.book) return (await this.books.read(job.book))?.data.idea === only
+    return false
+  }
+
+  /** Persists `only` in config/factory.md (null clears it). */
+  async setOnly(idea: string | null): Promise<void> {
+    const file = this.factoryFile()
+    let doc
+    try {
+      doc = await readMd(file)
+    } catch {
+      doc = { data: { kind: 'factory' } as Record<string, unknown>, body: '' }
+    }
+    const { only: _drop, ...rest } = doc.data as Record<string, unknown>
+    await writeMd(file, idea ? { ...rest, only: idea } : rest, doc.body)
+    this.factory = { ...this.factory, only: idea ?? undefined }
+    this.pipeline.kick()
   }
 
   /** Persists pause all in config/factory.md. */

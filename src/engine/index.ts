@@ -24,6 +24,7 @@ Usage:
   --heartbeat <ms>  Heartbeat interval. Default 3000
   --mcp             Serve the factory over MCP (http://127.0.0.1:7341/mcp), whatever config/mcp.md says
   --no-mcp          Do not start the MCP server
+  --only <idea>     Work on one idea (story slug) only: no other idea starts, no other book's jobs run (overrides "only" in config/factory.md)
   --mcp-port <n>    MCP port (0: any free one). Default: port in config/mcp.md
   probe             Stream one short reply from LM Studio (and DeepSeek if a key is set) and embed one string
   reindex           Rebuild index/library.sqlite (search index) from the markdown files
@@ -83,6 +84,11 @@ async function main(): Promise<void> {
 
   const startedAt = Date.now()
   const engine = new Engine({ dataDir, emit: (e) => transport.send(e), log, coverRenderer: !!parentPort })
+  const only = argValue(argv, 'only')
+  if (only) {
+    engine.onlyOverride = only
+    log(`single-idea run: only "${only}" starts and runs (--only)`)
+  }
   await engine.start()
   const watcher = watchDataFolder(dataDir, (e) => {
     log(`changed: ${e.kind} ${e.change} ${e.rel}`)

@@ -145,6 +145,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       return {
         dataDir: engine.dataDir,
         paused: engine.factory.paused,
+        only: engine.onlyIdea() ?? null,
         uptimeMs: engine.uptimeMs,
         spend: engine.budget.snapshot(),
         servers: serverStatuses(engine.registry),
@@ -1005,6 +1006,16 @@ export function registerTools(server: McpServer, engine: Engine): void {
   )
 
   // ---- factory ----
+  server.registerTool(
+    'set_factory_only',
+    { description: 'Run the factory for exactly one idea (story): pass its slug and only that idea starts, and only the jobs of that idea and of the book made from it run; every other idea and book waits, queued jobs stay queued. Pass null to go back to all ideas. Saved as `only` in config/factory.md (the engine option `--only <slug>` does the same without writing the file).', inputSchema: { idea: z.string().nullable() }, annotations: WRITE },
+    run(async ({ idea }: { idea: string | null }) => {
+      if (idea && !(await engine.ideas.list()).some((i) => i.slug === idea)) throw new Error(`no idea "${idea}"`)
+      await engine.setOnly(idea)
+      return { only: engine.onlyIdea() ?? null }
+    })
+  )
+
   server.registerTool(
     'set_factory_paused',
     { description: 'Pause or resume the whole factory. While paused no new jobs start (running ones finish).', inputSchema: { paused: z.boolean() }, annotations: WRITE },

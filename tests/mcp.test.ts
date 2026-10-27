@@ -75,7 +75,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'get_screenplay', 'build_vn_pack', 'get_vn_pack', 'refresh_factbase']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'set_factory_only', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'get_screenplay', 'build_vn_pack', 'get_vn_pack', 'refresh_factbase']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
