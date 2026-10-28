@@ -112,6 +112,8 @@ export interface SchedulerDeps {
   onAgentsChanged?: () => void
   /** True for a book paused on its own (`paused: true` in book.md): its jobs wait, running ones finish. */
   isBookPaused?: (book: string) => boolean
+  /** False for a job outside the single-idea run (`only` in factory.md): it stays queued. Unset: every job is in scope. */
+  inScope?: (job: JobFrontmatter) => Promise<boolean>
   /** The model a book sets for a role (`role_models` in book.md), if any. */
   getBookModel?: (book: string, role: string) => Promise<string | undefined>
   /** The model a story sets for a role (`role_models` in ideas/<story>.md): for a job of no book yet, such as `start_book`. */
@@ -324,6 +326,7 @@ export class Scheduler {
         if (!this.handlers.has(j.task)) continue
         if (j.not_before && Date.parse(j.not_before) > t) continue
         if (j.book && this.d.isBookPaused?.(j.book)) continue
+        if (this.d.inScope && !(await this.d.inScope(j))) continue
         if (j.depends_on.some((id) => !doneIds.has(id))) continue
         if (j.waiting_on && !doneIds.has(j.waiting_on)) continue
         if (j.locks.some((l) => this.locks.has(l))) continue

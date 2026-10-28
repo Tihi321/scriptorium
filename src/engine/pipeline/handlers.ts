@@ -71,6 +71,8 @@ export interface PipelineDeps {
   contextTokens(role: string): number | undefined
   getFormats(): FormatEntry[]
   getFactory(): FactoryConfig
+  /** The one idea the factory works on (`only` in factory.md), or undefined for all of them. */
+  onlyIdea?: () => string | undefined
   emit(e: EngineEvent): void
   log(message: string): void
   /** Renders the cover PNG (Electron) or marks it pending (headless). */
@@ -438,10 +440,11 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const run = new Run(ctx)
     const formats = d.getFormats()
     // the start jobs hold the `factory:start` lock, so they run one at a time: count again here, in case the factory was busy since the job was queued
-    const open = await countInProgress(d.books)
+    const only = d.onlyIdea?.()
+    const open = await countInProgress(d.books, only)
     const room: SlotRoom = { books: open.books < d.getFactory().max_books_in_progress, articles: open.articles < d.getFactory().max_articles_in_progress }
     if (!room.books && !room.articles) return { result: 'enough books in progress already' }
-    const pick = pickNext(await d.ideas.list(), await d.topics.read(), formats, await bookRefs(d.books), room, ctx.job.idea)
+    const pick = pickNext((await d.ideas.list()).filter((i) => !only || i.slug === only), only ? [] : await d.topics.read(), formats, await bookRefs(d.books), room, ctx.job.idea)
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it

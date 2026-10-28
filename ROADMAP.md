@@ -4,6 +4,8 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
 
 ## Where it stands (2026-10-25)
 
+- **SCP-48 (done in code, branch `SCP-48_single-idea-run`): single-idea run.** `only: <idea slug>` in `config/factory.md`, `--only <slug>` on the engine and the MCP tool `set_factory_only`: the scheduler and the pipeline work on that idea and its book only, whatever else is open. Default unchanged. Plan in `.claude/tickets/SCP-48-single-idea-run/`.
+
 - **Merged 2026-10-25 (PR #13):** SCP-45 writes the language-independent VN pack (`vn/pack.json` + `vn/text/<lang>.json`), `build_vn_pack`/`get_vn_pack`, narrator/`C<n>` tokens, `SCENE:` first-period/time parsing and the key helper; plan/changelog in `.claude/tickets/SCP-45-vn-pack/`, contract in the hub's `.claude/tickets/HUB-16-vn-pack/`. 679 tests + recovery, typecheck and lint green.
 - **Merged:** SCP-08 to SCP-19 (SCP-16 to SCP-18 in PR #10; master 5801f09). The HUB-04 live check ran on a8cf243 (SCP-14, SCP-19).
 - **SCP-16 to SCP-18 (merged, PR #10):** SCP-16 (VN media lines and aliases), SCP-17 (the screenplay writer) and SCP-18 (mystery with puzzles); the details are in `.claude/tickets/SCP-16-vn-media-lines/`, `SCP-17-screenplay-writer/` and `SCP-18-mystery-puzzles/` (each `changelog.md`).

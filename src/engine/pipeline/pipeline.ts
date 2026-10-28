@@ -427,14 +427,20 @@ export class Pipeline {
 
   async tick(): Promise<void> {
     const failed = await this.failedByBook()
+    const only = this.o.onlyIdea?.()
     for (const slug of await this.books.slugs()) {
       const b = await this.books.read(slug)
       if (b?.data.paused === true) this.pausedBooks.add(slug)
       else if (b) this.pausedBooks.delete(slug)
       if (!b || TERMINAL_STAGES.has(b.data.stage)) continue
+      if (only && b.data.idea !== only) continue // a single-idea run leaves the other books alone
       await this.advanceBook(slug, failed)
     }
     if (this.o.getFactory().paused) return
+    if (only) {
+      await this.startBooks(only)
+      return
+    }
     await this.fillIdeas()
     await this.startBooks()
   }
@@ -451,9 +457,9 @@ export class Pipeline {
     this.o.emit({ type: 'engine.warning', message })
   }
 
-  private async pendingJobs(task: string): Promise<number> {
+  private async pendingJobs(task: string, idea?: string): Promise<number> {
     let n = 0
-    for (const state of ['queued', 'running'] as const) for (const j of await this.jobs.list(state)) if (j.data.task === task) n++
+    for (const state of ['queued', 'running'] as const) for (const j of await this.jobs.list(state)) if (j.data.task === task && (!idea || j.data.idea === idea)) n++
     return n
   }
 
@@ -508,15 +514,16 @@ export class Pipeline {
     await this.jobs.enqueue({ id: `ideas--generate--b${all + 1}--r0`, task: 'generate_ideas', role: 'idea-generator', requested_by: 'engine' })
   }
 
-  private async startBooks(): Promise<void> {
+  private async startBooks(only?: string): Promise<void> {
     const factory = this.o.getFactory()
     // pending first, books second: a start job that finishes in between is then counted as a book (never missed)
-    const pending = await this.pendingJobs('start_book')
-    const open = await countInProgress(this.books)
+    // a single-idea run counts only that idea's start jobs and books: the others never run, so they must not hold it back
+    const pending = await this.pendingJobs('start_book', only)
+    const open = await countInProgress(this.books, only)
     // books and articles have separate limits: a full set of articles never holds a book back, and the other way round
     const room = { books: open.books < factory.max_books_in_progress, articles: open.articles < factory.max_articles_in_progress }
     if ((!room.books && !room.articles) || pending > 0) return
-    const ideas = await this.o.ideas.list()
+    const ideas = (await this.o.ideas.list()).filter((i) => !only || i.slug === only)
     // a story whose start failed 3 times is skipped (the others still start); a start with no story (a topic) has one shared count
     const { stories: failedStories, shared: failedShared } = await this.startFailures(ideas)
     const skip = new Set<string>()
@@ -525,7 +532,7 @@ export class Pipeline {
       skip.add(slug)
       this.warnOnce(`start-failing:${slug}`, `starting the story "${ideas.find((i) => i.slug === slug)?.title ?? slug}" failed ${n} times. It is skipped; the other stories still start. Remove its failed jobs in jobs/failed/ (eic--start--*) or edit the story to try it again.`)
     }
-    const pick = pickNext(ideas, await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room, undefined, skip)
+    const pick = pickNext(ideas, only ? [] : await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room, undefined, skip)
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {
