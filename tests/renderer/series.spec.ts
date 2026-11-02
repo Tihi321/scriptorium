@@ -14,6 +14,7 @@ test('the library creates a series, and "Next book" opens the story form with th
   await page.goto('/?demo&seed=3&tick=0')
   await expect(page.getByTestId('whiteboard')).toBeVisible()
   await page.getByTestId('tab-library').click()
+  await page.getByTestId('library-side-tab-series').click()
   await expect(page.getByTestId('series-panel')).toBeVisible()
   await expect(page.getByTestId('series-panel')).toContainText('No series yet')
 

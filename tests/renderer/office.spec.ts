@@ -200,6 +200,15 @@ test('the library shows shelves, a book card opens, the reader shows chapter 1, 
   await page.getByTestId('toggle-rejected').click()
   await expect(page.getByTestId('library').locator('.shelf-title', { hasText: 'The Grey Lighthouse' })).toHaveCount(1)
 
+  // the type chips: the demo's visual novel adaptation stands on its source's shelf with a "from" line, and the chip filters to it
+  await expect(page.getByTestId('from-blanket-moon-vn')).toHaveText("from The Moon's Blanket")
+  await page.getByTestId('type-chip-vn').click()
+  await expect(page.getByTestId('shelf-book-blanket-moon-vn')).toBeVisible()
+  await expect(page.getByTestId('shelf-book-the-moons-blanket')).toBeHidden()
+  await page.getByTestId('library-search').fill('zzz')
+  await page.getByTestId('library-clear').click()
+  await expect(page.getByTestId('shelf-book-the-moons-blanket')).toBeVisible()
+
   // the card
   await page.getByTestId('shelf-book-the-moons-blanket').click()
   await expect(page.getByTestId('card-title')).toHaveText("The Moon's Blanket")

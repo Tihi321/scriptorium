@@ -14,6 +14,7 @@ import {
   type SpendView,
   type StateGroup
 } from './model'
+import { NO_FILTER, type LibraryFilter } from './bookTypes'
 import { MAX_JOBS_PER_KEY, appendOutput, emptyJob, type JobLog } from './logModel'
 
 export interface OfficeState {
@@ -58,6 +59,9 @@ export interface OfficeState {
   kindle: Record<string, { state: 'sending' | 'ok' | 'error'; error?: string }>
   /** The office, the library or the newspaper. */
   view: 'office' | 'library' | 'newspaper'
+  /** The Library's filter bar and grouping. UI-only: never written to files, and it survives tab switches. */
+  libraryFilter: LibraryFilter
+  libraryGroupBy: 'topic' | 'type'
   /** The book whose card is open, and whether its reader is showing. */
   openBook: string | null
   reading: boolean
@@ -89,6 +93,8 @@ export interface OfficeActions {
   openDraft(slug: string | null): void
   setTerminal(open: boolean, mode?: 'agent' | 'book'): void
   setView(view: 'office' | 'library' | 'newspaper'): void
+  setLibraryFilter(patch: Partial<LibraryFilter>): void
+  setLibraryGroupBy(groupBy: 'topic' | 'type'): void
   /** Asks the story form (Ideas tab) to open with this series selected. The form clears it with null. */
   setStorySeries(series: string | null): void
   openBookCard(slug: string | null, reading?: boolean): void
@@ -136,6 +142,8 @@ function initial(): OfficeState {
     mcp: null,
     kindle: {},
     view: 'office',
+    libraryFilter: { ...NO_FILTER },
+    libraryGroupBy: 'topic',
     openBook: null,
     reading: false,
     settingsOpen: false,
@@ -409,6 +417,12 @@ export function createOfficeStore() {
     },
     setView(view) {
       set({ view })
+    },
+    setLibraryFilter(patch) {
+      set({ libraryFilter: { ...get().libraryFilter, ...patch } })
+    },
+    setLibraryGroupBy(libraryGroupBy) {
+      set({ libraryGroupBy })
     },
     setStorySeries(series) {
       set({ storySeries: series })
