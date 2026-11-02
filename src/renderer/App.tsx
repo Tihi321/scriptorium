@@ -13,6 +13,7 @@ import { Controls } from './ui/Controls'
 import { SideTools } from './ui/SideTools'
 import { StatusBar } from './ui/StatusBar'
 import { Terminal } from './ui/Terminal'
+import { WarnStrip } from './ui/WarnStrip'
 import { Whiteboard } from './ui/Whiteboard'
 
 export function App() {
@@ -21,11 +22,10 @@ export function App() {
   const warning = useOffice((s) => s.warnings[s.warnings.length - 1])
   return (
     <div className="app">
-      <div>
-        <div className="topbar">
-          <span className="brand">SCRIPTORIUM</span>
-          <StatusBar />
-          <span className="tabs row">
+      <header className="masthead">
+        <div className="masthead-main">
+          <span className="brand">Scriptorium</span>
+          <nav className="view-tabs">
             <button className={view === 'office' ? 'on' : ''} onClick={() => officeStore.getState().setView('office')} data-testid="tab-office">
               Office
             </button>
@@ -35,20 +35,24 @@ export function App() {
             <button className={view === 'newspaper' ? 'on' : ''} onClick={() => officeStore.getState().setView('newspaper')} data-testid="tab-newspaper">
               Newspaper
             </button>
-          </span>
-          <button onClick={() => officeStore.getState().setModelsOpen(true)} data-testid="models-open">
+          </nav>
+          <span className="masthead-spacer" />
+          <button className="ghost" onClick={() => officeStore.getState().setModelsOpen(true)} data-testid="models-open">
             Models
           </button>
-          <button onClick={() => officeStore.getState().setSettingsOpen(true)} data-testid="settings-open">
+          <button className="ghost" onClick={() => officeStore.getState().setSettingsOpen(true)} data-testid="settings-open">
             Settings
           </button>
-          <button onClick={() => setHiring(true)} data-testid="hire-open">
+          <button className="ghost" onClick={() => setHiring(true)} data-testid="hire-open">
             Hire
           </button>
           <Controls />
         </div>
-        {warning && <div className="warnbar">{warning}</div>}
-      </div>
+        <div className="masthead-status">
+          <StatusBar />
+        </div>
+        <WarnStrip text={warning} />
+      </header>
       <div className="middle">
         <div className="stage">
           <div className={view === 'office' ? 'stage-pane' : 'stage-pane hidden'}>

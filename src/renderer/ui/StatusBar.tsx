@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { sendCommand } from '../api'
-import { providerColor, providerLabel, roleShort } from '../store/model'
+import { providerColor, providerLabel } from '../store/model'
 import { useAgentList, useOffice } from '../store/hooks'
+import { TeamPopover } from './TeamPopover'
 import { countByProvider, countByRole, countStates, officeStore, type StateCounts } from '../store/store'
 
 function part(c: StateCounts): string {
@@ -28,7 +29,7 @@ function Servers() {
           data-down={s.down}
           title={s.down ? `${providerLabel(s.id)} is not running: its jobs go to the next model in their role` : `${providerLabel(s.id)} runs ${s.slots} request(s) at once`}
         >
-          <span className="dot" style={{ background: s.down ? '#e5484d' : providerColor(s.id) }} />
+          <span className="dot" style={{ background: s.down ? 'var(--rubric)' : providerColor(s.id) }} />
           {providerLabel(s.id)} {s.down ? 'off' : `on ×${s.slots}`}
         </span>
       ))}
@@ -48,7 +49,7 @@ function McpPill() {
   const port = new URL(mcp.url).port
   return (
     <span className="pill" data-testid="mcp-status" title={`MCP server: ${mcp.url}`}>
-      <span className="dot" style={{ background: '#6aa8ff' }} />
+      <span className="dot" style={{ background: 'var(--lapis)' }} />
       MCP :{port}
     </span>
   )
@@ -61,39 +62,33 @@ export function StatusBar() {
   const byRole = useMemo(() => countByRole(agents), [agents])
   const byProvider = useMemo(() => countByProvider(agents), [agents])
   return (
-    <div className="statusbar" data-testid="statusbar">
+    <div className="status-line" data-testid="statusbar">
       <span className="pill" title={connected ? 'engine connected' : 'waiting for the engine'}>
-        <span className="dot" style={{ background: connected ? '#3fb27f' : '#e5484d' }} />
+        <span className="dot" style={{ background: connected ? 'var(--verdigris)' : 'var(--rubric)' }} />
         {connected ? 'engine' : 'offline'}
       </span>
       <Servers />
       <McpPill />
       <span className="pill" data-testid="count-working">
-        <span className="dot" style={{ background: '#6fe39a' }} />
+        <span className="dot" style={{ background: 'var(--verdigris)' }} />
         working <b>{counts.working}</b>
       </span>
       <span className="pill" data-testid="count-waiting">
-        <span className="dot" style={{ background: '#f2c14e' }} />
+        <span className="dot" style={{ background: 'var(--ochre)' }} />
         waiting <b>{counts.waiting}</b>
       </span>
       <span className="pill" data-testid="count-idle">
-        <span className="dot" style={{ background: '#8d9bb3' }} />
+        <span className="dot" style={{ background: 'var(--vellum-dim)' }} />
         idle <b>{counts.idle}</b>
       </span>
-      <span className="breakdown" title="working / waiting / idle">
+      <span className="breakdown provider-breakdown" title="working / waiting / idle">
         {Object.entries(byProvider).map(([p, c]) => (
           <span key={p} style={{ color: providerColor(p) }}>
             {providerLabel(p)} {part(c)}
           </span>
         ))}
       </span>
-      <span className="breakdown roles" title="working / waiting / idle">
-        {Object.entries(byRole).map(([r, c]) => (
-          <span key={r}>
-            {roleShort(r)} {part(c)}
-          </span>
-        ))}
-      </span>
+      <TeamPopover byRole={byRole} />
     </div>
   )
 }

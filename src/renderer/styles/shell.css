@@ -1,1 +1,230 @@
 /* SCP-51: shell styles. */
+
+.masthead {
+  background: var(--ink-1);
+  position: relative;
+  z-index: 20;
+}
+.masthead-main {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-2);
+  height: 44px;
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--rule);
+}
+.masthead-main > * {
+  align-self: center;
+}
+.masthead .brand {
+  font-family: var(--font-brand);
+  font-size: var(--fs-5);
+  color: var(--gilt);
+  margin-right: var(--sp-3);
+}
+.view-tabs {
+  display: flex;
+  align-self: stretch;
+  gap: var(--sp-1);
+}
+.view-tabs button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0 var(--sp-3);
+  color: var(--vellum-dim);
+  font-size: var(--fs-4);
+}
+.view-tabs button:hover:not(:disabled) {
+  color: var(--vellum);
+  border-color: transparent transparent var(--rule);
+}
+.view-tabs button.on {
+  color: var(--vellum);
+  border-bottom-color: var(--gilt);
+}
+.masthead-spacer {
+  flex: 1;
+}
+.masthead button.ghost {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--vellum-dim);
+  border-radius: var(--r-sm);
+}
+.masthead button.ghost:hover:not(:disabled) {
+  color: var(--vellum);
+  background: var(--ink-2);
+  border-color: var(--rule);
+}
+.masthead .controls {
+  margin-left: var(--sp-2);
+  gap: var(--sp-2);
+}
+.masthead .controls button {
+  background: none;
+  border: 1px solid var(--vellum-dim);
+  border-radius: var(--r-sm);
+  padding: 4px var(--sp-3);
+}
+.masthead .controls button:hover:not(:disabled) {
+  border-color: var(--vellum);
+}
+.masthead .controls button.stop-now {
+  background: var(--rubric);
+  border-color: var(--rubric);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.masthead .controls button.stop-now:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.masthead .controls .confirm {
+  background: var(--ink-2);
+  border: 1px solid var(--rubric);
+  border-radius: var(--r-sm);
+}
+.masthead .controls button.danger {
+  background: var(--rubric);
+  border-color: var(--rubric);
+  color: #fff;
+}
+
+.masthead-status {
+  height: 26px;
+  background: var(--ink-3);
+  border-bottom: 1px solid var(--rule);
+  padding: 0 var(--sp-3);
+}
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 100%;
+  overflow: hidden;
+  font-size: var(--fs-2);
+  color: var(--vellum-dim);
+  white-space: nowrap;
+}
+.status-line .pill {
+  background: none;
+  padding: 0;
+  gap: 6px;
+}
+.status-line .pill b {
+  color: var(--vellum);
+  font-weight: 600;
+}
+.status-line .pill.server.off {
+  color: var(--rubric);
+}
+.status-line .dot {
+  width: 8px;
+  height: 8px;
+}
+.status-line button.small {
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-1);
+}
+.status-line .breakdown {
+  flex-wrap: nowrap;
+  font-size: var(--fs-2);
+  gap: var(--sp-2);
+}
+.status-line .team {
+  position: relative;
+  margin-left: auto;
+}
+.status-line .team-open {
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-2);
+}
+.team-popover {
+  /* fixed: the status line clips its overflow, so an absolute popover would be cut off */
+  position: fixed;
+  right: var(--sp-3);
+  top: 74px;
+  z-index: 30;
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--vellum);
+  white-space: normal;
+  animation: pop-in var(--dur-open) ease-out;
+}
+.team-popover ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--sp-4);
+}
+.team-role {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-2);
+}
+.team-role.dim {
+  color: var(--vellum-dim);
+}
+.team-counts {
+  font-variant-numeric: tabular-nums;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-popover {
+    animation: none;
+  }
+}
+@media (max-width: 1199px) {
+  .status-line .provider-breakdown {
+    display: none;
+  }
+}
+
+.warn-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-3);
+  background: color-mix(in srgb, var(--ochre) 14%, var(--ink-3));
+  color: var(--ochre);
+  font-size: var(--fs-2);
+  border-bottom: 1px solid var(--rule);
+}
+.warn-strip .warn-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.warn-strip[data-open='true'] .warn-text {
+  white-space: normal;
+}
+.warn-strip .warn-x {
+  padding: 0 var(--sp-2);
+  line-height: 1.2;
+  color: inherit;
+}
