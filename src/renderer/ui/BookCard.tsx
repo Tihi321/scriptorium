@@ -182,6 +182,27 @@ export function BookCard() {
               Send to Kindle
             </button>
           )}
+          {!article && book.gamebook && (
+            <>
+              <button onClick={() => sendCommand({ type: 'buildGamebook', book: book.slug })} data-testid="card-gamebook-epub" title="Build the gamebook EPUB: numbered sections with turn-to links">
+                Gamebook EPUB
+              </button>
+              <button onClick={() => sendCommand({ type: 'buildGamebookPdf', book: book.slug })} data-testid="card-gamebook-pdf" title="Build the gamebook PDF: the same sections, text only">
+                Gamebook PDF
+              </button>
+              <button
+                disabled={kindle?.state === 'sending'}
+                onClick={() => {
+                  officeStore.getState().markKindleSending(book.slug)
+                  sendCommand({ type: 'sendToKindle', book: book.slug, gamebook: true })
+                }}
+                data-testid="card-kindle-gamebook"
+                title="Mail the gamebook EPUB (build it first)"
+              >
+                Send gamebook to Kindle
+              </button>
+            </>
+          )}
           {published && (
             <>
               <button disabled={newTitle !== null || drawing} onClick={() => setNewTitle(book.title)} data-testid="card-rename" title="A new title: the cover, EPUB and reader are made again. The folder keeps its name.">

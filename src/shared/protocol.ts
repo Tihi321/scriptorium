@@ -186,6 +186,8 @@ export interface BookSummary {
   lengthGate?: { status: string; words?: number; min?: number; max?: number; wordsBefore?: number } | null
   /** The book was published over the format's ceiling (`length_over` in book.md). */
   lengthOver?: boolean
+  /** A story with choices that has branch data: the gamebook EPUB and PDF can be built (SCP-49, SCP-50). Missing: it has none. */
+  gamebook?: boolean
 }
 
 export interface TopicSummary {

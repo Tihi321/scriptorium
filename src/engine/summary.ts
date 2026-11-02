@@ -122,7 +122,8 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     readerPages: await readReaderPages(books.file(slug, 'out', 'reader')),
     publishedAt: typeof d.published === 'string' ? d.published : null,
     lengthGate: lengthGateOf(d.length_gate),
-    ...(d.length_over === true ? { lengthOver: true } : {})
+    ...(d.length_over === true ? { lengthOver: true } : {}),
+    ...(d.article !== true && (await books.branchMap(slug)) ? { gamebook: true } : {})
   }
 }
 
