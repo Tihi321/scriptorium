@@ -1,1 +1,31 @@
-/* SCP-51: board styles. */
+/* Whiteboard: type badges on the book chips and the Published "Show all" toggle. */
+.whiteboard .wb-badge {
+  flex: none;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  line-height: 16px;
+  color: #12141b;
+  background: var(--vellum-dim);
+}
+.whiteboard .wb-badge.t-vn { background: var(--t-vn); }
+.whiteboard .wb-badge.t-choices { background: var(--t-choices); }
+.whiteboard .wb-badge.t-picture { background: var(--t-picture); }
+.whiteboard .wb-badge.t-scripts { background: var(--t-scripts); }
+.whiteboard .wb-badge.t-puzzle { background: var(--t-puzzle); }
+.whiteboard .wb-badge.t-nonfiction { background: var(--t-nonfiction); }
+.whiteboard .wb-badge.t-stories { background: var(--t-stories); }
+
+.whiteboard .wb-more {
+  margin-top: var(--sp-1);
+  padding: 0 var(--sp-2);
+  font-size: 12px;
+  color: var(--vellum-dim);
+  background: transparent;
+  border: 1px dashed var(--rule);
+  border-radius: var(--r-sm);
+}
+.whiteboard .wb-more:hover {
+  color: var(--vellum);
+  border-color: var(--gilt);
+}

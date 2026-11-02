@@ -1,24 +1,44 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { STAGE_COLUMNS, stageColumn, type BookView } from '../store/model'
 import { useAgentList, useOffice } from '../store/hooks'
 import { agentsPerBook, officeStore } from '../store/store'
+import { typeBadge } from '../store/bookTypes'
 import { sendCommand } from '../api'
 
 const TERMINAL = new Set(['published', 'rejected', 'failed'])
+const PUBLISHED_CAP = 6
 
 export function Whiteboard() {
   const books = useOffice((s) => s.books)
   const highlight = useOffice((s) => s.highlightBook)
+  const formats = useOffice((s) => s.formats)
+  const [showAll, setShowAll] = useState(false)
   const agents = useAgentList()
   const perBook = useMemo(() => agentsPerBook(agents), [agents])
   const columns = useMemo(() => {
     const out: Record<string, BookView[]> = {}
     for (const b of Object.values(books)) (out[stageColumn(b.stage)] ??= []).push(b)
+    // newest published first
+    out.published?.sort((a, b) => (b.summary?.publishedAt ?? '').localeCompare(a.summary?.publishedAt ?? ''))
     return out
   }, [books])
   const names = [...STAGE_COLUMNS, ...(columns.other ? (['other'] as const) : [])]
+  const visible = (col: string): BookView[] => {
+    const list = columns[col] ?? []
+    if (col !== 'published' || showAll || list.length <= PUBLISHED_CAP) return list
+    const shown = list.slice(0, PUBLISHED_CAP)
+    const pinned = highlight ? list.find((b) => b.slug === highlight) : undefined
+    return pinned && !shown.includes(pinned) ? [...shown, pinned] : shown
+  }
+  const chipTitle = (b: BookView): string => {
+    const s = b.summary
+    const parts = [b.title]
+    if (s) parts.push(formats.find((f) => f.id === s.format)?.name ?? s.format)
+    if (s?.sourceBook) parts.push(`adapted from ${s.sourceBook.title}`)
+    return `${parts.join(', ')} (${b.stage}). Click to highlight its agents.`
+  }
   return (
-    <div className="card" data-testid="whiteboard">
+    <div className="card whiteboard" data-testid="whiteboard">
       <h3>
         Whiteboard <span>{Object.keys(books).length} books</span>
       </h3>
@@ -27,19 +47,28 @@ export function Whiteboard() {
           <div className="col-title">
             {col} ({columns[col]?.length ?? 0})
           </div>
-          {(columns[col] ?? []).map((b) => (
-            <button
-              key={b.slug}
-              className={`book-chip${highlight === b.slug ? ' active' : ''}`}
-              onClick={() => officeStore.getState().toggleHighlightBook(b.slug)}
-              title={`${b.title} (${b.stage}). Click to highlight its agents.`}
-              data-testid={`book-${b.slug}`}
-            >
-              <span className="swatch" style={{ background: b.color }} />
-              <span className="name">{b.title}</span>
-              <span className="dim">{b.summary?.paused ? 'paused' : perBook[b.slug] ? `${perBook[b.slug]} on it` : ''}</span>
+          {visible(col).map((b) => {
+            const badge = b.summary ? typeBadge(b.summary.format) : null
+            return (
+              <button
+                key={b.slug}
+                className={`book-chip${highlight === b.slug ? ' active' : ''}`}
+                onClick={() => officeStore.getState().toggleHighlightBook(b.slug)}
+                title={chipTitle(b)}
+                data-testid={`book-${b.slug}`}
+              >
+                <span className="swatch" style={{ background: b.color }} />
+                <span className="name">{b.title}</span>
+                {badge && <span className={`wb-badge t-${badge.group}`}>{badge.text}</span>}
+                <span className="dim">{b.summary?.paused ? 'paused' : perBook[b.slug] ? `${perBook[b.slug]} on it` : ''}</span>
+              </button>
+            )
+          })}
+          {col === 'published' && (columns.published?.length ?? 0) > PUBLISHED_CAP && (
+            <button className="wb-more" onClick={() => setShowAll((v) => !v)} data-testid="board-more-published">
+              {showAll ? 'Show fewer' : `Show all ${columns.published!.length}`}
             </button>
-          ))}
+          )}
         </div>
       ))}
       {highlight && books[highlight] && <BookInfo book={books[highlight]} onIt={perBook[highlight] ?? 0} />}
