@@ -28,3 +28,7 @@ The pixel-art office tiles, furniture and the five character pictures in `src/re
 ## Packaging
 
 The Windows installer is made with electron-builder (MIT) and NSIS. The packaged app bundles Electron (MIT, with the Chromium and other notices in `LICENSE.electron.txt` and `LICENSES.chromium.html` next to the executable), Phaser 3 (MIT), React (MIT) and the other dependencies listed in `package.json`, each under its own licence.
+
+## Font in the gamebook PDF
+
+The gamebook PDF (`src/engine/publish/pdf.ts`) embeds **Lora** (Regular and Bold) by Cyreal, in `resources/fonts/` with its licence text (`OFL.txt`). It is licensed under the SIL Open Font License 1.1 (https://openfontlicense.org), which allows embedding it in documents and bundling it with an app. `electron-builder.config.cjs` lists `resources/fonts/**/*` in `files`, so the packaged app ships it next to `out/`.

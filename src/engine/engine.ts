@@ -1038,6 +1038,17 @@ export class Engine {
     }
   }
 
+  /** SCP-50: writes out/<slug>-gamebook.pdf for a story with choices; says what happened in the log. */
+  private async buildGamebookPdf(cmd: { book: string; renumber?: boolean; seed?: string; lang?: string }): Promise<void> {
+    const slug = cmd.book
+    try {
+      const out = await this.books.buildGamebookPdf(slug, { renumber: cmd.renumber, seed: cmd.seed, lang: cmd.lang, note: (m) => this.log(m) })
+      if (out) this.log(`gamebook PDF of "${slug}": ${out}`)
+    } catch (err) {
+      this.log(`buildGamebookPdf failed for "${slug}": ${(err as Error).message}`)
+    }
+  }
+
   private async sendToKindle(slug: string, gamebook = false): Promise<void> {
     const fail = (error: string) => this.emit({ type: 'kindle.sent', book: slug, ok: false, error })
     const book = await this.books.read(slug)
@@ -1336,6 +1347,9 @@ export class Engine {
         break
       case 'buildGamebook':
         await this.buildGamebook(cmd)
+        return
+      case 'buildGamebookPdf':
+        await this.buildGamebookPdf(cmd)
         return
       case 'askResearcher': {
         // from the "Ask researcher" box: tied to a book (its notes), an idea (shared notes) or general (shared notes)

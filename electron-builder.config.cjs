@@ -6,7 +6,7 @@ module.exports = {
   copyright: 'Tihomir Selak',
   directories: { output: 'release', buildResources: 'build' },
   npmRebuild: false,
-  files: ['out/**/*', '!out/**/*.map', 'package.json'],
+  files: ['out/**/*', '!out/**/*.map', 'resources/fonts/**/*', 'package.json'],
   // No asar archive. sqlite-vec's loadable vec0.dll and the keyring .node file cannot be used from inside an archive,
   // and the engine (a separate process) resolves sqlite-vec with require.resolve, which returns an `app.asar` path
   // that SQLite cannot open. Without the archive every path is a real file path (no asarUnpack needed).

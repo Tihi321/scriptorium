@@ -416,6 +416,11 @@ export type Command =
    * The ordinary EPUB and the reader are not touched. A book without choices is not built (logged).
    */
   | { type: 'buildGamebook'; book: string; renumber?: boolean; seed?: string; lang?: string }
+  /**
+   * Builds the text-only gamebook PDF of a story with choices (SCP-50): out/<slug>-gamebook.pdf, the same sections and numbers as `buildGamebook`
+   * (books/<slug>/gamebook.json), "turn to section N" as links, a footer with the section number. A book without choices is not built (logged).
+   */
+  | { type: 'buildGamebookPdf'; book: string; renumber?: boolean; seed?: string; lang?: string }
   | { type: 'setTopicActive'; id: string; active: boolean }
   /** Adds a row to the "My topics" table in topics.md, switched on unless `active` is false. */
   | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
@@ -483,6 +488,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   rate: true,
   sendToKindle: true,
   buildGamebook: true,
+  buildGamebookPdf: true,
   setTopicActive: true,
   addTopic: true,
   addIdea: true,

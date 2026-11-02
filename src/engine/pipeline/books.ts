@@ -8,6 +8,7 @@ import { bookSchema } from '../../shared/schemas'
 import type { BookFrontmatter } from '../../shared/schemas'
 import { atomicWrite, readMd, writeMd } from '../store/atomic'
 import { buildEpub } from '../publish/epub'
+import { buildGamebookPdf } from '../publish/pdf'
 import { writeReaderDir } from '../publish/reader'
 import { planSections } from '../publish/sections'
 import type { SectionOrder } from '../publish/sections'
@@ -85,6 +86,18 @@ export interface BuildEpubOptions {
   /** Build the numbered-section gamebook of a story with choices (SCP-49). `true`: stored numbers, else seeded by the slug. */
   gamebook?: boolean | { seed?: string; order?: SectionOrder; renumber?: boolean; lang?: string }
   /** Gets a short message about what was done or ignored. */
+  note?: (message: string) => void
+}
+
+/** Options of `BookStore.buildGamebookPdf` (SCP-50). */
+export interface BuildGamebookPdfOptions {
+  seed?: string
+  order?: SectionOrder
+  /** Compute the section numbers again instead of reusing gamebook.json. */
+  renumber?: boolean
+  lang?: string
+  /** Streams are compressed by default; false keeps them readable (tests). */
+  compress?: boolean
   note?: (message: string) => void
 }
 
@@ -551,4 +564,38 @@ export class BookStore {
     return out
   }
 
+  /**
+   * SCP-50: builds the gamebook PDF of a story with choices, text only, to out/<slug>-gamebook.pdf: the same sections and numbers as the gamebook EPUB
+   * (books/<slug>/gamebook.json; a stale file throws, `renumber` computes it again). A book without choices gets no PDF (null; `opts.note` says so).
+   */
+  async buildGamebookPdf(slug: string, opts: BuildGamebookPdfOptions = {}): Promise<string | null> {
+    const book = await this.read(slug)
+    if (!book) throw new Error(`no book ${slug}`)
+    const d = book.data
+    if (d.article === true) throw new Error(`"${slug}" is an article, not a book`)
+    if (!(await this.branchMap(slug))) {
+      opts.note?.(`"${slug}" has no choices, so there is no gamebook PDF`)
+      return null
+    }
+    const chapters = await this.chapters(slug)
+    const links = await this.choiceLinks(slug, chapters)
+    const plan = await planSections(this.file(slug, 'gamebook.json'), slug, chapters.map((c) => c.n), opts)
+    if (plan.stale) throw new Error(`the stored section numbers of "${slug}" (gamebook.json) are for other chapters; export the gamebook with renumber to compute them again`)
+    opts.note?.(`gamebook PDF sections of "${slug}": ${plan.reused ? 'stored numbers reused' : 'numbers computed and stored'} (seed "${plan.seed}", ${plan.order})`)
+    const lang = opts.lang ?? (typeof d.language === 'string' ? d.language : typeof d.lang === 'string' ? d.lang : 'en')
+    const bytes = await buildGamebookPdf({
+      title: d.title,
+      author: d.author ?? undefined,
+      lang,
+      sections: chapters.map((c, i) => {
+        const l = links(c)
+        return { no: plan.sections[i]!, body: c.body, ...(l.choices ? { choices: l.choices.map((ch) => ({ text: ch.text, to: plan.sections[ch.to - 1]! })) } : {}), ...(l.ending !== undefined ? { ending: l.ending } : {}) }
+      }),
+      ...(opts.compress === false ? { compress: false } : {})
+    })
+    const out = this.file(slug, 'out', `${slug}-gamebook.pdf`)
+    await fs.mkdir(path.dirname(out), { recursive: true })
+    await fs.writeFile(out, bytes)
+    return out
+  }
 }
