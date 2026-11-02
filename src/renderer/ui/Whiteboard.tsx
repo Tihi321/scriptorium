@@ -59,7 +59,7 @@ export function Whiteboard() {
               >
                 <span className="swatch" style={{ background: b.color }} />
                 <span className="name">{b.title}</span>
-                {badge && <span className={`wb-badge t-${badge.group}`}>{badge.text}</span>}
+                {badge && <span className={`wb-badge t-${badge.choices ? 'choices' : badge.group}`}>{badge.text}</span>}
                 <span className="dim">{b.summary?.paused ? 'paused' : perBook[b.slug] ? `${perBook[b.slug]} on it` : ''}</span>
               </button>
             )

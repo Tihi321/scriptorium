@@ -1,5 +1,8 @@
 import type { BookSummary } from '../../shared/protocol'
 
+// Twin of C:\projects\Personal\visual-novels-orchestrator\src\renderer\lib\bookTypes.ts (same groups, labels and hues).
+// The two files must change together.
+
 /** One type group per book, shared in meaning and hues with VN Studio. */
 export type TypeGroup = 'stories' | 'nonfiction' | 'vn' | 'picture' | 'scripts' | 'puzzle' | 'other'
 

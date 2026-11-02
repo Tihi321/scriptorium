@@ -29,18 +29,18 @@ function BookOnShelf({ book }: { book: BookSummary }) {
   const badge = typeBadge(book.format)
   const formatName = formats.find((f) => f.id === book.format)?.name ?? book.format
   return (
-    <button className="lib-book" onClick={() => officeStore.getState().openBookCard(book.slug)} title={`${book.title} by ${book.author ?? 'unknown'}`} data-testid={`shelf-book-${book.slug}`}>
+    <button className="lib-book" onClick={() => officeStore.getState().openBookCard(book.slug)} title={`${book.title} by ${book.author ?? 'unknown'}${book.sourceBook ? `, from ${book.sourceBook.title}` : ''}`} data-testid={`shelf-book-${book.slug}`}>
       <span className="lib-cover-wrap">
         <CoverImage book={book} className="lib-cover" />
         {badge && (
-          <span className={`badge t-${badge.group}`} title={formatName}>
+          <span className={`badge t-${badge.choices ? 'choices' : badge.group}`} title={formatName}>
             {badge.text}
           </span>
         )}
       </span>
       <span className="shelf-title">{book.title}</span>
       {book.sourceBook && (
-        <span className="lib-from" data-testid={`from-${book.slug}`}>
+        <span className="lib-from" data-testid={`from-${book.slug}`} title={`from ${book.sourceBook.title}`}>
           from {book.sourceBook.title}
         </span>
       )}
