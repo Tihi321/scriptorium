@@ -1,3 +1,4 @@
+import { gamebookPhrases } from './sections'
 import { vnKey } from './vnKey'
 
 export function escapeXml(s: string): string {
@@ -230,10 +231,37 @@ export function choicesHtml(c: { choices?: { text: string; to: number }[]; endin
   return ''
 }
 
-export function xhtmlPage(title: string, bodyHtml: string, opts: { css?: string; bodyClass?: string; epubType?: string } = {}): string {
+/** The section file name of gamebook mode (`section-056.xhtml`). */
+export const sectionFile = (no: number) => `section-${String(no).padStart(3, '0')}.xhtml`
+
+/**
+ * The end of a section in gamebook mode (SCP-49): each choice as `{choice text} - turn to section N.` (hr `{choice text}, idi na odlomak N.`)
+ * with "section N" a link (`to` is the
+ * section number of the target), or "The End." and a link to section 1. Empty for a section with neither.
+ */
+export function gamebookChoicesHtml(c: { choices?: { text: string; to: number }[]; ending?: string }, lang = 'en'): string {
+  const p = gamebookPhrases(lang)
+  // the phrase is "turn to section N." / "idi na odlomak N.": "section N" / "odlomak N" inside it becomes the link (as in VN Studio)
+  const word = p.section.toLowerCase()
+  const link = (no: number) => `<a href="${sectionFile(no)}#s${no}">${word} ${no}</a>`
+  const jump = (no: number) => escapeXml(p.turn(no)).replace(`${word} ${no}`, () => link(no))
+  if (c.choices?.length) return `<div class="choices">
+<ul>
+${c.choices.map((ch) => `<li>${inline(ch.text)}${escapeXml(p.sep)}${jump(ch.to)}</li>`).join('\n')}
+</ul>
+</div>`
+  if (c.ending) return `<div class="the-end">
+<p>${escapeXml(p.theEnd)}</p>
+<p class="again">${escapeXml(p.startAgain(1)).replace(`${word} 1`, () => link(1))}</p>
+</div>`
+  return ''
+}
+
+export function xhtmlPage(title: string, bodyHtml: string, opts: { css?: string; bodyClass?: string; epubType?: string; lang?: string } = {}): string {
+  const lang = escapeXml(opts.lang ?? 'en')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${lang}" xml:lang="${lang}">
 <head>
 <meta charset="utf-8"/>
 <title>${escapeXml(title)}</title>

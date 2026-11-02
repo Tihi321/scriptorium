@@ -4,6 +4,7 @@ What Scriptorium still lacks on its own. Work that needs the other tools or a pr
 
 ## Where it stands (2026-10-25)
 
+- **SCP-49 (done in code, branch `SCP-49_gamebook-epub`; hub HUB-25): gamebook mode in the EPUB.** A story with choices can be built as a numbered-section gamebook (`gamebook` option of `BookStore.buildEpubFile`, engine command `buildGamebook`, `sendToKindle {gamebook: true}`): `out/<slug>-gamebook.epub`, shuffled section numbers kept in `books/<slug>/gamebook.json`, "turn to section N" links (Croatian `idi na odlomak N`), no pictures but the cover. The ordinary EPUB stays the default and unchanged (hash test). Not done: the PDF (SCP-50), a UI button, a check on a real Kindle (the user's). Plan in `.claude/tickets/SCP-49-gamebook-epub/`.
 - **SCP-48 (done in code, branch `SCP-48_single-idea-run`): single-idea run.** `only: <idea slug>` in `config/factory.md`, `--only <slug>` on the engine and the MCP tool `set_factory_only`: the scheduler and the pipeline work on that idea and its book only, whatever else is open. Default unchanged. Plan in `.claude/tickets/SCP-48-single-idea-run/`.
 
 - **Merged 2026-10-25 (PR #13):** SCP-45 writes the language-independent VN pack (`vn/pack.json` + `vn/text/<lang>.json`), `build_vn_pack`/`get_vn_pack`, narrator/`C<n>` tokens, `SCENE:` first-period/time parsing and the key helper; plan/changelog in `.claude/tickets/SCP-45-vn-pack/`, contract in the hub's `.claude/tickets/HUB-16-vn-pack/`. 679 tests + recovery, typecheck and lint green.

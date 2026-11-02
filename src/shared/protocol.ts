@@ -408,8 +408,14 @@ export type Command =
   | { type: 'regenerateCover'; book: string }
   /** Gives a published book a new title (its folder and slug stay), then remakes the cover, the EPUB and the reader. Answers with `book.updated`. */
   | { type: 'renameBook'; book: string; title: string }
-  /** Mails the EPUB. Answers with `kindle.sent`. */
-  | { type: 'sendToKindle'; book: string }
+  /** Mails the EPUB. Answers with `kindle.sent`. `gamebook` (SCP-49): mails out/<slug>-gamebook.epub (built by `buildGamebook`) instead. */
+  | { type: 'sendToKindle'; book: string; gamebook?: boolean }
+  /**
+   * Builds the numbered-section gamebook EPUB of a story with choices (SCP-49): out/<slug>-gamebook.epub, "turn to section N" links, no pictures but the cover.
+   * Section numbers come from books/<slug>/gamebook.json (made on the first export, seeded by the slug); `renumber` or a new `seed` computes them again.
+   * The ordinary EPUB and the reader are not touched. A book without choices is not built (logged).
+   */
+  | { type: 'buildGamebook'; book: string; renumber?: boolean; seed?: string; lang?: string }
   | { type: 'setTopicActive'; id: string; active: boolean }
   /** Adds a row to the "My topics" table in topics.md, switched on unless `active` is false. */
   | { type: 'addTopic'; name: string; kind: string; target?: number; active?: boolean }
@@ -476,6 +482,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   checkServers: true,
   rate: true,
   sendToKindle: true,
+  buildGamebook: true,
   setTopicActive: true,
   addTopic: true,
   addIdea: true,

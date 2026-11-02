@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { ORNAMENT_CSS, ornamentHtml, ornamentSvg } from './art'
-import { choicesHtml, escapeXml, markdownToXhtml, xhtmlPage } from './xhtml'
+import { choicesHtml, escapeXml, gamebookChoicesHtml, markdownToXhtml, sectionFile, xhtmlPage } from './xhtml'
+import { gamebookPhrases } from './sections'
 import type { PuzzleView } from './xhtml'
 
 export interface EpubChapter {
@@ -37,7 +38,16 @@ export interface EpubBook {
   genreClass?: string
   /** Extra subjects (keywords). */
   subjects?: string[]
+  /**
+   * Gamebook mode (SCP-49): one numbered section file per chapter, written in number order, with "turn to section N" links instead of chapter links.
+   * `sections[i]` is the section number of `chapters[i]` (a bijection onto 1..n, chapter 1 is section 1). Absent: the book is built as always.
+   */
+  gamebook?: { sections: number[]; lang: string }
 }
+
+/** Extra CSS of the gamebook mode only (the default `BOOK_CSS` is unchanged). */
+export const GAMEBOOK_CSS = `
+h2.section-no { font-size: 3em; font-weight: bold; margin: 1em 0 1em; }`
 
 export const BOOK_CSS = `body { font-family: Georgia, "Times New Roman", serif; line-height: 1.5; margin: 5%; }
 h1, h2, h3 { font-family: Georgia, serif; text-align: center; }
@@ -94,15 +104,18 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
 </container>
 `
   )
-  put('OEBPS/style.css', BOOK_CSS)
-  put('OEBPS/images/ornament.svg', ornamentSvg(book.genreClass ?? ''))
+  const gb = book.gamebook
+  if (gb && gb.sections.length !== book.chapters.length) throw new Error(`gamebook: ${gb.sections.length} section numbers for ${book.chapters.length} chapters`)
+  const lang = gb?.lang ?? 'en'
+  put('OEBPS/style.css', gb ? BOOK_CSS + GAMEBOOK_CSS : BOOK_CSS)
+  if (!gb) put('OEBPS/images/ornament.svg', ornamentSvg(book.genreClass ?? ''))
 
   const manifest: string[] = [
     '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
     '<item id="css" href="style.css" media-type="text/css"/>',
     '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>',
     '<item id="titlepage" href="title.xhtml" media-type="application/xhtml+xml"/>',
-    '<item id="ornament" href="images/ornament.svg" media-type="image/svg+xml"/>'
+    ...(gb ? [] : ['<item id="ornament" href="images/ornament.svg" media-type="image/svg+xml"/>'])
   ]
   const spine: string[] = ['<itemref idref="cover"/>', '<itemref idref="titlepage"/>']
 
@@ -135,33 +148,50 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
 
   const single = book.chapters.length === 1
   const navItems: string[] = []
-  book.chapters.forEach((c, i) => {
-    const n = String(i + 1).padStart(2, '0')
-    const file = `chapter-${n}.xhtml`
-    const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
-    put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles, characters: c.characters })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
-    manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
-    spine.push(`<itemref idref="ch${n}"/>`)
-    navItems.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)
-  })
+  if (gb) {
+    const p = gamebookPhrases(gb.lang)
+    // files in number order, so the file order does not give the story away; the nav lists numbers only
+    const order = book.chapters.map((c, i) => ({ c, no: gb.sections[i]! })).sort((a, b) => a.no - b.no)
+    for (const { c, no } of order) {
+      const file = sectionFile(no)
+      const body = markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles, characters: c.characters })
+      const end = c.choices || c.ending ? '\n' + gamebookChoicesHtml({ choices: c.choices?.map((ch) => ({ text: ch.text, to: gb.sections[ch.to - 1]! })), ending: c.ending }, gb.lang) : ''
+      put(`OEBPS/${file}`, xhtmlPage(`${p.section} ${no}`, `<h2 class="section-no" id="s${no}">${no}</h2>
+${body}${end}`, { epubType: 'chapter', lang: gb.lang }))
+      manifest.push(`<item id="s${no}" href="${file}" media-type="application/xhtml+xml"/>`)
+      spine.push(`<itemref idref="s${no}"/>`)
+      navItems.push(`<li><a href="${file}#s${no}">${no}</a></li>`)
+    }
+  } else {
+    book.chapters.forEach((c, i) => {
+      const n = String(i + 1).padStart(2, '0')
+      const file = `chapter-${n}.xhtml`
+      const heading = ornamentHtml() + (single ? `<h2>${escapeXml(book.title)}</h2>` : `<h2>${escapeXml(c.title)}</h2>`)
+      put(`OEBPS/${file}`, xhtmlPage(c.title, `${heading}\n${markdownToXhtml(c.body, { script: c.script, screenplay: c.screenplay, puzzles: c.puzzles, characters: c.characters })}${c.choices || c.ending ? '\n' + choicesHtml(c) : ''}`, { epubType: 'chapter' }))
+      manifest.push(`<item id="ch${n}" href="${file}" media-type="application/xhtml+xml"/>`)
+      spine.push(`<itemref idref="ch${n}"/>`)
+      navItems.push(`<li><a href="${file}">${escapeXml(single ? book.title : c.title)}</a></li>`)
+    })
+  }
 
   put(
     'OEBPS/nav.xhtml',
     xhtmlPage(
-      'Contents',
+      gb ? gamebookPhrases(lang).contents : 'Contents',
       `<nav epub:type="toc" id="toc">
-<h2>Contents</h2>
+<h2>${gb ? gamebookPhrases(lang).contents : 'Contents'}</h2>
 <ol>
 <li><a href="title.xhtml">Title page</a></li>
-${navItems.join('\n')}
+${gb ? `<li><a href="${sectionFile(1)}#s1">${escapeXml(gamebookPhrases(lang).start(1))}</a></li>\n` : ''}${navItems.join('\n')}
 </ol>
 </nav>
 <nav epub:type="landmarks" hidden="hidden">
 <ol>
 <li><a epub:type="cover" href="cover.xhtml">Cover</a></li>
-<li><a epub:type="bodymatter" href="${book.chapters.length ? 'chapter-01.xhtml' : 'title.xhtml'}">Start of the book</a></li>
+<li><a epub:type="bodymatter" href="${book.chapters.length ? (gb ? sectionFile(1) : 'chapter-01.xhtml') : 'title.xhtml'}">Start of the book</a></li>
 </ol>
-</nav>`
+</nav>`,
+      { lang }
     )
   )
 
@@ -169,12 +199,12 @@ ${navItems.join('\n')}
   put(
     'OEBPS/content.opf',
     `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="en">
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="${lang}">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="book-id">${escapeXml(id)}</dc:identifier>
     <dc:title>${escapeXml(book.title)}</dc:title>
     <dc:creator id="creator">${escapeXml(book.author)}</dc:creator>
-    <dc:language>en</dc:language>
+    <dc:language>${lang}</dc:language>
 ${subjects.map((s) => `    <dc:subject>${escapeXml(s)}</dc:subject>`).join('\n')}
     <dc:description>${escapeXml(book.description)}</dc:description>
     <dc:contributor id="contributor">Scriptorium (AI)</dc:contributor>

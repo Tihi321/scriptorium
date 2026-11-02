@@ -1023,19 +1023,34 @@ export class Engine {
     }
   }
 
-  private async sendToKindle(slug: string): Promise<void> {
+  /** SCP-49: writes out/<slug>-gamebook.epub for a story with choices; says what happened in the log. */
+  private async buildGamebook(cmd: { book: string; renumber?: boolean; seed?: string; lang?: string }): Promise<void> {
+    const slug = cmd.book
+    const book = await this.books.read(slug)
+    if (!book) return this.log(`buildGamebook: no book "${slug}"`)
+    if (book.data.article === true) return this.log(`buildGamebook: "${slug}" is an article, not a book`)
+    if (!(await this.books.branchMap(slug))) return this.log(`buildGamebook: "${slug}" has no choices, so there is no gamebook (the ordinary EPUB is unchanged)`)
+    try {
+      const out = await this.books.buildEpubFile(slug, { gamebook: { renumber: cmd.renumber, seed: cmd.seed, lang: cmd.lang }, note: (m) => this.log(m) })
+      this.log(`gamebook EPUB of "${slug}": ${out}`)
+    } catch (err) {
+      this.log(`buildGamebook failed for "${slug}": ${(err as Error).message}`)
+    }
+  }
+
+  private async sendToKindle(slug: string, gamebook = false): Promise<void> {
     const fail = (error: string) => this.emit({ type: 'kindle.sent', book: slug, ok: false, error })
     const book = await this.books.read(slug)
     if (!book) return fail(`no book "${slug}"`)
     const s = this.settingsSummary()
     if (!s.kindleAddress || !s.fromAddress) return fail('set the Kindle address and the sender address in the settings first')
     if (!this.opts.mailTransport && !s.smtpHost) return fail('set the SMTP server in the settings first')
-    const epubPath = this.books.file(slug, 'out', `${slug}.epub`)
+    const epubPath = this.books.file(slug, 'out', gamebook ? `${slug}-gamebook.epub` : `${slug}.epub`)
     if (book.data.article === true) return fail('an article has no EPUB: it is a web page (out/article.html)')
-    if (!(await fs.access(epubPath).then(() => true, () => false))) return fail('this book has no EPUB yet')
+    if (!(await fs.access(epubPath).then(() => true, () => false))) return fail(gamebook ? 'this book has no gamebook EPUB yet (build it first)' : 'this book has no EPUB yet')
     try {
       const transport = (this.opts.mailTransport ?? smtpTransport)(s, resolveKey('SCRIPTORIUM_SMTP_PASSWORD'))
-      await sendEpub(transport, s, { title: book.data.title, author: book.data.author ?? 'Unknown', slug, epubPath })
+      await sendEpub(transport, s, { title: book.data.title, author: book.data.author ?? 'Unknown', slug: gamebook ? `${slug}-gamebook` : slug, epubPath })
       this.log(`sent ${slug} to ${s.kindleAddress}`)
       this.emit({ type: 'kindle.sent', book: slug, ok: true })
     } catch (err) {
@@ -1317,7 +1332,10 @@ export class Engine {
         return
       }
       case 'sendToKindle':
-        await this.sendToKindle(cmd.book)
+        await this.sendToKindle(cmd.book, cmd.gamebook === true)
+        break
+      case 'buildGamebook':
+        await this.buildGamebook(cmd)
         return
       case 'askResearcher': {
         // from the "Ask researcher" box: tied to a book (its notes), an idea (shared notes) or general (shared notes)

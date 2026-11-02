@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { briefOf, isEmptyBrief } from '../../shared/brief'
@@ -9,6 +9,8 @@ import type { BookFrontmatter } from '../../shared/schemas'
 import { atomicWrite, readMd, writeMd } from '../store/atomic'
 import { buildEpub } from '../publish/epub'
 import { writeReaderDir } from '../publish/reader'
+import { planSections } from '../publish/sections'
+import type { SectionOrder } from '../publish/sections'
 import { buildReferences, citedNumbers, FactBase } from '../memory/factbase'
 import { buildArticleHtml, buildArticleMarkdown } from '../publish/article'
 import { parseLightBible } from '../publish/script'
@@ -76,6 +78,14 @@ export interface OutlineChapter {
   ending?: string
   /** An adaptation: the chapters of the source book this chapter is made from. */
   source_chapters?: number[]
+}
+
+/** Options of `BookStore.buildEpubFile`. */
+export interface BuildEpubOptions {
+  /** Build the numbered-section gamebook of a story with choices (SCP-49). `true`: stored numbers, else seeded by the slug. */
+  gamebook?: boolean | { seed?: string; order?: SectionOrder; renumber?: boolean; lang?: string }
+  /** Gets a short message about what was done or ignored. */
+  note?: (message: string) => void
 }
 
 export class BookStore {
@@ -477,8 +487,12 @@ export class BookStore {
     })
   }
 
-  /** Builds out/<slug>.epub from the files, with out/cover.png when it exists. An article has no EPUB: its page is written instead and its path returned. */
-  async buildEpubFile(slug: string): Promise<string> {
+  /**
+   * Builds out/<slug>.epub from the files, with out/cover.png when it exists. An article has no EPUB: its page is written instead and its path returned.
+   * `opts.gamebook` (SCP-49, off by default) builds the numbered-section gamebook of a story with choices instead, to out/<slug>-gamebook.epub, and leaves
+   * out/<slug>.epub and the reader alone. A book without choices ignores the option (`opts.note` says so) and is built as always.
+   */
+  async buildEpubFile(slug: string, opts: BuildEpubOptions = {}): Promise<string> {
     const book = await this.read(slug)
     if (!book) throw new Error(`no book ${slug}`)
     const d = book.data
@@ -486,6 +500,17 @@ export class BookStore {
     const chapters = await this.chapters(slug)
     const refs = await this.references(slug)
     const links = await this.choiceLinks(slug, chapters)
+    let gamebook: { sections: number[]; lang: string } | undefined
+    if (opts.gamebook) {
+      if (!(await this.branchMap(slug))) opts.note?.(`"${slug}" has no choices: the gamebook option is ignored and the book is built as always`)
+      else {
+        const g = opts.gamebook === true ? {} : opts.gamebook
+        const plan = await planSections(this.file(slug, 'gamebook.json'), slug, chapters.map((c) => c.n), g)
+        if (plan.stale) throw new Error(`the stored section numbers of "${slug}" (gamebook.json) are for other chapters; export the gamebook with renumber to compute them again`)
+        opts.note?.(`gamebook sections of "${slug}": ${plan.reused ? 'stored numbers reused' : 'numbers computed and stored'} (seed "${plan.seed}", ${plan.order})`)
+        gamebook = { sections: plan.sections, lang: g.lang ?? (typeof d.language === 'string' ? d.language : typeof d.lang === 'string' ? d.lang : 'en') }
+      }
+    }
     const puzzles = d.puzzles === true ? puzzleViews(await puzzlesOf({ books: this }, slug)) : undefined
     const characters = d.script === true ? parseLightBible(await this.bible(slug)).characters.map((c) => c.name) : []
     let coverPng: Uint8Array | undefined
@@ -499,6 +524,11 @@ export class BookStore {
       uuid = randomUUID()
       await this.update(slug, () => ({ uuid }))
     }
+    // the gamebook is another book to a reader: its own identifier, the same every time
+    if (gamebook) {
+      const h = createHash('sha256').update(`${uuid}:gamebook`).digest('hex')
+      uuid = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
+    }
     const bytes = await buildEpub({
       title: d.title,
       author: d.author ?? 'Unknown',
@@ -509,13 +539,16 @@ export class BookStore {
       year: Number(d.year ?? new Date().getFullYear()),
       modified: new Date(),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
-      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, screenplay: d.screenplay === true, ...(puzzles ? { puzzles } : {}), ...(characters.length ? { characters } : {}), ...links(c) })), ...(refs ? [refs] : [])],
-      coverPng
+      chapters: [...chapters.map((c) => ({ title: c.title, body: c.body, script: d.script === true, screenplay: d.screenplay === true, ...(puzzles ? { puzzles } : {}), ...(characters.length ? { characters } : {}), ...links(c) })), ...(refs && !gamebook ? [refs] : [])],
+      coverPng,
+      ...(gamebook ? { gamebook } : {})
     })
-    const out = this.file(slug, 'out', `${slug}.epub`)
+    const out = this.file(slug, 'out', gamebook ? `${slug}-gamebook.epub` : `${slug}.epub`)
     await fs.mkdir(path.dirname(out), { recursive: true })
     await fs.writeFile(out, bytes)
+    if (gamebook) return out
     await this.buildReader(slug)
     return out
   }
+
 }
