@@ -1,16 +1,16 @@
 :root {
-  --bg: #12161e;
-  --panel: #1a202b;
-  --panel2: #222a38;
-  --line: #2f3a4d;
-  --text: #dfe6f2;
-  --dim: #8d9bb3;
-  --accent: #7df3ff;
-  --warn: #f2c14e;
-  --bad: #e5484d;
-  --good: #3fb27f;
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  font-size: 13px;
+  --bg: var(--ink-0);
+  --panel: var(--ink-1);
+  --panel2: var(--ink-2);
+  --line: var(--rule);
+  --text: var(--vellum);
+  --dim: var(--vellum-dim);
+  --accent: var(--gilt);
+  --warn: var(--ochre);
+  --bad: var(--rubric);
+  --good: var(--verdigris);
+  font-family: var(--font-body);
+  font-size: var(--fs-3);
   color: var(--text);
   background: var(--bg);
 }

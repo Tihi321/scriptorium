@@ -814,6 +814,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fontsource/alegreya-sc@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/alegreya-sc@npm:5.3.0"
+  checksum: 10c0/c42efe580f69069dcffa9f3a078951599a02bdfecb6aea207a1bbb1423dfa96074aa0985b4d777bb80c606c95ba52acfcb4ef397b2d3b3b30892c79ee015cfea
+  languageName: node
+  linkType: hard
+
+"@fontsource/alegreya@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/alegreya@npm:5.3.0"
+  checksum: 10c0/86151e5e71352979d4af8f10cde123008765c0be4a915892bc67ee8b90bf359b181ffbbc50ed1d5ca94023df5807e9336a8bc4eb0fab3eed699c52d5a52f0553
+  languageName: node
+  linkType: hard
+
 "@hono/node-server@npm:^1.19.9 || ^2.0.5":
   version: 2.1.5
   resolution: "@hono/node-server@npm:2.1.5"
@@ -5088,6 +5102,8 @@ __metadata:
   resolution: "scriptorium@workspace:."
   dependencies:
     "@eslint/js": "npm:^10.0.1"
+    "@fontsource/alegreya": "npm:^5.3.0"
+    "@fontsource/alegreya-sc": "npm:^5.3.0"
     "@modelcontextprotocol/sdk": "npm:^1.32.1"
     "@napi-rs/keyring": "npm:^2.1.0"
     "@playwright/test": "npm:^1.64.0"

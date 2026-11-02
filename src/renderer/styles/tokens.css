@@ -1,0 +1,80 @@
+/* SCP-51 design tokens, "lamplit scriptorium". Other stylesheets use these through the aliases in styles.css. */
+@import '@fontsource/alegreya/latin-500.css';
+@import '@fontsource/alegreya/latin-700.css';
+@import '@fontsource/alegreya-sc/latin-500.css';
+
+:root {
+  /* Surfaces */
+  --ink-0: #0f121a;
+  --ink-1: #161a25;
+  --ink-2: #1e2331;
+  --ink-3: #0b0d13;
+  --rule: #2c3344;
+
+  /* Text and accents */
+  --vellum: #e9e2d0;
+  --vellum-dim: #a29b89;
+  --gilt: #d6b05a;
+  --lapis: #7590ff;
+  --rubric: #d8523d;
+  --verdigris: #4fb48c;
+  --ochre: #e3a63b;
+
+  /* Type-badge hues, shared with VN Studio */
+  --t-vn: #b49cff;
+  --t-choices: #ff8fb3;
+  --t-picture: #7fd0e6;
+  --t-scripts: #6fd3b0;
+  --t-puzzle: #f0c06a;
+  --t-nonfiction: #9fb4cc;
+  --t-stories: #c9b791;
+
+  /* Type */
+  --font-display: 'Alegreya', Georgia, serif;
+  --font-brand: 'Alegreya SC', 'Alegreya', Georgia, serif;
+  --font-body: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --fs-1: 11px;
+  --fs-2: 12px;
+  --fs-3: 13px;
+  --fs-4: 15px;
+  --fs-5: 18px;
+  --fs-6: 22px;
+  --fs-7: 28px;
+
+  /* Spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* Radius */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* Shadow and motion */
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45);
+  --shadow-shelf: 0 6px 10px -6px rgb(0 0 0 / 0.7);
+  --dur-open: 120ms;
+}
+
+:focus-visible {
+  outline: 2px solid var(--lapis);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-open: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
