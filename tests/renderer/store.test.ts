@@ -417,6 +417,18 @@ describe('library and protocol events', () => {
     expect(shelves.map((s) => s.id)).toEqual(['a', 'b', 'd', 'gone'])
     expect(shelves.find((s) => s.id === 'b')?.books).toHaveLength(0)
     expect(emptiestFirst(topics).map((t) => t.id)).toEqual(['b', 'c', 'd', 'a'])
+
+    // an adaptation (no topic) stands on its source's topic shelf, right after the source; a topic-less picture book on its type shelf; no "Other" shelf
+    const more = [
+      ...books,
+      bookSummary('x-vn', { title: 'x', stage: 'published', topic: null, format: 'visual-novel', sourceBook: { slug: 'x', title: 'x' } }),
+      bookSummary('v', { title: 'v', stage: 'published', topic: null, format: 'kids-picture-book' })
+    ]
+    const withTypes = buildShelves(topics, more)
+    expect(withTypes.map((s) => s.id)).toEqual(['a', 'b', 'd', 'gone', 'type-picture'])
+    expect(withTypes[0]!.books.map((x) => x.slug)).toEqual(['x', 'x-vn'])
+    expect(withTypes.some((s) => s.id === '_other')).toBe(false)
+    expect(buildShelves(topics, more, { groupBy: 'type', hideEmpty: true }).map((s) => s.id)).toEqual(['type-vn', 'type-picture'])
   })
   it('groups topics by section, emptiest first, and filters them', () => {
     const topic = (id: string, section: string, name: string, kind: string, active: boolean, done: number, target: number, inProgress = 0) => ({ id, section, name, kind, active, target, done, inProgress })

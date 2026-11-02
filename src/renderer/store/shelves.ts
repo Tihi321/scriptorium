@@ -1,10 +1,13 @@
 import type { BookSummary, TopicSummary } from '../../shared/protocol'
+import { TYPE_GROUPS, typeGroupOf, type TypeGroup } from './bookTypes'
 
 export interface Shelf {
   id: string
   name: string
   topic: TopicSummary | null
   books: BookSummary[]
+  /** Type shelves only. */
+  group?: TypeGroup
 }
 
 /** The newspaper articles among these books (medium `article`). The Library shows none of them: they have their own tab. */
@@ -43,28 +46,84 @@ export function frontPage(articles: BookSummary[]): FrontPageDay[] {
     }))
 }
 
-/** Published books per topic (articles are not books: they are left out). Shelves exist for active topics and for topics that have books. */
-export function buildShelves(topics: TopicSummary[], books: BookSummary[]): Shelf[] {
+export interface BuildShelvesOptions {
+  groupBy?: 'topic' | 'type'
+  /** Where an adaptation's source is looked up (all books, not only the filtered ones). Defaults to `books`. */
+  sources?: BookSummary[]
+  /** Drop shelves with no books (the Library sets it while a filter is active). */
+  hideEmpty?: boolean
+}
+
+/** The root of an adaptation chain: follows `sourceBook` up to 5 hops and stops on a loop or a missing source. */
+function rootOf(b: BookSummary, bySlug: Map<string, BookSummary>): BookSummary {
+  const seen = new Set<string>([b.slug])
+  let cur = b
+  for (let hop = 0; hop < 5 && cur.sourceBook; hop++) {
+    const next = bySlug.get(cur.sourceBook.slug)
+    if (!next || seen.has(next.slug)) break
+    seen.add(next.slug)
+    cur = next
+  }
+  return cur
+}
+
+/**
+ * Published books per shelf (articles are not books: they are left out). By topic, a book stands on its own topic's shelf, else on its
+ * source book's topic shelf, else on a shelf named after its type group. By type, one shelf per non-empty group. Inside a shelf an
+ * adaptation follows its source. Display only: the books keep `topic: null`.
+ */
+export function buildShelves(topics: TopicSummary[], books: BookSummary[], opts: BuildShelvesOptions = {}): Shelf[] {
+  const groupBy = opts.groupBy ?? 'topic'
+  const bySlug = new Map((opts.sources ?? books).map((b) => [b.slug, b]))
   const published = books.filter((b) => b.stage === 'published' && b.medium !== 'article')
-  const byTopic = new Map<string, BookSummary[]>()
+  const family = (b: BookSummary) => {
+    const root = rootOf(b, bySlug)
+    return { rootTitle: root.title.toLowerCase(), adapted: root.slug === b.slug ? 0 : 1 }
+  }
+  const sortFamily = (list: BookSummary[]) =>
+    [...list].sort((x, y) => {
+      const fx = family(x)
+      const fy = family(y)
+      return fx.rootTitle.localeCompare(fy.rootTitle) || fx.adapted - fy.adapted || x.title.localeCompare(y.title)
+    })
+  const finish = (shelves: Shelf[]) => {
+    const sorted = shelves.map((s) => ({ ...s, books: sortFamily(s.books) }))
+    return opts.hideEmpty ? sorted.filter((s) => s.books.length > 0) : sorted
+  }
+  const typeKey = (g: TypeGroup) => `type-${g}`
+  const typeShelves = (byKey: Map<string, BookSummary[]>): Shelf[] =>
+    TYPE_GROUPS.filter((g) => byKey.has(typeKey(g.id))).map((g) => ({ id: typeKey(g.id), name: g.label, topic: null, books: byKey.get(typeKey(g.id))!, group: g.id }))
+
+  const byKey = new Map<string, BookSummary[]>()
+  const put = (key: string, b: BookSummary) => byKey.set(key, [...(byKey.get(key) ?? []), b])
+  if (groupBy === 'type') {
+    for (const b of published) put(typeKey(typeGroupOf(b.format)), b)
+    return finish(typeShelves(byKey))
+  }
   for (const b of published) {
-    const id = b.topic?.id ?? '_other'
-    byTopic.set(id, [...(byTopic.get(id) ?? []), b])
+    let topic = b.topic
+    for (let cur = b, hop = 0; !topic && cur.sourceBook && hop < 5; hop++) {
+      const next = bySlug.get(cur.sourceBook.slug)
+      if (!next || next === b) break
+      topic = next.topic
+      cur = next
+    }
+    put(topic ? topic.id : typeKey(typeGroupOf(b.format)), b)
   }
   const shelves: Shelf[] = []
   for (const t of topics) {
     // the newspaper sections have no shelf: their articles are on the Newspaper tab
     if (t.kind === 'article') {
-      byTopic.delete(t.id)
+      byKey.delete(t.id)
       continue
     }
-    const list = byTopic.get(t.id) ?? []
+    const list = byKey.get(t.id) ?? []
     if (t.active || list.length) shelves.push({ id: t.id, name: t.name, topic: t, books: list })
-    byTopic.delete(t.id)
+    byKey.delete(t.id)
   }
   // books whose topic is not in topics.md any more
-  for (const [id, list] of byTopic) shelves.push({ id, name: id === '_other' ? 'Other' : (list[0]?.topic?.name ?? id), topic: null, books: list })
-  return shelves
+  for (const [id, list] of byKey) if (!id.startsWith('type-')) shelves.push({ id, name: list[0]?.topic?.name ?? id, topic: null, books: list })
+  return finish([...shelves, ...typeShelves(byKey)])
 }
 
 /** Topics with the emptiest first (fewest finished books against the target). */

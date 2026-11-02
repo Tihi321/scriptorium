@@ -5,7 +5,12 @@ export interface FakeBook {
   slug: string
   title: string
   stage: string
-  topic: number
+  /** Index into the topics; null for a book without a topic (an adaptation, or a picture book made on its own). */
+  topic: number | null
+  /** The format id; the default follows the topic kind. */
+  format?: string
+  /** When it was published; the default is 2026-10-08. */
+  publishedAt?: string
   rating: number | null
   note: string | null
   paused?: boolean
@@ -45,7 +50,7 @@ export function makeTopics(): FakeTopic[] {
 }
 
 export function makeBooks(): FakeBook[] {
-  const b = (slug: string, title: string, stage: string, topic: number, rating: number | null = null): FakeBook => ({ slug, title, stage, topic, rating, note: null })
+  const b = (slug: string, title: string, stage: string, topic: number | null, rating: number | null = null): FakeBook => ({ slug, title, stage, topic, rating, note: null })
   const article = (slug: string, title: string, topic: number, standfirst: string, published: string): FakeBook => ({ slug, title, stage: 'published', topic, rating: null, note: null, article: { standfirst, published } })
   return [
     b('the-lantern-and-the-fox', 'The Lantern and the Fox', 'drafting', 1),
@@ -59,6 +64,10 @@ export function makeBooks(): FakeBook[] {
     b('the-tea-shop-murders', 'The Tea Shop Murders', 'published', 2),
     b('dragon-in-the-attic', 'Dragon in the Attic', 'idea', 1),
     b('the-grey-lighthouse', 'The Grey Lighthouse', 'rejected', 2),
+    // no topic of their own: the adaptation stands on its source's shelf, the other two on a type shelf
+    { ...b('blanket-moon-vn', 'The Blanket Moon', 'published', null), source: 'the-moons-blanket', sourceTitle: "The Moon's Blanket", publishedAt: '2026-10-01T12:00:00Z' },
+    { ...b('night-train-picture', 'Night Train to Sleepytown', 'published', null), format: 'kids-picture-book', publishedAt: '2026-10-01T11:00:00Z' },
+    { ...b('maze-of-the-lost-key', 'The Maze of the Lost Key', 'published', null), format: 'gamebook', publishedAt: '2026-10-01T10:00:00Z' },
     article('chips-for-the-grid', 'Chipmakers race to power the grid', 9, 'Three firms say their new power chips cut data centre energy use by a fifth.', '2026-10-19T09:30:00Z'),
     article('quiet-quake-report', 'Seismologists find a quiet fault under the Alps', 10, 'A year of sensor data shows a slow slip nobody had mapped before.', '2026-10-19T14:10:00Z'),
     article('library-robots', 'Libraries try robot shelvers', 9, 'A pilot in three cities returns books faster, and staff say it frees them for readers.', '2026-10-18T16:45:00Z')
@@ -80,16 +89,16 @@ export function topicSummaries(topics: FakeTopic[], books: FakeBook[]): TopicSum
 
 export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
   const published = b.stage === 'published'
-  const t = topics[b.topic]!
+  const t = b.topic === null ? null : topics[b.topic]!
   return {
     slug: b.slug,
     title: b.title,
     author: 'Mara Quill',
-    topic: { id: t.id, name: t.name },
-    kind: t.kind,
-    format: b.source ? 'visual-novel' : b.article || t.kind === 'article' ? 'article' : t.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story',
-    medium: b.article || t.kind === 'article' ? 'article' : 'book',
-    headline: b.article || t.kind === 'article' ? b.title : null,
+    topic: t ? { id: t.id, name: t.name } : null,
+    kind: t?.kind ?? null,
+    format: b.format ?? (b.source ? 'visual-novel' : b.article || t?.kind === 'article' ? 'article' : t?.kind === 'juvenile-fiction' ? 'bedtime-toddler' : 'short-story'),
+    medium: b.article || t?.kind === 'article' ? 'article' : 'book',
+    headline: b.article || t?.kind === 'article' ? b.title : null,
     standfirst: b.article?.standfirst ?? null,
     articlePage: b.article && published ? `books/${b.slug}/out/article.html` : null,
     ...(b.source ? { sourceBook: { slug: b.source, title: b.sourceTitle ?? b.source } } : {}),
@@ -115,7 +124,7 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     epub: published && !b.article ? `books/${b.slug}/out/${b.slug}.epub` : null,
     readerDir: published && !b.article ? `books/${b.slug}/out/reader` : null,
     readerPages: published && !b.article ? READER_PAGES : [],
-    publishedAt: published ? (b.article?.published ?? '2026-10-08T12:00:00Z') : null
+    publishedAt: published ? (b.article?.published ?? b.publishedAt ?? '2026-10-08T12:00:00Z') : null
   }
 }
 
