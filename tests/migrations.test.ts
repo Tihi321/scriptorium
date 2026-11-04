@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { initDataFolder } from '../src/engine/store/dataFolder'
-import { migrateAcpProvider, migrateAntigravityClient, migrateClientProvider, migrateFallbacks, migrateSeedPrompts } from '../src/engine/store/migrations'
+import { migrateAcpProvider, migrateAntigravityClient, migrateClientProvider, migrateFallbacks, migrateSeedPrompts, migrateStrataLoaded } from '../src/engine/store/migrations'
 import { SEED_HISTORY, seedHash } from '../src/engine/store/seedHistory'
 import { parseMd } from '../src/shared/md'
 import { seedDir } from './helpers'
@@ -254,7 +254,7 @@ describe('migrateFallbacks (SCP-19)', () => {
     const old = await settingsFolder(oldSettings(['model_order: [strata]']))
     const first = await initDataFolder(old, seedDir)
     expect(first.migrated.filter((l) => l.includes('fallbacks'))).toHaveLength(1)
-    expect((await read(old)).data).toMatchObject({ fallbacks: ['strata/qwen3.8-flash-next', 'deepseek/deepseek-v4-pro', 'lmstudio/gemma'], fallback_shared: true })
+    expect((await read(old)).data).toMatchObject({ fallbacks: ['strata/default', 'deepseek/deepseek-v4-pro', 'lmstudio/gemma'], fallback_shared: true }) // migrateStrataLoaded renames the old Strata ref after it
     expect((await initDataFolder(old, seedDir)).migrated.filter((l) => l.includes('fallbacks'))).toHaveLength(0)
   })
 })
@@ -335,5 +335,55 @@ describe('migrateAntigravityClient (SCP-44)', () => {
     expect((await migrateAntigravityClient(has)).changes).toEqual([])
     expect((await migrateAntigravityClient(await providersFolder(OLD_PROVIDERS))).changes).toEqual([])
     expect((await migrateAntigravityClient(await tmp())).changes).toEqual([])
+  })
+})
+
+describe('migrateStrataLoaded (HUB-26)', () => {
+  it('turns the old Strata rows and refs into loaded rows once, keeps your own row and comments, never brings a removed row back, and leaves a deleted strata provider alone', async () => {
+    const strataOld = [
+      '---',
+      'kind: providers',
+      'providers:',
+      '  # my Strata note',
+      '  - id: strata',
+      '    kind: openai-compat',
+      '    local: true',
+      '    base_url: http://127.0.0.1:8080/v1',
+      '    concurrency: auto',
+      '    discover: false',
+      '    models:',
+      '      - id: qwen3.8-flash-next',
+      '        family: qwen',
+      '      - id: qwen3.8-flash-next-low',
+      '        family: qwen',
+      '      - id: my-model',
+      '        family: llama',
+      '---',
+      '# Providers',
+      ''
+    ]
+    const dir = await providersFolder(strataOld, '\r\n')
+    await writeFile(path.join(dir, 'config', 'roles.md'), '---\nkind: roles\nroles:\n  fact-checker:\n    models: [strata/qwen3.8-flash-next-low, lmstudio]\n---\n')
+    await writeFile(path.join(dir, 'config', 'settings.md'), '---\nkind: settings\nfallbacks:\n  - strata/qwen3.8-flash-next\n  - deepseek/deepseek-flash\nlast_resort_model: strata/qwen3.8-flash-next\n---\n')
+    expect((await migrateStrataLoaded(dir)).changes).toHaveLength(3)
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await readFile(file, 'utf8')
+    expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/)
+    expect(text).toContain('  # my Strata note')
+    const strata = (parseMd(text).data.providers as { id: string; discover: boolean; models: { id: string; loaded?: boolean; aliases?: string[] }[]; profiles: { id: string }[] }[])[0]!
+    expect(strata.discover).toBe(true)
+    expect(strata.models.map((m) => m.id)).toEqual(['default', 'default-low', 'my-model'])
+    expect(strata.models[0]).toMatchObject({ loaded: true, aliases: ['qwen3.8-flash-next'] })
+    expect(strata.profiles.map((p) => p.id)).toEqual(['qwen3.8-flash-next', 'deepseek-v4.1-flash'])
+    expect(await readFile(path.join(dir, 'config', 'roles.md'), 'utf8')).toContain('strata/default-low, lmstudio')
+    expect(parseMd(await readFile(path.join(dir, 'config', 'settings.md'), 'utf8')).data).toMatchObject({ fallbacks: ['strata/default', 'deepseek/deepseek-flash'], last_resort_model: 'strata/default' })
+    // a second start changes nothing; a loaded row you remove afterwards stays removed
+    expect((await migrateStrataLoaded(dir)).changes).toEqual([])
+    await writeFile(file, text.replace(/ {6}- id: default-low\r\n {8}loaded: true\r\n {8}aliases:.*\r\n {8}context: 131072\r\n {8}extra_body:.*\r\n/, ''))
+    expect((await migrateStrataLoaded(dir)).changes).toEqual([])
+    // no strata provider: nothing is added
+    const none = await providersFolder(OLD_PROVIDERS)
+    expect((await migrateStrataLoaded(none)).changes).toEqual([])
+    expect(await readFile(path.join(none, 'config', 'providers.md'), 'utf8')).not.toContain('strata')
   })
 })

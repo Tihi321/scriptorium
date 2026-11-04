@@ -1,6 +1,8 @@
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
-import { parseMd } from '../../shared/md'
+import { isMap, isSeq, parseDocument, visit } from 'yaml'
+import type { Document } from 'yaml'
+import { parseMd, splitFrontmatter } from '../../shared/md'
 import { atomicWrite, readMd, writeMd } from './atomic'
 import { SEED_HISTORY, seedHash } from './seedHistory'
 
@@ -543,5 +545,90 @@ export async function migrateFallbacks(dataDir: string, seedDir: string | undefi
   }
   await writeMd(file, next, body)
   changes.push(`config/settings.md: the default models and model_order became fallbacks (${(next.fallbacks as string[]).join(', ')}; one order for every role: ${next.fallback_shared})`)
+  return { changes }
+}
+
+/** Strata's older model ids and the neutral refs that replaced them (HUB-26): the `loaded` rows follow whatever model Strata runs. */
+const STRATA_REFS: Record<string, string> = {
+  'strata/qwen3.8-flash-next-low': 'strata/default-low',
+  'strata/qwen3.8-flash-next': 'strata/default'
+}
+
+/** The `loaded` rows and the profiles the seed's `strata` provider has (providers.md). */
+const STRATA_LOADED_ROWS = [
+  { id: 'default', loaded: true, aliases: ['qwen3.8-flash-next'], context: 131072, extra_body: { reasoning_effort: 'none' } },
+  { id: 'default-low', loaded: true, aliases: ['qwen3.8-flash-next-low'], context: 131072, extra_body: { reasoning_effort: 'low' } }
+]
+const STRATA_PROFILES = [
+  { id: 'qwen3.8-flash-next', family: 'qwen', context: 131072 },
+  { id: 'deepseek-v4.1-flash', family: 'deepseek', context: 131072 }
+]
+
+/** Edits the frontmatter of a config file in place (comments kept, the file's own line endings). Missing, without frontmatter or not parsing: not touched. True when `edit` changed it. */
+async function editFrontmatter(file: string, edit: (doc: Document) => boolean): Promise<boolean> {
+  if (!existsSync(file)) return false
+  const text = await fs.readFile(file, 'utf8')
+  const { frontmatter, body } = splitFrontmatter(text)
+  if (frontmatter === null) return false
+  const doc = parseDocument(frontmatter)
+  if (doc.errors.length > 0 || !edit(doc)) return false
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  await atomicWrite(file, `---${eol}${doc.toString({ lineWidth: 0 }).replace(/\r?\n/g, eol)}---${eol}${body}`)
+  return true
+}
+
+/** Renames the exact old Strata refs in every string of a config file. Returns whether anything changed. */
+function renameStrataRefs(doc: Document): boolean {
+  let changed = false
+  visit(doc, {
+    Scalar(_key, node) {
+      const to = typeof node.value === 'string' ? STRATA_REFS[node.value] : undefined
+      if (to) {
+        node.value = to
+        changed = true
+      }
+    }
+  })
+  return changed
+}
+
+/**
+ * HUB-26: Strata runs one model at a time, and the two fixed Strata rows (`qwen3.8-flash-next`, `-low`) became `loaded` rows (`strata/default`,
+ * `strata/default-low`) that follow whichever model it runs, with `profiles` per model. In config/providers.md, a `strata` provider that has
+ * no `loaded` row and still has one of the old rows gets the two `loaded` rows (first, with the old ids as `aliases`), the seed's profiles it
+ * lacks and `discover: true`; the old rows go, every other row and key stays. Then the exact old refs become the new ones in config/roles.md
+ * and config/settings.md (`fallbacks`, `last_resort_model`, any other string). Runs after `migrateFallbacks`, whose fallbacks may name the old
+ * ref. Running it again changes nothing, and it never brings back a row you removed afterwards (it only acts while an old row is there). A
+ * deleted `strata` provider, or a file that is missing or does not parse, is left alone.
+ */
+export async function migrateStrataLoaded(dataDir: string): Promise<MigrationResult> {
+  const changes: string[] = []
+  const aliasIds = new Set(STRATA_LOADED_ROWS.flatMap((r) => r.aliases))
+  const providers = await editFrontmatter(path.join(dataDir, 'config', 'providers.md'), (doc) => {
+    const list = doc.get('providers', true)
+    const strata = isSeq(list) ? list.items.find((p) => isMap(p) && p.get('id') === 'strata') : undefined
+    if (!isMap(strata)) return false
+    const models = strata.get('models', true)
+    if (!isSeq(models)) return false
+    if (models.items.some((m) => isMap(m) && m.get('loaded') === true)) return false
+    if (!models.items.some((m) => isMap(m) && aliasIds.has(String(m.get('id'))))) return false
+    models.items = models.items.filter((m) => !(isMap(m) && aliasIds.has(String(m.get('id')))))
+    STRATA_LOADED_ROWS.forEach((r, i) => models.items.splice(i, 0, doc.createNode(r)))
+    strata.set('discover', true)
+    let profiles = strata.get('profiles', true)
+    if (!isSeq(profiles)) {
+      strata.set('profiles', doc.createNode([]))
+      profiles = strata.get('profiles', true)
+    }
+    if (isSeq(profiles)) {
+      const have = new Set(profiles.items.filter(isMap).map((p) => String(p.get('id'))))
+      for (const p of STRATA_PROFILES) if (!have.has(p.id)) profiles.add(doc.createNode(p))
+    }
+    return true
+  })
+  if (providers) changes.push('config/providers.md: Strata has the loaded rows strata/default and strata/default-low (they follow the model Strata runs), with profiles per model')
+  for (const name of ['roles.md', 'settings.md']) {
+    if (await editFrontmatter(path.join(dataDir, 'config', name), renameStrataRefs)) changes.push(`config/${name}: strata/qwen3.8-flash-next(-low) became strata/default(-low)`)
+  }
   return { changes }
 }

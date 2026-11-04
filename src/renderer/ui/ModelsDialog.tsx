@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { sendCommand } from '../api'
 import { useOffice } from '../store/hooks'
+import { providerLabel } from '../store/model'
 import { officeStore } from '../store/store'
 import type { ModelSummary, ProviderSummary, SettingsSummary } from '../../shared/protocol'
 
@@ -16,6 +17,23 @@ interface Row {
   source?: 'config' | 'discovered' | 'picked'
   /** It can be ticked: known, local, or listed with a price. */
   pickable: boolean
+  /** A `loaded` row (`strata/default`): the model name to show, `Strata: <served>`. */
+  label?: string
+}
+
+/** What a server that follows its loaded model runs: `Strata runs <model>`, or that it is not running (and what it ran last). */
+function servedNote(p: ProviderSummary, down: boolean): string {
+  const name = p.name !== p.id ? p.name : providerLabel(p.id)
+  if (down) return `${name}: not running${p.served ? ` (last: ${p.served})` : ''}`
+  return p.served ? `${name} runs ${p.served}. The rows below stand for it.` : `${name}: model not known yet`
+}
+
+/** `Strata: <model>` and `Strata: <model>, thinking low` for a `loaded` row that has been answered for; undefined for any other model. */
+function servedLabel(m: ModelSummary | undefined, providers: ProviderSummary[]): string | undefined {
+  if (!m?.served) return undefined
+  const p = providers.find((x) => x.id === m.provider)
+  const name = p && p.name !== p.id ? p.name : providerLabel(m.provider)
+  return `${name}: ${m.served}${m.thinking && m.thinking !== 'none' ? `, thinking ${m.thinking}` : ''}`
 }
 
 const SOURCE_LABEL = { config: 'providers.md', discovered: 'found', picked: 'added' } as const
@@ -115,6 +133,7 @@ export function ModelsDialog() {
   const models = useOffice((s) => s.models)
   const catalogs = useOffice((s) => s.catalogs)
   const settings = useOffice((s) => s.settings)
+  const servers = useOffice((s) => s.servers)
   const providerTest = useOffice((s) => s.providerTest)
   const providerSaved = useOffice((s) => s.providerSaved)
   const [form, setForm] = useState<ProviderForm | null>(null)
@@ -173,7 +192,7 @@ export function ModelsDialog() {
     const out = new Map<string, Row>()
     for (const m of models) {
       if (m.provider !== current.id) continue
-      out.set(m.ref, { ref: m.ref, id: m.model, context: m.context, priceIn: m.priceIn, priceOut: m.priceOut, shown: m.shown !== false, source: m.source, pickable: true })
+      out.set(m.ref, { ref: m.ref, id: m.model, context: m.context, priceIn: m.priceIn, priceOut: m.priceOut, shown: m.shown !== false, source: m.source, pickable: true, label: servedLabel(m, providers) })
     }
     for (const c of catalog?.models ?? []) {
       const known = out.get(c.ref)
@@ -181,7 +200,7 @@ export function ModelsDialog() {
       else out.set(c.ref, { ref: c.ref, id: c.id, context: c.context, priceIn: c.priceIn, priceOut: c.priceOut, shown: false, pickable: c.pickable })
     }
     return [...out.values()].sort((a, b) => a.id.localeCompare(b.id))
-  }, [current, models, catalog])
+  }, [current, models, catalog, providers])
 
   if (!open) return null
   const saveLoad = () => {
@@ -263,7 +282,7 @@ export function ModelsDialog() {
         <select value={ref} onChange={(e) => save(fallbacks.map((r, j) => (j === i ? e.target.value : r)))} style={{ flex: 1, minWidth: 0 }} data-testid={`fallback-model-${i}`}>
           {refs.map((r) => (
             <option key={r} value={r}>
-              {r}
+              {servedLabel(models.find((m) => m.ref === r), providers) ?? r}
             </option>
           ))}
         </select>
@@ -489,6 +508,11 @@ export function ModelsDialog() {
                   )}
                 </div>
               )}
+              {current.followsServer && (
+                <div className={current.available && !servers.find((s) => s.id === current.id)?.down ? 'dim' : 'warn'} data-testid="served-note">
+                  {servedNote(current, servers.find((s) => s.id === current.id)?.down ?? false)}
+                </div>
+              )}
               {!form && formError && (
                 <div className="warn" data-testid="provider-error">
                   {formError}
@@ -562,7 +586,9 @@ export function ModelsDialog() {
                     data-testid={`model-row-${r.ref}`}
                   >
                     <input type="checkbox" checked={r.shown} disabled={!r.pickable} onChange={(e) => sendCommand({ type: 'showModels', refs: [r.ref], shown: e.target.checked })} />
-                    <span className="model-id">{r.id}</span>
+                    <span className="model-id" title={r.label ? r.id : undefined}>
+                      {r.label ?? r.id}
+                    </span>
                     <span className="dim">{formatContext(r.context)}</span>
                     <span className={r.priceIn === 0 && r.priceOut === 0 && !local ? 'free' : 'dim'}>{formatPrice(r, local, client)}</span>
                     <span className="dim">{r.source ? SOURCE_LABEL[r.source] : ''}</span>

@@ -8,7 +8,7 @@ smtp_user: ""
 smtp_secure: false
 fallbacks:
   - deepseek/deepseek-flash
-  - strata/qwen3.8-flash-next
+  - strata/default
   - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
 fallback_shared: false
 last_resort_model: ""

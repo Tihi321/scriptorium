@@ -166,7 +166,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     const d = new Date()
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
   }
-  const limits = (concurrency: number, o: Partial<ProviderSummary> = {}) => ({ concurrency, concurrencyAuto: false, requestsToday: 0, dayFull: false, dayResetsAt: midnightUtc(), ...o })
+  const limits = (concurrency: number, o: Partial<ProviderSummary> = {}) => ({ concurrency, concurrencyAuto: false, followsServer: false, requestsToday: 0, dayFull: false, dayResetsAt: midnightUtc(), ...o })
   type ProviderBase = Omit<ProviderSummary, 'name' | 'custom' | 'enabled' | 'hasKey' | 'jsonSchema'> & Partial<Pick<ProviderSummary, 'name' | 'custom' | 'enabled' | 'hasKey' | 'jsonSchema'>>
   const withDefaults = (p: ProviderBase): ProviderSummary => ({ name: p.id, custom: false, enabled: p.available, hasKey: false, jsonSchema: true, ...p })
   const PROVIDERS: ProviderSummary[] = ([
@@ -189,7 +189,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     ]
   }
   const roleDefaults: Record<string, string> = Object.fromEntries(STAFF.map(([role, , , model]) => [role, model]))
-  let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 }
+  let settings = { kindleAddress: 'me@kindle.com', fromAddress: 'me@example.com', smtpHost: 'smtp.example.com', smtpPort: 587, smtpUser: 'me', smtpSecure: false, fallbacks: ['deepseek/deepseek-flash', 'strata/default', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 }
   const secretsSet = new Set<string>(['DEEPSEEK_API_KEY'])
 
   const summaryOf = (a: FakeAgent): AgentSummary => ({
