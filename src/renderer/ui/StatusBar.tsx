@@ -27,7 +27,11 @@ function Servers() {
           className={s.down ? 'pill server off' : 'pill server'}
           data-testid={`server-${s.id}`}
           data-down={s.down}
-          title={s.down ? `${providerLabel(s.id)} is not running: its jobs go to the next model in their role` : `${providerLabel(s.id)} runs ${s.slots} request(s) at once`}
+          title={
+            s.down
+              ? `${providerLabel(s.id)}: not running${s.served ? ` (last: ${s.served})` : ''}. Its jobs go to the next model in their role`
+              : `${providerLabel(s.id)}${s.served ? `: ${s.served},` : ''} runs ${s.slots} request(s) at once`
+          }
         >
           <span className="dot" style={{ background: s.down ? 'var(--rubric)' : providerColor(s.id) }} />
           {providerLabel(s.id)} {s.down ? 'off' : `on ×${s.slots}`}

@@ -44,6 +44,10 @@ export interface ModelSummary {
   /** Where it comes from: providers.md, the provider's own list (`discover`), or picked in the Models dialog. */
   source: 'config' | 'discovered' | 'picked'
   context?: number
+  /** A `loaded` row (`strata/default`): the model the provider serves now, once it has answered. Pickers show it instead of the ref's id. */
+  served?: string
+  /** A `loaded` row: its thinking level (`reasoning_effort` of its `extra_body`), shown as "thinking low" unless `none`. */
+  thinking?: string
   /** USD per 1M tokens. */
   priceIn: number
   priceOut: number
@@ -73,6 +77,10 @@ export interface ProviderSummary {
   reason?: string
   /** It can list its models (`GET /models`, OpenAI-style providers). */
   canList: boolean
+  /** Has `loaded` rows (Strata): they stand for the model it runs, `served`. */
+  followsServer: boolean
+  /** The model it ran when last asked (kept while it is down). */
+  served?: string
   /** Requests at once. With `concurrencyAuto` the server sets it (Strata, LM Studio), so it can't be changed here. */
   concurrency: number
   concurrencyAuto: boolean
@@ -105,6 +113,8 @@ export interface ServerStatus {
   id: string
   down: boolean
   slots: number
+  /** The model the server runs (last seen, also while it is down). Only for a provider with `loaded` rows. */
+  served?: string
 }
 
 export interface AgentSummary {
@@ -356,6 +366,8 @@ export type EngineEvent =
       type: 'spend'
       provider: string
       model: string
+      /** A `loaded` row (`strata/default`): the model that answered. */
+      served?: string
       tokensIn: number
       tokensOut: number
       costUsd: number
