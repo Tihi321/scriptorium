@@ -39,6 +39,7 @@ const FORMATS: Record<string, { group: TypeGroup; choices?: boolean }> = {
   'mystery-puzzle-visual-novel': { group: 'puzzle' },
   'nonfiction-short': { group: 'nonfiction' },
   'nonfiction-kids': { group: 'nonfiction' },
+  'science-blink': { group: 'nonfiction' },
   article: { group: 'nonfiction' },
   'feature-article': { group: 'nonfiction' }
 }

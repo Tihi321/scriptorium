@@ -234,6 +234,27 @@ formats:
       define each term when it first appears, explain one idea at a time, use real examples, dates and numbers. Every chapter has a job
       in the argument and ends by pointing to the next. Every fact comes from the sourced notes and carries the number of its source in
       square brackets, like [2]. Never state a date, number, name or event that the notes do not give. No invented quotes, no invented people.
+  - id: science-blink
+    name: Science explainer (short read)
+    enabled: true
+    nonfiction: true
+    humanize: true
+    max_rounds: 1
+    kinds: [nonfiction]
+    juvenile: false
+    age_band: null
+    words: [2000, 4000]
+    chapters: [6, 10]
+    read_aloud: false
+    guidance: |
+      A short-read science explainer for curious general readers, in the style of a book-summary app. Each chapter is one "blink" of
+      250 to 500 words that carries one key idea. Open the first blink with a hook: a vivid scene, a small story or a puzzle the reader
+      can feel. Every blink explains one idea in plain, concrete words, defines each term when it first appears, uses an everyday analogy
+      and a real example or number, and ends with a line that pulls into the next. The last blink is a short takeaway: the whole argument
+      in a few sentences. Where the science is unsettled, say so plainly, and keep what is measured apart from what is theory or
+      speculation. Every fact comes from the sourced notes and carries the number of its source in square brackets, like [2]. Never state
+      a date, number, name or quote that the notes do not give. No invented quotes, no invented people; a clearly imagined scene that
+      illustrates an idea is allowed if the text frames it as imagined.
   - id: nonfiction-kids
     name: Fact book for children
     enabled: true
