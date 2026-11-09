@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: REQ-0005
 repos: [scriptorium]
 branch: SCP-56_req0004-fixes
