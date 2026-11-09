@@ -96,7 +96,7 @@ export function factCheckNotes(notes: NoteFile[], sources: SourceEntry[], bookTe
   // below the room the label and markers need, no excerpts are added: the block never exceeds `excerptLimit`
   if (room <= 0) return text
   const body = blocks.join('\n\n').replace(/<{2,}|>{2,}/g, ' ').slice(0, room)
-  return `${text}\n\n${head}\n${begin}\n${body}\n${end}`
+  return `${text ? `${text}\n\n` : ''}${head}\n${begin}\n${body}\n${end}`
 }
 
 export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): void {
@@ -252,7 +252,7 @@ export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): v
       const { messages, version } = await buildMessages(d.dataDir, ctx, role, 'fact_check', {
         title: book.title,
         factbase: digest,
-        notes: noteText || '(no research notes at all)',
+        notes: noteText || (notes.length ? '(the research notes have no text to show here and their page excerpts did not fit)' : '(no research notes at all)'),
         book_text: bookText,
         coverage: coverage.length ? coverage.map((x) => `- Chapter ${x.chapter}: ${x.detail}`).join('\n') : '(every chapter has sourced facts and cites at least one source)',
         round,
