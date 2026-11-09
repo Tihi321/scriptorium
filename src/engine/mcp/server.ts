@@ -55,6 +55,8 @@ export interface McpStartOptions {
   log: (m: string) => void
   /** Tests: the bearer token, instead of looking up the secret named in the config. */
   token?: string
+  /** Milliseconds between the `: keepalive` comments on an SSE response. Default 15000. */
+  keepAliveMs?: number
 }
 
 const json = (res: http.ServerResponse, status: number, message: string, headers: Record<string, string> = {}) => {
@@ -104,6 +106,22 @@ export async function startMcpServer(o: McpStartOptions): Promise<McpHandle | nu
       void mcp.close()
     })
     await mcp.connect(transport)
+    // a long tool call (wait_for_book) writes nothing until it returns: an SSE comment now and then keeps a client with an idle timeout connected
+    // writeHead(status, headers) does not set res.getHeader, so the content type is read from the call itself
+    let sse = false
+    const writeHead = res.writeHead.bind(res) as (...a: unknown[]) => http.ServerResponse
+    res.writeHead = ((...a: unknown[]) => {
+      const h = a.find((x) => typeof x === 'object' && x !== null) as Record<string, unknown> | unknown[] | undefined
+      const type = Array.isArray(h) ? h.map(String).join(',') : Object.entries(h ?? {}).map(([k, v]) => (k.toLowerCase() === 'content-type' ? String(v) : '')).join('')
+      sse = sse || type.includes('text/event-stream') || String(res.getHeader('content-type') ?? '').includes('text/event-stream')
+      return writeHead(...a)
+    }) as typeof res.writeHead
+    const timer = setInterval(() => {
+      if (sse && res.headersSent && !res.writableEnded) res.write(': keepalive\n\n')
+    }, o.keepAliveMs ?? 15000)
+    const stop = () => clearInterval(timer)
+    res.once('close', stop)
+    res.once('finish', stop)
     await transport.handleRequest(req, res)
   }
 
