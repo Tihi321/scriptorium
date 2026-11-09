@@ -91,12 +91,15 @@ export function candidateFacts(notes: NoteFile[], sources: SourceEntry[]): KeyFa
 /** How much of one research note the writer and the fact checker see (the source excerpts of a note always fit inside it). */
 export const NOTE_CHARS = 1800
 
+/** The note has text a writer can see (a fallback note, with page excerpts only, has none). */
+const hasText = (n: NoteFile): boolean => formatNote(n) !== ''
+
 /**
  * The notes as prompt text, with `[n]` instead of the URL, so the writer cites by number. The sources are numbered before a note is
  * cut, so the short `[n]` is what takes room, not the URL.
  */
 export function numberedNotes(notes: NoteFile[], sources: SourceEntry[], maxChars = NOTE_CHARS): string {
-  return notes.map((n) => formatNote({ ...n, body: numberedNoteText(n.body, sources) }, maxChars)).join('\n\n')
+  return notes.map((n) => formatNote({ ...n, body: numberedNoteText(n.body, sources) }, maxChars)).filter(Boolean).join('\n\n')
 }
 
 export interface NfContextOptions {
@@ -122,8 +125,9 @@ export async function nonfictionContext(d: NfDeps, slug: string, n: number, o: N
   // the book's late research first (newest first), then the notes that fit the chapter best
   const fresh = await freshNotes(d, slug, n, 12)
   const relevant = await chapterNotes(d, slug, query, 6)
-  // the text of the newest 6 fresh notes; the sources of every fresh note are listed, even when a note's text is not shown
-  const notes = [...fresh.slice(0, 6), ...relevant.filter((x) => !fresh.slice(0, 6).some((f) => f.file === x.file))]
+  // the text of the newest 6 fresh notes that have text (a fallback note has none); the sources of every note are listed, even when its text is not shown
+  const newest = fresh.filter(hasText).slice(0, 6)
+  const notes = [...newest, ...relevant.filter((x) => !newest.some((f) => f.file === x.file))]
   const sources = await d.factbase.syncSources(slug, [...notes, ...fresh])
   const facts = await d.factbase.facts(slug)
   const terms = await d.factbase.terms(slug)
@@ -140,7 +144,8 @@ export async function nonfictionContext(d: NfDeps, slug: string, n: number, o: N
   if (own.length) items.push({ name: `key facts of chapter ${n}`, text: d.factbase.factLines(own), priority: 0, order: 4, must: true })
   else items.push({ name: `key facts of chapter ${n}`, text: '(no sourced facts were found for this chapter: write only what the argument, the terms and the notes below support, and keep it general)', priority: 0, order: 4, must: true })
   if (cite.size) items.push({ name: 'numbered sources', text: d.factbase.sourceLines(sources, cite), priority: 0.5, order: 4.5, must: true })
-  if (notes.length) items.push({ name: `research notes (${notes.length})`, text: numberedNotes(notes, sources), priority: 2, order: 5 })
+  const shown = notes.filter(hasText)
+  if (shown.length) items.push({ name: `research notes (${shown.length})`, text: numberedNotes(shown, sources), priority: 2, order: 5 })
   const others = [...facts.entries()].filter(([k]) => k !== n).sort((a, b) => a[0] - b[0])
   if (others.length) items.push({ name: 'key facts of the other chapters', text: others.map(([k, f]) => `Chapter ${k}:\n${d.factbase.factLines(f)}`).join('\n'), priority: 3, order: 6 })
   const chapters = (await d.books.chapters(slug)).filter((c) => (o.chapters === 'before' ? c.n < n : c.n !== n))

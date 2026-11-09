@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { parseMd } from '../../shared/md'
-import { researchNotesFor } from '../research/context'
+import { researchNotesFor, withText } from '../research/context'
 import type { ResearchItem } from '../research/context'
 import { applyMarkerFixes, findMarkers, markerSentence } from '../research/markers'
 import { formatNote, questionKey } from '../research/notes'
@@ -117,7 +117,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
       ctx.log(`already answered by ${exact.file}`)
       return { result: `already in the notes (${exact.file})`, resultPath: exact.file }
     }
-    const items = await researchNotesFor(d, book, question, 4)
+    const items = withText(await researchNotesFor(d, book, question, 4))
     if (items.length > 0) {
       const { messages, version } = await buildMessages(d.dataDir, ctx, 'researcher', 'check_notes', { question, notes: items.map((i) => i.text).join('\n\n') })
       run.version = version
@@ -456,7 +456,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
       const parts: string[] = []
       for (const [i, m] of markers.entries()) {
         const note = await d.research.store.findExact(m.question, slug)
-        const found: ResearchItem[] = note ? [{ name: note.question, text: formatNote(note), file: note.file }] : await researchNotesFor(d, slug, m.question, 1)
+        const found: ResearchItem[] = withText(note ? [{ name: note.question, text: formatNote(note), file: note.file }] : await researchNotesFor(d, slug, m.question, 1))
         parts.push(`Marker ${i + 1}: ${m.question}\nSentence: ${markerSentence(chapter.body, m)}\n${found.length ? `Research notes:\n${found.map((f) => f.text).join('\n')}` : 'No notes were found for this question.'}`)
       }
       try {

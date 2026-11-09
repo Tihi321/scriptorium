@@ -79,3 +79,7 @@ Found on the VN adaptation `the-local-patch-2` (hub run log `runs/the-local-patc
 ## After SCP-19 is merged
 
 - At the first engine start, check that `~/Scriptorium/config/settings.md` was migrated to `fallbacks` and `fallback_shared`, and that the Models panel shows the three rows.
+
+## Open: deferred from the REQ-0004 checks (2026-11-09)
+
+- **`candidateFacts` matches source-excerpt lines.** The lines under "## Source excerpts" in a normal note (verbatim, up to 500 characters) still match `candidateFacts` (`src/engine/research/notes.ts`, `src/engine/pipeline/nfcontext.ts`). Pre-existing, no harm seen. Decide whether `candidateFacts` should skip excerpt lines. From SCP-56 `discoveries.md` item 4, deferred in SCP-58.

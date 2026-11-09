@@ -28,7 +28,7 @@ import type { FactBase } from '../memory/factbase'
 import { buildDraftContext } from '../memory/context'
 import type { PackedContext } from '../memory/context'
 import type { MemoryService } from '../memory/service'
-import { researchBlock, researchNotesFor, researchNotesForQuestions } from '../research/context'
+import { researchBlock, researchNotesFor, researchNotesForQuestions, withText } from '../research/context'
 import { findMarkers, stripMarkers } from '../research/markers'
 import type { ResearchService, SearchService } from '../research/service'
 import { bibleFor, nonfictionContext } from './nfcontext'
@@ -290,7 +290,7 @@ export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 's
   }
   // research notes (of the book and shared) that fit what this chapter is about
   const entry = (await d.books.outline(slug))?.chapters.find((c) => c.n === n)
-  const research = entry ? await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4) : []
+  const research = entry ? withText(await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4)) : []
   const seriesBooks = await earlierSeriesBooks(d, slug)
   return buildDraftContext({ books: d.books, bible: d.bible, index, slug, n, budgetTokens, research, seriesBooks, log: d.log })
 }
@@ -670,7 +670,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     // the architect's research questions (asked after the pitch) are answered by now: the outline is built on the notes
     const planText = await d.books.readText(slug, 'research-plan.md')
     const planned = planText && Array.isArray(parseMd(planText).data.questions) ? (parseMd(planText).data.questions as { question: string }[]).map((q) => q.question) : []
-    const planNotes = planned.length ? await researchNotesForQuestions(d, slug, planned) : []
+    const planNotes = planned.length ? withText(await researchNotesForQuestions(d, slug, planned)) : []
     if (planNotes.length) ctx.context(planNotes.map((i) => ({ name: i.name, tokens: Math.round(i.text.length / 4) })))
     const { messages, version } = await buildMessages(d.dataDir, ctx, 'architect', variant(fmt, 'outline'), {
       research: planNotes.length ? `${researchBlock(planNotes)}
@@ -845,7 +845,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       // a story with choices: only the chapters a reader can pass through on the way here
       const before = fmt.choices ? ancestors(outline.chapters, n) : null
       const prior = (await d.books.chapters(slug)).filter((c) => (before ? before.has(c.n) : c.n < n))
-      const research = await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4)
+      const research = withText(await researchNotesFor(d, slug, `${entry.title}. ${entry.summary}`, 4))
       storySoFar = [
         `## Pitch\n${(await d.books.pitch(slug)) ?? ''}`,
         `## Outline\n${outline.chapters.map((c) => `${c.n}. ${c.title}: ${c.summary}${fmt.choices ? ` [${endLine(c)}]` : ''}`).join('\n')}`,

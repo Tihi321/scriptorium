@@ -189,10 +189,15 @@ export const EXCERPTS_HEADING = '## Source excerpts (verbatim, for checking)'
 export const PAGE_EXCERPTS_HEADING = '## Page excerpts (verbatim, for the fact-checker)'
 const PAGE_EXCERPT_CHARS = 1200
 
-/** The lines of a note's page excerpts section, or ''. */
+/** Stored page text cannot open a heading or a code block of the prompt: a line that starts with # or a code fence gets a backslash. */
+export function neutralisePageText(text: string): string {
+  return text.replace(/^([ \t>]*)(#|`{3,}|~{3,})/gm, '$1\\$2')
+}
+
+/** The lines of a note's page excerpts section, or ''. The page text is neutralised (see neutralisePageText). */
 export function pageExcerpts(n: NoteFile): string {
   const at = n.body.indexOf(PAGE_EXCERPTS_HEADING)
-  return at >= 0 ? n.body.slice(at + PAGE_EXCERPTS_HEADING.length).trim() : ''
+  return at >= 0 ? neutralisePageText(n.body.slice(at + PAGE_EXCERPTS_HEADING.length).trim()) : ''
 }
 
 /** The note text a writer sees: the facts, framed as data. The source excerpts stay inside the cap, the facts give way. The page excerpts are left out. */
@@ -203,6 +208,7 @@ export function formatNote(n: NoteFile, maxChars = 2400): string {
   const at = body.indexOf(EXCERPTS_HEADING)
   const facts = at >= 0 ? body.slice(0, at).trim() : body
   const excerpts = at >= 0 ? body.slice(at).trim() : ''
+  if (!facts && !excerpts) return '' // a fallback note (page excerpts only) has nothing for the writer; its URL stays in the sources
   const room = Math.max(600, maxChars - (excerpts ? excerpts.length + 2 : 0))
   const cut = facts.length > room ? facts.slice(0, room).replace(/\n[^\n]*$/, '') + '\n- (more facts in the file)' : facts
   return `### ${n.question}${n.unverified ? ' (unverified)' : ''}\n${cut}${excerpts ? `\n\n${excerpts}` : ''}`
