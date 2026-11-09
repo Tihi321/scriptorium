@@ -343,7 +343,7 @@ export function ModelsDialog() {
       )}
       {formField(
         'Base URL',
-        <input value={form.baseUrl} placeholder="http://127.0.0.1:7461/v1" onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} data-testid="provider-url" />
+        <input value={form.baseUrl} placeholder="http://127.0.0.1:8787/v1" onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} data-testid="provider-url" />
       )}
       {formField(
         form.hasKey ? 'API key (stored, not shown: leave empty to keep it)' : 'API key (optional)',

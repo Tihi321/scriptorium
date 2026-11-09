@@ -264,7 +264,7 @@ describe('migrateAcpProvider (SCP-44)', () => {
     const withClient = [...OLD_PROVIDERS.slice(0, 8), '  # my client note', '  - id: client', '    kind: client', '    models: []', ...OLD_PROVIDERS.slice(8)]
     const dir = await providersFolder(withClient, '\r\n')
     const res = await migrateAcpProvider(dir, seedDir)
-    expect(res.changes).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:7461/v1, switched off)'])
+    expect(res.changes).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:8787/v1, switched off)'])
     const file = path.join(dir, 'config', 'providers.md')
     const text = await readFile(file, 'utf8')
     expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/)
@@ -277,7 +277,7 @@ describe('migrateAcpProvider (SCP-44)', () => {
     await writeFile(path.join(dir, 'config', 'roles.md'), ['---', 'kind: roles', 'roles: {}', '---', ''].join('\n'))
     const registry = new ModelRegistry(dir, { keys: () => undefined })
     await registry.load()
-    expect(registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, baseUrl: 'http://127.0.0.1:7461/v1', concurrency: 2, jsonSchema: false, discover: true, custom: false, name: 'ACP proxy', available: false })
+    expect(registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, baseUrl: 'http://127.0.0.1:8787/v1', concurrency: 2, jsonSchema: false, discover: true, custom: false, name: 'ACP proxy', available: false })
     expect(registry.kindOf('acp/any')).toBe('acp')
   })
 
@@ -290,6 +290,17 @@ describe('migrateAcpProvider (SCP-44)', () => {
     const own = await providersFolder([...OLD_PROVIDERS.slice(0, 8), '  - id: acp', '    name: Mine', '    custom: true', '    kind: openai-compat', '    base_url: http://localhost:9/v1', '    models: []', ...OLD_PROVIDERS.slice(8)])
     expect((await migrateAcpProvider(own, seedDir)).changes).toEqual([])
     expect(await readFile(path.join(own, 'config', 'providers.md'), 'utf8')).toContain('name: Mine')
+    // SCP-56: the old default port is rewritten once, and only for an entry that is switched off with exactly that URL
+    const oldAcp = (enabled: string, url = 'http://127.0.0.1:7461/v1') => [...OLD_PROVIDERS.slice(0, 8), '  - id: acp', '    kind: openai-compat', `    enabled: ${enabled}`, `    base_url: ${url}`, '    models: []', ...OLD_PROVIDERS.slice(8)]
+    const stale = await providersFolder(oldAcp('false'))
+    expect((await migrateAcpProvider(stale, seedDir)).changes).toEqual(["config/providers.md: the acp provider now points at http://127.0.0.1:8787/v1 (the ACP proxy's default port)"])
+    expect(await readFile(path.join(stale, 'config', 'providers.md'), 'utf8')).toContain('base_url: http://127.0.0.1:8787/v1')
+    expect((await migrateAcpProvider(stale, seedDir)).changes).toEqual([])
+    for (const lines of [oldAcp('true'), oldAcp('false', 'http://127.0.0.1:7461/v2')]) {
+      const keep = await providersFolder(lines)
+      expect((await migrateAcpProvider(keep, seedDir)).changes).toEqual([])
+      expect(await readFile(path.join(keep, 'config', 'providers.md'), 'utf8')).toContain('127.0.0.1:7461')
+    }
     const none = await tmp()
     expect((await migrateAcpProvider(none, seedDir)).changes).toEqual([])
     expect(existsSync(path.join(none, 'config'))).toBe(false)
@@ -308,7 +319,7 @@ describe('migrateAcpProvider (SCP-44)', () => {
     expect(from).toBeGreaterThan(0)
     await writeFile(file, seedText.slice(0, from) + seedText.slice(to))
     const again = await initDataFolder(fresh, seedDir)
-    expect(again.migrated).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:7461/v1, switched off)'])
+    expect(again.migrated).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:8787/v1, switched off)'])
     expect((await initDataFolder(fresh, seedDir)).migrated).toEqual([])
   })
 })

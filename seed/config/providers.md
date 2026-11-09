@@ -138,7 +138,7 @@ providers:
     kind: openai-compat
     enabled: false
     local: true
-    base_url: http://127.0.0.1:7461/v1
+    base_url: http://127.0.0.1:8787/v1
     concurrency: 2
     json_schema: false
     discover: true
@@ -252,7 +252,7 @@ Strata (`D:\Strata`) is a fast local server with an OpenAI-style API. It is the 
 
 ## The ACP proxy
 
-`acp` points at the api-acp-proxy (`http://127.0.0.1:7461/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API. It is off until you start the proxy and set `enabled: true` (or switch it on in the Models panel). It is local (free, its own kind `acp` in the fallback list); press **Detect models** to list what the proxy offers and tick the ones you want.
+`acp` points at the api-acp-proxy (`http://127.0.0.1:8787/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API. It is off until you start the proxy and set `enabled: true` (or switch it on in the Models panel). It is local (free, its own kind `acp` in the fallback list); press **Detect models** to list what the proxy offers and tick the ones you want.
 
 - Start the proxy with `PROXY_IGNORE_SAMPLING=1`: Scriptorium sends `temperature`, `max_tokens` and `stream_options`, which the proxy has to ignore.
 - It is text only: no vision.
