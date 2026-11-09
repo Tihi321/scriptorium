@@ -145,12 +145,27 @@ const COMMON_VERBS = new Set(
   'said ran went saw took came made knew felt found heard left held told thought stood sat got gave kept began fell grew lay met put rose slept spoke swam threw woke wrote brought caught drew drove flew hid hung lost paid rode rang sang sent shook shut sank spent struck taught tore understood won'.split(' ')
 )
 
-/** The sentence has a verb cue: an auxiliary or a modal, a past tense, a pronoun followed by a word, or a name followed by a word ending in -s. */
+/** A contraction carries a verb: "doesn't", "they're", "we've", "it'll", "I'm", "he'd", and 's after the words that take "is" ("that's"). */
+const CONTRACTION = /[\p{L}](?:n['’]t|['’](?:re|ve|ll|m|d))(?![\p{L}])|(?<![\p{L}])(?:that|here|there|what|it|he|she|who|where|let|everything|nothing|something)['’]s(?![\p{L}])/iu
+/** A determiner, up to two more words, then a lower-case word of 3+ letters ending in -s (not -ss, -us, -is): "the light travels", "each clock runs". */
+const DETERMINER_THEN_VERB = new RegExp(
+  '(?<![\\p{L}])(?:' +
+    'the|a|an|its|this|that|these|those|each|every|his|her|their|our|your|my|one|no|any|some'
+      .split('|')
+      .map((w) => `[${w[0]!.toUpperCase()}${w[0]}]${w.slice(1)}`)
+      .join('|') +
+    ')\\s+(?:[\\p{Ll}-]+\\s+){0,2}?\\p{Ll}{2,}(?<![su]s)s(?![\\p{L}])',
+  'u'
+)
+
+/** The sentence has a verb cue: an auxiliary or a modal, a past tense, a contraction, a pronoun followed by a word, a name followed by a word ending in -s, or a determiner phrase followed by a present-tense -s verb. */
 function hasVerbCue(sentence: string): boolean {
-  const words = sentence.toLowerCase().match(/[\p{L}']+/gu) ?? []
+  const words = sentence.toLowerCase().match(/[\p{L}'’]+/gu) ?? []
   if (words.some((w) => AUXILIARIES.has(w) || COMMON_VERBS.has(w) || (w.length > 3 && w.endsWith('ed')))) return true
   if (/\b(?:i|you|he|she|it|we|they)\s+[\p{L}']+/iu.test(sentence)) return true
-  return /\b\p{Lu}[\p{Ll}]+\s+[\p{Ll}]{2,}s\b/u.test(sentence)
+  if (CONTRACTION.test(sentence)) return true
+  if (/\b\p{Lu}[\p{Ll}]+\s+[\p{Ll}]{2,}s\b/u.test(sentence)) return true
+  return DETERMINER_THEN_VERB.test(sentence)
 }
 
 /**
@@ -304,6 +319,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     }
     const problem = leakProblem ?? humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
     if (problem) ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
+    else ctx.log(`humanizer: chapter ${n} humanized: ${countWords(current.body)} to ${countWords(revised)} words`)
     let body = problem ? current.body : revised
     // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently), and a place the bible lacks is added to it
     if (!problem && fmt.script) body = await settleScenePlaces(d, slug, n, body, (m) => ctx.log(`humanizer: ${m}`), { cues: !fmt.screenplay })
