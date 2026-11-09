@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ClientTaskQueue } from '../src/engine/models/client'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { humanizeProblem, newNames, numberTokens } from '../src/engine/pipeline/humanizerHandlers'
-import { ClientSearchProvider } from '../src/engine/research/clientSearch'
+import { ClientSearchProvider, parseSearchAnswer } from '../src/engine/research/clientSearch'
 import { SearchService } from '../src/engine/research/service'
 import { initDataFolder } from '../src/engine/store/dataFolder'
 import { migrateClientSearch } from '../src/engine/store/migrations'
@@ -25,6 +25,16 @@ afterEach(async () => {
 
 const answer = (n: number) =>
   JSON.stringify({ results: Array.from({ length: n }, (_, i) => ({ title: `Page ${i}`, url: `https://example.org/p${i}`, content: `Excerpt ${i}: the harbour handled 1,200 ships in 2024.`, published: '2026-10-14' })) })
+
+describe('parseSearchAnswer: one page, several excerpts', () => {
+  it('merges results with the same URL, keeps each distinct excerpt once, and counts URLs against the limit', () => {
+    const r = (url: string, content: string) => ({ title: 'T', url, content })
+    const text = JSON.stringify({ results: [r('https://example.org/a', 'First excerpt of a.'), r('https://example.org/a', 'Second excerpt of a.'), r('https://example.org/a', 'First excerpt of a.'), r('https://example.org/b', 'Excerpt of b.'), r('https://example.org/c', 'Excerpt of c.')] })
+    const out = parseSearchAnswer(text, 2)
+    expect(out.map((x) => x.url)).toEqual(['https://example.org/a', 'https://example.org/b'])
+    expect(out[0]!.content).toBe('First excerpt of a.\n\n[...]\n\nSecond excerpt of a.')
+  })
+})
 
 describe('client web search: a task for the MCP client', () => {
   it('a query is a searcher task; the client answers it and the results come back as notes material', async () => {

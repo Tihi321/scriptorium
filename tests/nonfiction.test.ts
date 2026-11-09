@@ -381,6 +381,7 @@ describe('seed files of the non-fiction variant', () => {
     const rows = parseTopics(await readFile(path.resolve(__dirname, '../seed/topics.md'), 'utf8'))
     for (const kind of ['fiction', 'juvenile-fiction', 'nonfiction', 'juvenile-nonfiction']) expect(rows.filter((r) => r.kind === kind).length, kind).toBeGreaterThanOrEqual(40)
     expect(rows.find((r) => r.id === 'his-books-and-printing')).toMatchObject({ kind: 'nonfiction', section: 'History' })
+    for (const id of ['phil-fate-and-free-will', 'phil-luck-and-moral-luck']) expect(rows.find((r) => r.id === id)).toMatchObject({ kind: 'nonfiction', section: 'Philosophy & Religion' })
     expect(rows.filter((r) => r.kind === 'visual-novel').every((r) => r.section === 'Visual Novels')).toBe(true)
     expect(rows.filter((r) => r.kind === 'visual-novel').length).toBeGreaterThanOrEqual(5)
     for (const kind of ['juvenile-visual-novel', 'interactive-fiction', 'juvenile-interactive-fiction']) expect(rows.filter((r) => r.kind === kind).length, kind).toBeGreaterThanOrEqual(5)

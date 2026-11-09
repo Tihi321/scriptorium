@@ -378,6 +378,8 @@ export async function migrateClientProvider(dataDir: string, seedDir: string | u
   return { changes }
 }
 
+const ACP_URL = 'http://127.0.0.1:8787/v1'
+
 /** The ACP proxy provider as the seed has it, for a data folder whose seed can't be read. */
 const ACP_PROVIDER_BLOCK = [
   '  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-compatible server. Off until you start the proxy.',
@@ -387,7 +389,7 @@ const ACP_PROVIDER_BLOCK = [
   '    kind: openai-compat',
   '    enabled: false',
   '    local: true',
-  '    base_url: http://127.0.0.1:7461/v1',
+  '    base_url: http://127.0.0.1:8787/v1',
   '    concurrency: 2',
   '    json_schema: false',
   '    discover: true',
@@ -395,9 +397,10 @@ const ACP_PROVIDER_BLOCK = [
 ]
 
 /**
- * SCP-44: the seed has an `acp` provider (the api-acp-proxy at 127.0.0.1:7461, switched off). A data folder from before gets it once, in
+ * SCP-44: the seed has an `acp` provider (the api-acp-proxy at 127.0.0.1:8787, switched off). A data folder from before gets it once, in
  * config/providers.md: the seed's block (with its comments) before the client provider, else before the first search provider. A file that
- * has a provider with the id `acp` (a custom one with that name too) is left alone. Everything else stays as it is, including comments and
+ * has a provider with the id `acp` (a custom one with that name too) gets no second one; its entry changes only when it is switched off
+ * and has exactly the old default URL (port 7461, SCP-56), which is rewritten to 8787. Everything else stays as it is, including comments and
  * line endings. Running it again changes nothing. A folder without the file is not touched.
  */
 export async function migrateAcpProvider(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
@@ -410,7 +413,18 @@ export async function migrateAcpProvider(dataDir: string, seedDir: string | unde
   const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
   if (lines[0]?.trim() !== '---' || end < 0) return { changes }
   const isAcp = (block: string) => /^ {2}- id:\s*acp\s*$/.test(block.split('\n')[0]!)
-  if (providerRange(lines, end, isAcp)) return { changes }
+  const existing = providerRange(lines, end, isAcp)
+  if (existing) {
+    // SCP-56: the old default port (7461) becomes the proxy's own default (8787), but only for an entry that is switched off and has exactly the old URL
+    const off = lines.slice(existing.from, existing.to).some((l) => /^ {4}enabled:\s*false\s*$/.test(l))
+    const at = lines.findIndex((l, i) => i >= existing.from && i < existing.to && /^ {4}base_url:\s*http:\/\/127\.0\.0\.1:7461\/v1\s*$/.test(l))
+    if (off && at >= 0) {
+      lines[at] = lines[at]!.replace('7461', '8787')
+      await atomicWrite(file, lines.join(eol))
+      changes.push(`config/providers.md: the acp provider now points at ${ACP_URL} (the ACP proxy's default port)`)
+    }
+    return { changes }
+  }
   let block = ACP_PROVIDER_BLOCK
   const seedFile = seedDir ? path.join(seedDir, 'config', 'providers.md') : ''
   if (seedFile && existsSync(seedFile)) {
@@ -424,7 +438,7 @@ export async function migrateAcpProvider(dataDir: string, seedDir: string | unde
   const orderAt = lines.findIndex((l, i) => i > 0 && i < end && /^search_order:/.test(l))
   lines.splice(client ? client.from : search ? search.from : orderAt >= 0 ? orderAt : end, 0, ...block)
   await atomicWrite(file, lines.join(eol))
-  changes.push('config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:7461/v1, switched off)')
+  changes.push(`config/providers.md: added the acp provider (the ACP proxy at ${ACP_URL}, switched off)`)
   return { changes }
 }
 

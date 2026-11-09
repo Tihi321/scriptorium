@@ -27,6 +27,8 @@ export const CLIENT_SEARCH_SCHEMA: Record<string, unknown> = {
 }
 
 const MAX_EXCERPT = 1500
+/** Between two excerpts of one page. */
+const EXCERPT_JOIN = '\n\n[...]\n\n'
 
 export interface ClientSearchOptions {
   id?: string
@@ -63,23 +65,25 @@ export function searchTaskMessages(query: string, opts: { limit: number; news?: 
 /** Turns a client's answer into search results: at most `limit`, a real http(s) URL each, an excerpt of at most 1500 characters. */
 export function parseSearchAnswer(text: string, limit: number): SearchResult[] {
   const value = extractJson(text) as { results?: { title?: unknown; url?: unknown; content?: unknown; published?: unknown }[] }
-  const out: SearchResult[] = []
-  const seen = new Set<string>()
+  const byUrl = new Map<string, { title: string; parts: string[] }>()
   for (const r of value.results ?? []) {
     const url = typeof r.url === 'string' ? r.url.trim() : ''
     const content = typeof r.content === 'string' ? r.content.trim() : ''
-    if (!/^https?:\/\/\S+$/.test(url) || !content || seen.has(url)) continue
-    seen.add(url)
+    if (!/^https?:\/\/\S+$/.test(url) || !content) continue
+    // results with the same URL are one page with several excerpts: the excerpts are joined (an identical one once), title and date come from the first
+    const have = byUrl.get(url)
+    if (have) {
+      if (!have.parts.includes(content)) have.parts.push(content)
+      continue
+    }
+    if (byUrl.size >= limit) continue
     const published = typeof r.published === 'string' && r.published.trim() ? ` (${r.published.trim()})` : ''
-    out.push({
-      title: `${typeof r.title === 'string' && r.title.trim() ? r.title.trim() : url}${published}`,
-      url,
-      snippet: content.slice(0, 240),
-      content: content.slice(0, MAX_EXCERPT)
-    })
-    if (out.length >= limit) break
+    byUrl.set(url, { title: `${typeof r.title === 'string' && r.title.trim() ? r.title.trim() : url}${published}`, parts: [content] })
   }
-  return out
+  return [...byUrl.entries()].map(([url, p]) => {
+    const content = p.parts.join(EXCERPT_JOIN)
+    return { title: p.title, url, snippet: p.parts[0]!.slice(0, 240), content: p.parts.length > 1 ? content.slice(0, MAX_EXCERPT * 3) : content.slice(0, MAX_EXCERPT) }
+  })
 }
 
 /**

@@ -24,9 +24,9 @@ afterEach(async () => {
   env = undefined
 })
 
-async function start(token?: string) {
+async function start(token?: string, keepAliveMs?: number) {
   env = await makeEnv({ paused: true })
-  mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: (m) => env!.logs.push(m), token })
+  mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: (m) => env!.logs.push(m), token, keepAliveMs })
   expect(mcp).not.toBeNull()
   return mcp!
 }
@@ -639,6 +639,30 @@ describe('MCP: the prompt once, waiting for a book, absolute paths, book models 
     const done = await pending
     expect(done.data).toMatchObject({ done: true, reason: 'published', book: 'wb', story: null, title: 'Demo Book', stage: 'published', chaptersWritten: 1, folder: path.join(env!.dir, 'books', 'wb') })
     expect(done.data.waitedMs).toBeLessThan(2500)
+  })
+
+  it('wait_for_book keeps an idle-sensitive client connected with SSE comments and still ends with the result', async () => {
+    const h = await start(undefined, 100)
+    const c = await connect(h.url)
+    await call(c, 'add_story', { title: 'The Bell', premise: 'A bell under the sea.' })
+    const u = new URL(h.url)
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for_book', arguments: { slug: 'the-bell', timeout_seconds: 2 } } })
+    const text = await new Promise<string>((resolve, reject) => {
+      const req = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' } }, (res) => {
+        res.socket.setTimeout(500, () => reject(new Error('the connection was idle for 500 ms')))
+        let out = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => (out += chunk))
+        res.on('end', () => resolve(out))
+        res.on('error', reject)
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+    expect(text).toContain(': keepalive')
+    const last = text.split(/\r?\n/).filter((l) => l.startsWith('data:')).pop()!
+    const result = JSON.parse(last.slice(5)).result.content[0].text
+    expect(JSON.parse(result)).toMatchObject({ reason: 'timeout', story: 'the-bell' })
   })
 
   it('wait_for_book returns when a model request of the book waits for the client', async () => {

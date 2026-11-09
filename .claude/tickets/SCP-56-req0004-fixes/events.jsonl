@@ -1,0 +1,10 @@
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"plan.created","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"planner returned the plan (draft)"}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"plan.approved","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"user approved the plan (Yes, build both)"}
+{"ts":"2026-11-09T12:00:00Z","actor":"implement","type":"implement.started","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"branch SCP-56_req0004-fixes cut from master"}
+{"ts":"2026-11-09T13:40:00Z","actor":"implement","type":"slice.done","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"T1-T5 done by the orchestrator itself","data":{"tasks":["T1","T2","T3","T4","T5"]}}
+{"ts":"2026-11-09T13:41:00Z","actor":"implement","type":"verify.passed","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"vitest 733 passed, typecheck and lint clean"}
+{"ts":"2026-11-09T13:45:00Z","actor":"implement","type":"changelog.written","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"changelog.md written; ticket left in-progress"}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"round 0 PASS with findings (M1)","data":{"round":0,"verdict":"PASS-with-findings","findings":["M1"]}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"re-check 1 FAIL after f1ecdd8: docs and humanizer refusals","data":{"round":1,"verdict":"FAIL","commit":"f1ecdd8"}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"re-check 2 PASS after 3e94a48 (733 tests, typecheck, lint 0)","data":{"round":2,"verdict":"PASS","commit":"3e94a48","tests":733}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0005","ticket":"SCP-56-req0004-fixes","detail":"plan done on PASS re-check 2"}

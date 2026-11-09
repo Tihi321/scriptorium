@@ -24,6 +24,14 @@ export interface NoteFact {
 export interface NoteExcerpt {
   text: string
   url: string
+  title?: string
+}
+
+/** A page the researcher read: kept word for word (bounded) at the end of the note, for the fact checker only. */
+export interface NotePage {
+  url: string
+  title: string
+  text: string
 }
 
 export interface NoteFile {
@@ -139,13 +147,19 @@ export class ResearchStore {
    * Writes a note. The facts are in the researcher's own words, one per line, each with its source URL and the date it was read.
    * `unverified: true` marks notes that come from the model's own knowledge.
    */
-  async write(o: { question: string; book: string | null; facts: NoteFact[]; unverified: boolean; askedBy: string; purpose?: string; provider?: string; idea?: string; excerpts?: NoteExcerpt[]; now?: Date }): Promise<NoteFile> {
+  async write(o: { question: string; book: string | null; facts: NoteFact[]; unverified: boolean; askedBy: string; purpose?: string; provider?: string; idea?: string; excerpts?: NoteExcerpt[]; pages?: NotePage[]; now?: Date }): Promise<NoteFile> {
     const date = stampOf(o.now)
     const slug = await this.freeSlug(o.book, o.question)
-    const sources = [...new Map(o.facts.filter((f) => f.source).map((f) => [f.source!.url, { url: f.source!.url, title: f.source!.title ?? '', retrieved: date }])).values()]
+    const sourceMap = new Map<string, { url: string; title: string; retrieved: string }>()
+    for (const f of o.facts) if (f.source && !sourceMap.has(f.source.url)) sourceMap.set(f.source.url, { url: f.source.url, title: f.source.title ?? '', retrieved: date })
+    for (const x of (o.excerpts ?? []).slice(0, 4)) if (!sourceMap.has(x.url)) sourceMap.set(x.url, { url: x.url, title: x.title ?? '', retrieved: date })
+    // a note with only page excerpts (the extraction fallback) is still sourced by its pages
+    if (o.facts.length === 0 && !(o.excerpts ?? []).length) for (const x of (o.pages ?? []).slice(0, 3)) if (!sourceMap.has(x.url)) sourceMap.set(x.url, { url: x.url, title: x.title, retrieved: date })
+    const sources = [...sourceMap.values()]
     const lines = o.facts.map((f) => `- ${f.fact.replace(/\s+/g, ' ').trim()} ${f.source ? `(source: ${f.source.url}, ${date})` : `(source: none, the model's own knowledge, ${date}; unverified)`}`)
-    const excerpts = (o.excerpts ?? []).slice(0, 4).map((x) => `- "${x.text.replace(/\s+/g, ' ').replace(/"/g, "'").trim().slice(0, 300)}" (source: ${x.url}, ${date})`)
-    const body = `\n# ${o.question.replace(/\s+/g, ' ').trim()}\n\n${o.unverified ? '**Unverified:** no web source was found. These facts come from the model\'s own knowledge. Treat them with suspicion.\n\n' : ''}${lines.join('\n')}\n${excerpts.length ? `\n${EXCERPTS_HEADING}\n\n${excerpts.join('\n')}\n` : ''}`
+    const excerpts = (o.excerpts ?? []).slice(0, 4).map((x) => `- "${x.text.replace(/\s+/g, ' ').replace(/"/g, "'").trim().slice(0, 500)}" (source: ${x.url}, ${date})`)
+    const pages = (o.pages ?? []).slice(0, 3).map((x) => `> (source: ${x.url}, ${date}) ${x.text.replace(/\s+/g, ' ').trim().slice(0, PAGE_EXCERPT_CHARS)}`)
+    const body = `\n# ${o.question.replace(/\s+/g, ' ').trim()}\n\n${o.unverified ? '**Unverified:** no web source was found. These facts come from the model\'s own knowledge. Treat them with suspicion.\n\n' : ''}${lines.join('\n')}\n${excerpts.length ? `\n${EXCERPTS_HEADING}\n\n${excerpts.join('\n')}\n` : ''}${pages.length ? `\n${PAGE_EXCERPTS_HEADING}\n\n${pages.join('\n')}\n` : ''}`
     const file = path.join(this.dirFor(o.book), `${slug}.md`)
     await writeMd(
       file,
@@ -171,9 +185,21 @@ export class ResearchStore {
 /** The heading of the verbatim sentences at the end of a note. */
 export const EXCERPTS_HEADING = '## Source excerpts (verbatim, for checking)'
 
-/** The note text a writer sees: the facts, framed as data. The source excerpts stay inside the cap, the facts give way. */
+/** The heading of the page text kept for the fact checker at the very end of a note (up to 3 pages, 1,200 characters each). The writer never sees it. */
+export const PAGE_EXCERPTS_HEADING = '## Page excerpts (verbatim, for the fact-checker)'
+const PAGE_EXCERPT_CHARS = 1200
+
+/** The lines of a note's page excerpts section, or ''. */
+export function pageExcerpts(n: NoteFile): string {
+  const at = n.body.indexOf(PAGE_EXCERPTS_HEADING)
+  return at >= 0 ? n.body.slice(at + PAGE_EXCERPTS_HEADING.length).trim() : ''
+}
+
+/** The note text a writer sees: the facts, framed as data. The source excerpts stay inside the cap, the facts give way. The page excerpts are left out. */
 export function formatNote(n: NoteFile, maxChars = 2400): string {
-  const body = n.body.replace(/^# .*\n+/, '').trim()
+  const full = n.body.replace(/^# .*\n+/, '').trim()
+  const pagesAt = full.indexOf(PAGE_EXCERPTS_HEADING)
+  const body = pagesAt >= 0 ? full.slice(0, pagesAt).trim() : full
   const at = body.indexOf(EXCERPTS_HEADING)
   const facts = at >= 0 ? body.slice(0, at).trim() : body
   const excerpts = at >= 0 ? body.slice(at).trim() : ''

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { emptyBrief, parseBrief } from '../src/shared/brief'
 import type { StoryBrief } from '../src/shared/brief'
+import { publishKeywords } from '../src/engine/pipeline/handlers'
 import { parseMd } from '../src/shared/md'
 import { makeEnv, makePipelineEnv, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
@@ -207,3 +208,15 @@ describe('the publisher and a fixed title', () => {
     expect(asked[0]).not.toContain('The owner fixed the title')
   }, 120000)
 })
+
+describe('publishKeywords', () => {
+  it('cuts to 8, dedupes, and tops up below 4 from the fill list', () => {
+    const eleven = ['Fate', 'fate', ...Array.from({ length: 10 }, (_, i) => `word ${i}`)]
+    expect(publishKeywords(eleven, [])).toEqual({ keywords: ['Fate', ...Array.from({ length: 7 }, (_, i) => `word ${i}`)], note: 'cut 11 keywords to 8' })
+    const topped = publishKeywords(['Luck', 'Will'], ['Philosophy', 'luck'])
+    expect(topped.keywords).toEqual(['Luck', 'Will', 'Philosophy'])
+    expect(topped.note).toMatch(/topped up 2 keywords to 3.*only 3 keywords/)
+    expect(publishKeywords(['a', 'b', 'c', 'd', 'e'], ['x'])).toEqual({ keywords: ['a', 'b', 'c', 'd', 'e'], note: null })
+  })
+})
+
