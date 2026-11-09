@@ -134,7 +134,9 @@ describe('the researcher keeps the figures of the pages', () => {
     expect(note.body).toContain('transmitter fault')
     // the page text stays out of the key facts and out of the writer's note text; the fact checker still gets it, boxed and labelled
     const sources = note.sources.map((x, i) => ({ n: i + 1, url: x.url, title: x.title, retrieved: x.retrieved }))
-    expect(candidateFacts(await unmergedNotes({ research: { store: new ResearchStore(e.dir) }, factbase: { merged: async () => new Set<string>() } } as never, null as never), sources)).toEqual([])
+    const unmerged = await unmergedNotes({ research: { store: new ResearchStore(e.dir) }, factbase: { merged: async () => new Set<string>() } } as never, null as never)
+    expect(unmerged.map((n) => n.file)).toContain(note.file)
+    expect(candidateFacts(unmerged, sources)).toEqual([])
     expect(candidateFacts([note], sources)).toEqual([])
     expect(formatNote(note)).not.toContain('PWNED')
     expect(factCheckNotes([note], sources, 'x [1]', 30000, 5000)).toMatch(/<<<PAGE_EXCERPTS>>>[\s\S]*PWNED[\s\S]*<<<END_PAGE_EXCERPTS>>>/)

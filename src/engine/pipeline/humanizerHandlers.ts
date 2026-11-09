@@ -119,8 +119,26 @@ const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes
 /** A plural group noun by its ending ("Romans", "Christians", "Buddhists", "Stoics", "Epicureans"). */
 const GROUP_ENDING = /(?:ans|ians|ists|ites|ics)$/
 
-/** A group-ending word counts as a group noun only after "the" or a quantifier ("the Stoics", "many Romans"); "then Evans came in" is a name. */
-const groupNounInContext = (before: string, key: string) => GROUP_ENDING.test(key) && /\b(?:the|these|those|many|most|some|all|of)$/i.test(before)
+/** Lower-case words after which a group-ending word is a group, not a name ("early Christians", "ancient Romans"). */
+const GROUP_ADJECTIVES = /\b(?:early|ancient|modern|later|first|many|devout|pious|pagan|medieval|classical|contemporary|fellow|other)$/
+/** Words after which a group-ending word is a group ("the Stoics", "many Romans"). */
+const GROUP_CONTEXT = /\b(?:the|these|those|many|most|some|all|of)$/i
+/** A word, then a joiner ("and", "or" or a comma) at the end of the text before. */
+const JOINED = /([\p{L}\p{M}'’-]+)(?:,?\s+(?:and|or)|,)$/u
+
+/**
+ * A group-ending word counts as a group noun after "the" or a quantifier ("the Stoics", "many Romans"), after a short lower-case adjective
+ * ("early Christians"), or after "and", "or" or a comma when the word before the joiner is itself a group noun or an accepted group-ending
+ * word ("the Greeks and Romans", "the Stoics and Epicureans"). "then Evans came in" and "Captain Evans" are names.
+ */
+function groupNounInContext(before: string, key: string): boolean {
+  if (!GROUP_ENDING.test(key)) return false
+  if (GROUP_CONTEXT.test(before) || GROUP_ADJECTIVES.test(before)) return true
+  const m = JOINED.exec(before)
+  if (!m) return false
+  const prev = nameKey(m[1]!)
+  return GROUP_NOUNS.has(prev) || groupNounInContext(before.slice(0, m.index).replace(/[ \t]+$/, ''), prev)
+}
 
 /** The singular and plural forms of a key, so "greeks" matches a known "greek" and "greek" a known "greeks". */
 function nameForms(key: string): string[] {
