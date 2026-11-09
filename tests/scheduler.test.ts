@@ -96,7 +96,7 @@ describe('scheduler', () => {
       return 'from m2'
     })
     registerChat(env)
-    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine', max_attempts: 1 })
+    await env.engine.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine', max_attempts: 1, revived: 1 }) // already revived once: it fails for good
     await waitFor(async () => (await jobsIn(env!, 'failed')).length === 1, 5000, 'job failed')
     const problems = () => env!.events.flatMap((e) => (e.type === 'agent.problem' ? [e.problem ? `${e.problem.kind}:${e.problem.model}${e.problem.failed ? ':failed' : ''}` : 'cleared'] : []))
     expect(problems()).toEqual(['day-limit:loc/m1', 'bad-request:alt/m2', 'bad-request:alt/m2:failed'])
@@ -290,6 +290,27 @@ describe('scheduler', () => {
     expect(retry.data.not_before).toBeTruthy()
     expect(env.events.some((e) => e.type === 'agent.state' && e.state === 'error')).toBe(true)
   }, 20000)
+
+  it('a job that failed only because no model answered is revived once', async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'W' }] })
+    env.engine.scheduler.register('nomodel', async () => {
+      throw new ProviderError('all models failed. loc/m1: HTTP 400: unsupported parameter', 400, false)
+    })
+    const before = Date.now()
+    await env.engine.jobs.enqueue({ id: 'out', task: 'nomodel', role: 'writer', max_attempts: 1 })
+    const revived = await waitFor(async () => {
+      const j = await env!.engine.jobs.read('queued', 'out')
+      return j && j.data.revived === 1 ? j : null
+    }, 10000, 'the job revived')
+    expect(revived.data.attempts).toBe(0)
+    const wait = Date.parse(revived.data.not_before!) - before
+    expect(wait).toBeGreaterThan(9.9 * 60_000)
+    expect(wait).toBeLessThan(10.5 * 60_000)
+    expect(await jobsIn(env, 'failed')).toEqual([])
+    // ten minutes later it fails again: for good this time
+    await env.engine.jobs.update('queued', 'out', { not_before: null })
+    await waitFor(async () => (await jobsIn(env!, 'failed')).includes('out.md'), 10000, 'failed for good')
+  }, 30000)
 
   it('a paused book: its jobs wait while other books go on, and run once it is resumed', async () => {
     env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'W' }] })

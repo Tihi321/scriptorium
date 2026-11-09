@@ -144,6 +144,12 @@ export class Engine {
       this.emit({ type: 'engine.warning', message: `${m.ref} is retired or unknown at its provider: jobs use their next model. Remove it from config/settings.md or config/models.md.` })
       this.scheduler.kick()
     }
+    // a model that refuses a plain request (a 400 for a parameter it does not take): jobs use their next model for 10 minutes
+    this.router.onModelRefused = (m, message) => {
+      this.log(`models: ${m.ref} refused a request at ${m.provider.id} (${message.slice(0, 300)}): jobs use the next model in their role for 10 minutes`)
+      this.emit({ type: 'engine.warning', message: `${m.ref} refused a request: jobs use their next model for 10 minutes.` })
+      this.scheduler.kick()
+    }
     this.jobs = new JobStore(dir)
     this.agents = new AgentStore(dir)
     this.logs = new LogWriter(dir)
@@ -738,6 +744,16 @@ export class Engine {
   }
 
   // ---- file changes ----
+
+  /** True for the change event of the engine's own spend-summary write to config/budget.md: not a config change. */
+  async isOwnWrite(e: WatchEvent): Promise<boolean> {
+    if (e.rel !== 'config/budget.md' || e.change !== 'change' || this.budget.lastSummaryText === undefined) return false
+    try {
+      return (await fs.readFile(e.path, 'utf8')) === this.budget.lastSummaryText
+    } catch {
+      return false
+    }
+  }
 
   async handleWatch(e: WatchEvent): Promise<void> {
     try {

@@ -173,8 +173,9 @@ describe('humanizer: the guards and the report', () => {
     // a dropped speaker line, a swapped speaker, a merged scene, a lost on-screen line
     expect(humanizeProblem(script, script.replace(/^BRAM \(gruff\): /m, ''), { script: true })).toMatch(/script lines changed/)
     expect(humanizeProblem(script, script.replace('BRAM (gruff)', 'MARA (gruff)'), { script: true })).toMatch(/script lines changed/)
-    expect(humanizeProblem(script, script.replace('SCENE: The lamp room, night', 'The lamp room, night'), { script: true })).toMatch(/script lines changed/)
-    expect(humanizeProblem(script, script.replace('ON SCREEN: ', ''), { script: true })).toMatch(/script lines changed/)
+    expect(humanizeProblem(script, script.replace('SCENE: The lamp room, night', 'The lamp room is dark at night.'), { script: true })).toMatch(/script lines changed/)
+    // (the lost line is rewritten as a sentence with a verb, so the fragment check has nothing to say about it)
+    expect(humanizeProblem(script, script.replace('ON SCREEN: MARA (freckled, ink on her fingers)', 'MARA is freckled, with ink on her fingers.'), { script: true })).toMatch(/script lines changed/)
     // the same change is fine in prose
     expect(humanizeProblem(script, script.replace('BRAM (gruff)', 'MARA (gruff)'))).toBeNull()
   })

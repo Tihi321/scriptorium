@@ -446,6 +446,8 @@ export const jobSchema = z.looseObject({
   max_attempts: z.number().int().positive().nullable().default(null),
   /** Do not start before this time (ISO). Used for retry backoff. */
   not_before: z.string().nullable().default(null),
+  /** 1 once the job was queued again after failing for good on a provider error (no model answered): it gets this second chance only once. */
+  revived: z.number().int().nonnegative().nullable().optional(),
   created: z.string().optional()
 })
 

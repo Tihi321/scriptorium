@@ -78,6 +78,27 @@ describe('client web search: a task for the MCP client', () => {
     expect(queue.list()).toEqual([])
   })
 
+  it('the same query within 30 minutes is answered from the last search', async () => {
+    const queue = new ClientTaskQueue()
+    const client = new ClientSearchProvider({ id: 'client-search', queue, waitMs: 60_000 })
+    const svc = new SearchService({ registry: undefined as unknown as ModelRegistry, providers: [client] })
+    const first = svc.search('muon time dilation', { book: 'b1' })
+    const t = (await waitFor(() => queue.lease({ role: 'searcher' })))!
+    queue.submit(t.id, answer(2))
+    const out = await first
+    expect(out?.results).toHaveLength(2)
+    // a retried research job asks again: no second task for the client
+    const again = await svc.search('muon time dilation', { book: 'b1' })
+    expect(again).toEqual(out)
+    expect(queue.list()).toEqual([])
+    // another query, or the news variant of it, is a new search
+    const stop = new AbortController()
+    const other = svc.search('muon time dilation', { book: 'b1', news: true, days: 3, signal: stop.signal }).catch(() => null)
+    expect(await waitFor(() => (queue.list().length ? queue.list() : null))).toHaveLength(1)
+    stop.abort()
+    await other
+  })
+
   it('a task a client has taken is waited for past the wait time, and a released one times out', async () => {
     const queue = new ClientTaskQueue()
     const provider = new ClientSearchProvider({ queue, waitMs: 100 })

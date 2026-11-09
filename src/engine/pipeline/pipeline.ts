@@ -532,7 +532,7 @@ export class Pipeline {
       skip.add(slug)
       this.warnOnce(`start-failing:${slug}`, `starting the story "${ideas.find((i) => i.slug === slug)?.title ?? slug}" failed ${n} times. It is skipped; the other stories still start. Remove its failed jobs in jobs/failed/ (eic--start--*) or edit the story to try it again.`)
     }
-    const pick = pickNext(ideas, only ? [] : await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room, undefined, skip)
+    const pick = pickNext(ideas, await this.o.topics.read(), this.o.getFormats(), await bookRefs(this.o.books), room, undefined, skip, !only)
     if (!pick) {
       const topics = await this.o.topics.read()
       if (eligibleTopics(topics, this.o.getFormats()).length > 0) {

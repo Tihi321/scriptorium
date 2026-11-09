@@ -143,7 +143,7 @@ export class JobStore {
     const cur = await this.read('failed', id)
     if (!cur) return false
     const body = cur.body.split(/^## (?:Request|Failed)$/m)[0]!.trimEnd()
-    await writeMd(this.file('queued', id), { ...cur.data, attempts: 0, not_before: null, failure: null, paid: null }, body ? body + '\n' : '')
+    await writeMd(this.file('queued', id), { ...cur.data, attempts: 0, not_before: null, failure: null, paid: null, revived: null }, body ? body + '\n' : '')
     await fs.rm(this.file('failed', id), { force: true })
     return true
   }

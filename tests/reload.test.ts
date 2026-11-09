@@ -41,4 +41,16 @@ describe('config reload', () => {
       await w.close()
     }
   })
+
+  it("the engine's own budget.md summary is not a config change", async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [] })
+    const file = path.join(env.dir, 'config', 'budget.md')
+    const ev = { kind: 'config', change: 'change', rel: 'config/budget.md', path: file } as const
+    await env.engine.budget.record({ time: new Date(), agent: 'a', book: 'b', role: 'writer', provider: 'loc', model: 'm1', tokensIn: 1, tokensCached: 0, tokensOut: 1, costUsd: 0.01, ms: 5 })
+    await env.engine.budget.flush()
+    expect(await env.engine.isOwnWrite(ev)).toBe(true)
+    const text = await readFile(file, 'utf8')
+    await writeFile(file, text.replace('## Spend summary', 'My own note.\n\n## Spend summary'))
+    expect(await env.engine.isOwnWrite(ev)).toBe(false)
+  })
 })

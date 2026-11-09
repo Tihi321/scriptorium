@@ -39,6 +39,12 @@ describe('the fragment guard', () => {
     expect(problem).toMatch(/^it broke sentences into fragments \(\d+% before, \d+% after\)$/)
     expect(humanizeProblem(ORIGINAL, LIVELIER)).toBeNull()
   })
+
+  it('accepts the real science-blink ch05 rewrite (present tense and contractions are verbs)', async () => {
+    const dir = path.join(__dirname, 'fixtures', 'humanizer')
+    const read = async (name: string) => (await readFile(path.join(dir, name), 'utf8')).replace(/\r\n/g, '\n')
+    expect(humanizeProblem(await read('ch05-before.md'), await read('ch05-after.md'), { nonfiction: true })).toBeNull()
+  })
 })
 
 describe('the language guard', () => {

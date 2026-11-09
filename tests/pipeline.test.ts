@@ -13,7 +13,6 @@ import { writeMd } from '../src/engine/store/atomic'
 import { parseTopics } from '../src/engine/store/topics'
 import { parseMd } from '../src/shared/md'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
-import { ProviderError } from '../src/engine/models/types'
 import { makePipelineEnv, quietResearchState, sleep, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
 
@@ -162,7 +161,8 @@ describe('bedtime story, mock e2e', () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', maxBooks: 1 })
     const e = env
     const down = e.mock.on({ task: 'review' }, () => {
-      throw new ProviderError('reviewer model down', 400, false)
+      // a plain error fails the job for good at once (a provider error gets one more try after 10 minutes first)
+      throw new Error('reviewer failed')
     })
     const failedSlug = async () => {
       for (const s of await readdir(path.join(e.dir, 'books'))) if ((await bookMd(e, s).then((b) => b.data.stage, () => null)) === 'failed') return s

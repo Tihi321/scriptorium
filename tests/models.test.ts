@@ -15,7 +15,7 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
-import { ModelRouter, isDailyLimitError, isRetiredModelError, problemKind } from '../src/engine/models/router'
+import { ModelRouter, isDailyLimitError, isRefusedRequest, isRetiredModelError, problemKind } from '../src/engine/models/router'
 import { BudgetError, collect, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
@@ -831,6 +831,43 @@ describe('daily request limits', () => {
     const r2 = new ModelRouter(solo.registry, undefined)
     await expect((async () => { for await (const ev of r2.chat(r2.candidates('writer'), { messages: [], meta: { role: 'writer' } })) void ev })()).rejects.toThrow(/No endpoints/)
     expect(r2.candidates('writer').map((m) => m.ref)).toEqual(['a/x'])
+  })
+
+  it('a model that refuses a request is set aside for 10 minutes', async () => {
+    const { registry, mock } = await registryWith({ providers: [{ id: 'a', models: ['x'] }, { id: 'b', models: ['y'] }], roles: { writer: ['a/x', 'b/y'] } })
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw new ProviderError('HTTP 400: {"error":{"code":"unsupported_parameter","param":"temperature"}}', 400)
+      return 'ok'
+    })
+    let now = 1_000_000
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1, now: () => now })
+    const refused: string[] = []
+    r.onModelRefused = (m) => refused.push(m.ref)
+    const ask = async (models = r.candidates('writer')) => {
+      for await (const ev of r.chat(models, { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    }
+    const first = r.candidates('writer')
+    await ask(first)
+    expect(seen).toEqual(['x', 'y']) // no retries on x, then y answers
+    expect(refused).toEqual(['a/x'])
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['b/y'])
+    await ask(first) // a job that picked its models earlier skips x too, and nothing is reported twice
+    expect(seen).toEqual(['x', 'y', 'y'])
+    expect(refused).toHaveLength(1)
+    now += 10 * 60_000 + 1
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/y'])
+  })
+
+  it('a prompt-too-long 400 is not a refusal, an unsupported parameter is', () => {
+    const e = (text: string) => new ProviderError(`HTTP 400: ${text}`, 400)
+    for (const text of [
+      '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 215000 tokens > 200000 maximum"}}',
+      '{"error":{"code":400,"message":"The input token count (1048577) exceeds the maximum number of tokens allowed (1048576)."}}',
+      '{"error":{"message":"Request exceeds the maximum number of tokens"}}',
+    ]) expect(isRefusedRequest(e(text), false)).toBe(false)
+    expect(isRefusedRequest(e("{\"error\":{\"code\":\"unsupported_parameter\",\"message\":\"Parameter 'temperature' is not supported\"}}"), false)).toBe(true)
   })
 
   it('tells a retired or unknown model from other failures', () => {

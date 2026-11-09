@@ -8,7 +8,7 @@ import type { LogSession, LogWriter } from '../logs/logs'
 import { isPaidModel } from '../models/registry'
 import type { ModelInfo } from '../models/registry'
 import type { ModelRouter } from '../models/router'
-import { BudgetError, emptyUsage, isAbortError, ServerDownError } from '../models/types'
+import { BudgetError, emptyUsage, isAbortError, ProviderError, ServerDownError } from '../models/types'
 import type { ChatMessage, Usage } from '../models/types'
 import type { JobFile, JobStore, NewJob } from './jobs'
 
@@ -127,6 +127,9 @@ export interface BlockedJob {
   agent: string
   reason: string
 }
+
+/** How long a job that failed for good on a provider error waits for its one more try. */
+const REVIVE_MS = 10 * 60_000
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex').slice(0, 8)
 
@@ -675,7 +678,12 @@ export class Scheduler {
         const max = j.max_attempts ?? this.d.getFactory().max_attempts
         rt.errorUntil = this.now() + 3000
         if (rt.problem) this.setProblem(rt, { ...rt.problem, failed: true })
-        if (attempts >= max) {
+        if (attempts >= max && err instanceof ProviderError && !j.revived) {
+          // no model answered (an outage, a refusing provider): the job gets one more go later instead of failing its book for good
+          const at = this.now() + REVIVE_MS
+          await jobs.requeue(j.id, { attempts: 0, revived: 1, not_before: new Date(at).toISOString() })
+          logAll(`### Result\nFailed ${attempts} times because no model answered (${message}). One more try at ${new Date(at).toTimeString().slice(0, 5)}.\n`)
+        } else if (attempts >= max) {
           await jobs.fail(j.id, { ...stats(), attempts, failure: message } as Partial<JobFrontmatter>, `${requestBody()}## Failed\n\n${message}\n`)
           logAll(`### Result\nFailed for good after ${attempts} attempt(s): ${message}\n`)
         } else {

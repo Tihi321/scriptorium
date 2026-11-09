@@ -132,6 +132,8 @@ export class Budget {
   private warned = new Set<string>()
   private writeChain: Promise<unknown> = Promise.resolve()
   private summaryTimer: NodeJS.Timeout | undefined
+  /** The full text of budget.md as the engine last wrote it (or found it), so the watcher can tell its own write from a hand edit. */
+  lastSummaryText: string | undefined
 
   constructor(
     private readonly dataDir: string,
@@ -353,6 +355,7 @@ export class Budget {
     const head = at === -1 ? text.replace(/\s*$/, '\n\n') : text.slice(0, at)
     const next = `${head}${SUMMARY_MARKER}\n\n${this.summaryText()}`
     if (next !== text) await atomicWrite(this.configFile, next)
+    this.lastSummaryText = next
   }
 
   snapshot() {
