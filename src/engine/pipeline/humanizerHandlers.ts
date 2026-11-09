@@ -118,8 +118,13 @@ const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes
 
 /** A plural group noun by its ending ("Romans", "Christians", "Buddhists", "Stoics", "Epicureans"). */
 const GROUP_ENDING = /(?:ans|ians|ists|ites|ics)$/
-/** The endings that are telling enough to count after a joiner or "of": "Evans" ends in "ans" and is a name, "Epicureans" is not. */
+/** The endings that are telling enough to count after a joiner or "of": "Epicureans", "Stoics", "Platonists". */
 const STRONG_ENDING = /(?:ians|ists|ites|ics|eans)$/
+/**
+ * Any other "-ans" word (Anglicans, Americans, Puritans) is a group noun after a joiner or "of" when it is at least this long: the short
+ * ones are surnames ("Evans", "Hughes"-like, 5 letters), the groups are 7 letters or more.
+ */
+const MIN_LONG_ANS = 7
 
 /** Words after which a group-ending word is a group, not a name ("early Christians", "ancient Romans"). Lower case or sentence-initial. */
 const GROUP_ADJECTIVES = /\b(?:early|ancient|modern|later|first|many|devout|pious|pagan|medieval|classical|contemporary|fellow|other)$/i
@@ -127,17 +132,17 @@ const GROUP_ADJECTIVES = /\b(?:early|ancient|modern|later|first|many|devout|piou
 const GROUP_CONTEXT = /\b(?:the|these|those|many|most|some|all)$/i
 /** A word, then a joiner ("and", "or" or a comma) at the end of the text before. */
 const JOINED = /([\p{L}\p{M}'’-]+)(?:,?\s+(?:and|or)|,)$/u
-/** How many joined group nouns are read back, and how many characters before the word are looked at for each step. */
 /** "of" at the end of the text before. */
 const OF = /\bof$/i
-const MAX_CHAIN = 8
+/** How many joined group nouns are read back (a long list of schools), and how many characters before the word are looked at for each step. */
+const MAX_CHAIN = 64
 const TAIL = 120
 
 /**
  * A group-ending word counts as a group noun after "the" or a quantifier ("the Stoics", "many Romans"), after a short adjective
  * ("early Christians"), or after "and", "or" or a comma when the word before the joiner is itself a group noun or an accepted group-ending
  * word ("the Greeks and Romans", "the Stoics and Epicureans"). "then Evans came in" and "Captain Evans" are names, and so are
- * "the Stoics and Evans" and "the friend of Evans": after a joiner or "of" only a telling ending counts. The chain is read back at most
+ * "the Stoics and Evans" and "the friend of Evans": after a joiner or "of" only a telling ending, a listed group noun or a long "-ans" word counts. The chain is read back at most
  * MAX_CHAIN words and only the tail of the text is scanned, so a long run of joined nouns stays cheap.
  */
 function groupNounInContext(before: string, key: string): boolean {
@@ -147,7 +152,7 @@ function groupNounInContext(before: string, key: string): boolean {
     if (!GROUP_ENDING.test(word)) return false
     const tail = text.slice(-TAIL)
     if (GROUP_CONTEXT.test(tail) || GROUP_ADJECTIVES.test(tail)) return true
-    const strong = STRONG_ENDING.test(word) || GROUP_NOUNS.has(word)
+    const strong = STRONG_ENDING.test(word) || GROUP_NOUNS.has(word) || word.length >= MIN_LONG_ANS
     if (OF.test(tail)) return strong
     const m = JOINED.exec(tail)
     if (!m || !strong) return false

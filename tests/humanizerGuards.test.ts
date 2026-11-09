@@ -118,6 +118,22 @@ describe('group nouns: bounds and names', () => {
     expect(newNames('She read about the Stoics of Epicureans and Christians.', 'She read.')).toEqual([])
   })
 
+  it('real group nouns after a joiner or "of" pass, whatever their ending; short surnames still do not', () => {
+    const phrases = [
+      'the Catholics and Anglicans',
+      'the Catholics and Lutherans',
+      'the Greeks and Americans',
+      'the Greeks and Africans',
+      'the fate of Americans',
+      'the fate of Puritans',
+      'the Jews and Samaritans',
+      'the Greeks, Romans and Etruscans',
+      'the Franciscans and Dominicans',
+      'the Stoics, Cynics, Epicureans, Sceptics, Platonists, Aristotelians, Pythagoreans, Sophists, Megarians, Eleatics and Atomists',
+    ]
+    for (const p of phrases) expect(newNames(`She read about ${p} today.`, 'She read.'), p).toEqual([])
+  })
+
   it('an adjective matches in any case', () => {
     expect(newNames('Early Christians prayed here.', 'They prayed here.')).toEqual([])
   })

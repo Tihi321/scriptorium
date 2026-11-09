@@ -8,3 +8,10 @@ Outcome: built on branch `SCP-57_humanizer-group-nouns` (from master 86d3c47). N
 - tests/humanizerGuards.test.ts: three tests (400 joined items under 100 ms; names after joiner and "of"; "Early Christians").
 
 Results: `yarn vitest run` 58 files, 736 tests pass (was 733 + 3 new; the three new fail on the old code); recovery config 1 test pass; `yarn typecheck` clean; `yarn lint` clean.
+
+## 2026-11-09 SCP-57 polish round 1 (REQ-0006 checker)
+
+- src/engine/pipeline/humanizerHandlers.ts: after a joiner or "of" an "-ans" word that is not "-eans"/"-ians" now counts as a group noun when it is at least 7 letters (`MIN_LONG_ANS`; Anglicans, Americans, Puritans, Etruscans pass, "Evans" with 5 letters stays a name). `MAX_CHAIN` 8 to 64 so an 11-item list is not cut. The MAX_CHAIN/TAIL doc comment now sits above the constants.
+- tests/humanizerGuards.test.ts: one table-driven accept test (the ten phrases the checker listed); the refuse tests stay.
+- docs/design.md: new Decisions row "Humanizer group nouns, round 2 (SCP-57)" and a History line.
+- Not done: the case-insensitive adjective unlocking "the Fellow Evans" (not a one-line fix).
