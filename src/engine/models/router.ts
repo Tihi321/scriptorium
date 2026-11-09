@@ -343,7 +343,7 @@ export function isRetiredModelError(err: unknown): boolean {
 /** The request is larger than the model's context window, or the model ran out of tokens before answering. */
 export function isContextError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
-  return /exceed_context_size|exceeds the available context|context (size|length|window)|maximum context|n_ctx|token limit without an answer/i.test(msg)
+  return /exceed_context_size|exceeds the available context|context (size|length|window)|maximum context|n_ctx|token limit without an answer|prompt is too long|(input|prompt|request)[^.]{0,40}too long|exceeds the maximum number of tokens/i.test(msg)
 }
 
 function abort(): Error {

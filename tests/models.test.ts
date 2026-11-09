@@ -15,7 +15,7 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
-import { ModelRouter, isDailyLimitError, isRetiredModelError, problemKind } from '../src/engine/models/router'
+import { ModelRouter, isDailyLimitError, isRefusedRequest, isRetiredModelError, problemKind } from '../src/engine/models/router'
 import { BudgetError, collect, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
@@ -858,6 +858,16 @@ describe('daily request limits', () => {
     expect(refused).toHaveLength(1)
     now += 10 * 60_000 + 1
     expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/y'])
+  })
+
+  it('a prompt-too-long 400 is not a refusal, an unsupported parameter is', () => {
+    const e = (text: string) => new ProviderError(`HTTP 400: ${text}`, 400)
+    for (const text of [
+      '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 215000 tokens > 200000 maximum"}}',
+      '{"error":{"code":400,"message":"The input token count (1048577) exceeds the maximum number of tokens allowed (1048576)."}}',
+      '{"error":{"message":"Request exceeds the maximum number of tokens"}}',
+    ]) expect(isRefusedRequest(e(text), false)).toBe(false)
+    expect(isRefusedRequest(e("{\"error\":{\"code\":\"unsupported_parameter\",\"message\":\"Parameter 'temperature' is not supported\"}}"), false)).toBe(true)
   })
 
   it('tells a retired or unknown model from other failures', () => {
