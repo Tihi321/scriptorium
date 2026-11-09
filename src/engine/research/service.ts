@@ -37,8 +37,14 @@ export interface SearchOutcome {
   results: SearchResult[]
 }
 
+/** A search answered this recently is reused for the same query (a retried research job asks the same questions again). */
+const SEARCH_REUSE_MS = 30 * 60_000
+
 /** The search providers of config/providers.md in the order of `search_order`, with spend logging and fallback. */
 export class SearchService {
+  /** Answers of the last searches by query, so a retried research job does not search (and pay, or queue a client task) again. */
+  private readonly recent = new Map<string, { outcome: SearchOutcome; at: number }>()
+
   constructor(private readonly o: SearchServiceOptions) {}
 
   /** The providers that can be used right now: enabled, with their key, known engine. */
@@ -66,6 +72,18 @@ export class SearchService {
    * A paid provider is skipped while a budget cap is reached. Every request that was answered is written to the spend rows.
    */
   async search(query: string, ctx: { signal?: AbortSignal; book?: string | null; agent?: string; limit?: number; news?: boolean; days?: number } = {}): Promise<SearchOutcome | null> {
+    const key = JSON.stringify([query, !!ctx.news, ctx.days ?? null, ctx.limit ?? 5])
+    const hit = this.recent.get(key)
+    if (hit && Date.now() - hit.at < SEARCH_REUSE_MS) return hit.outcome
+    const outcome = await this.searchProviders(query, ctx)
+    if (outcome) {
+      for (const [k, v] of this.recent) if (Date.now() - v.at >= SEARCH_REUSE_MS) this.recent.delete(k)
+      this.recent.set(key, { outcome, at: Date.now() })
+    }
+    return outcome
+  }
+
+  private async searchProviders(query: string, ctx: { signal?: AbortSignal; book?: string | null; agent?: string; limit?: number; news?: boolean; days?: number }): Promise<SearchOutcome | null> {
     for (const p of this.providers()) {
       if (ctx.signal?.aborted) throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
       if (p.pricePerRequest > 0 && this.o.budget && !this.o.budget.isExhausted(ctx.book).ok) {

@@ -833,6 +833,33 @@ describe('daily request limits', () => {
     expect(r2.candidates('writer').map((m) => m.ref)).toEqual(['a/x'])
   })
 
+  it('a model that refuses a request is set aside for 10 minutes', async () => {
+    const { registry, mock } = await registryWith({ providers: [{ id: 'a', models: ['x'] }, { id: 'b', models: ['y'] }], roles: { writer: ['a/x', 'b/y'] } })
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw new ProviderError('HTTP 400: {"error":{"code":"unsupported_parameter","param":"temperature"}}', 400)
+      return 'ok'
+    })
+    let now = 1_000_000
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1, now: () => now })
+    const refused: string[] = []
+    r.onModelRefused = (m) => refused.push(m.ref)
+    const ask = async (models = r.candidates('writer')) => {
+      for await (const ev of r.chat(models, { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) void ev
+    }
+    const first = r.candidates('writer')
+    await ask(first)
+    expect(seen).toEqual(['x', 'y']) // no retries on x, then y answers
+    expect(refused).toEqual(['a/x'])
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['b/y'])
+    await ask(first) // a job that picked its models earlier skips x too, and nothing is reported twice
+    expect(seen).toEqual(['x', 'y', 'y'])
+    expect(refused).toHaveLength(1)
+    now += 10 * 60_000 + 1
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['a/x', 'b/y'])
+  })
+
   it('tells a retired or unknown model from other failures', () => {
     expect(isRetiredModelError(new ProviderError('HTTP 404: The `:free` variant has been retired', 404))).toBe(true)
     expect(isRetiredModelError(new ProviderError('HTTP 404: No endpoints found for foo/bar', 404))).toBe(true)

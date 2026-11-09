@@ -69,6 +69,11 @@ export class ModelRouter {
   onModelRetired?: (m: ModelInfo, message: string) => void
   /** Models the provider no longer serves (`provider/model` ref to the provider's text), for this engine run. */
   private readonly retired = new Map<string, string>()
+  /** Called once when a model answers a plain request with a 4xx that retrying cannot fix: jobs use their next model for `REFUSED_MS`. */
+  onModelRefused?: (m: ModelInfo, message: string) => void
+  /** Models that refused a request (`provider/model` ref), with the time they come back. */
+  private readonly refused = new Map<string, { until: number; message: string }>()
+  private readonly now: () => number
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
   constructor(
@@ -78,6 +83,7 @@ export class ModelRouter {
     limiter?: ProviderLimiter
   ) {
     this.limiter = limiter ?? new ProviderLimiter(opts.now)
+    this.now = opts.now ?? Date.now
     this.opts = { retries: opts.retries ?? 2, backoffMs: opts.backoffMs ?? 1000, sleep: opts.sleep ?? defaultSleep }
   }
 
@@ -89,6 +95,15 @@ export class ModelRouter {
   /** The provider's text when this model was found retired or unknown in this engine run, else undefined. */
   retiredReason(m: ModelInfo): string | undefined {
     return this.retired.get(m.ref)
+  }
+
+  /** True while the model is set aside for refusing a request; an expired entry is removed. */
+  isRefused(m: ModelInfo): boolean {
+    const r = this.refused.get(m.ref)
+    if (!r) return false
+    if (r.until > this.now()) return true
+    this.refused.delete(m.ref)
+    return false
   }
 
   /** Why a provider takes no request now, in words for the office and `factory_status`, or null when it takes one. */
@@ -125,6 +140,9 @@ export class ModelRouter {
     // a model the provider retired answers 404 every time: leave it out while another model is left (the chain's last entry stays so the error shows)
     const live = list.filter((m) => !this.retired.has(m.ref))
     if (live.length > 0) list = live
+    // a model that answered a plain request with a 4xx retrying cannot fix is set aside for a while, for the same reason
+    const willing = list.filter((m) => !this.isRefused(m))
+    if (willing.length > 0) list = willing
     if (o.avoidFamily) {
       // the book's and the agent's own model were picked on purpose: they stay first even in the writer's family
       let lead = 0
@@ -153,6 +171,8 @@ export class ModelRouter {
       if (!this.usable(model.provider) && models.slice(i + 1).some((m) => this.usable(m.provider))) continue
       // a job that picked its models before the model was found retired skips it too
       if (this.retired.has(model.ref) && models.slice(i + 1).some((m) => !this.retired.has(m.ref))) continue
+      // so does a model set aside for refusing a request
+      if (this.isRefused(model) && models.slice(i + 1).some((m) => !this.isRefused(m) && !this.retired.has(m.ref))) continue
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
         const paid = isPaidModel(model)
@@ -241,6 +261,16 @@ export class ModelRouter {
             failures.push(`${model.ref}: ${err instanceof Error ? err.message : String(err)}`)
             break
           }
+          // the model refuses the request itself (an unsupported parameter, a bad body): the same request fails again, and so does the next job's
+          if (isRefusedRequest(err, !!req.schema)) {
+            const text = err instanceof Error ? err.message : String(err)
+            if (!this.isRefused(model)) {
+              this.refused.set(model.ref, { until: this.now() + REFUSED_MS, message: text })
+              this.onModelRefused?.(model, text)
+            }
+            failures.push(`${model.ref}: ${text}`)
+            break
+          }
           // a request too big for this model fails the same way every time: go straight to the next model
           const retryable = err instanceof ProviderError && err.retryable && !isContextError(err)
           if (!retryable || retry === this.opts.retries) {
@@ -261,6 +291,20 @@ export class ModelRouter {
     if (failures.length > 1) throw new ProviderError(`all models failed. ${failures.map((f) => f.slice(0, 400)).join(' | ')}`)
     throw lastError instanceof Error ? lastError : new ProviderError('all models failed')
   }
+}
+
+/** How long a model that refused a request is left out of the jobs' model lists. */
+export const REFUSED_MS = 10 * 60_000
+
+/**
+ * The model answered a request without a JSON schema with a 4xx that asking again cannot fix (a parameter it does not take, a body it
+ * does not accept). Auth, credit, rate, timeout and conflict statuses, a context error and a retired model have their own handling.
+ * A request with a schema is left out: `chatJson` asks again without it.
+ */
+export function isRefusedRequest(err: unknown, hadSchema: boolean): boolean {
+  if (hadSchema || !(err instanceof ProviderError) || err.status === undefined) return false
+  if (err.status < 400 || err.status > 499 || [401, 402, 403, 404, 408, 409, 425, 429].includes(err.status)) return false
+  return !isContextError(err) && !isRetiredModelError(err)
 }
 
 /** What kind of failure an error is, so the office can say why an agent isn't getting answers. */
