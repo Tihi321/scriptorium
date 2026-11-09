@@ -96,7 +96,8 @@ async function main(): Promise<void> {
     }
   }
   await engine.start()
-  const watcher = watchDataFolder(dataDir, (e) => {
+  const watcher = watchDataFolder(dataDir, async (e) => {
+    if (await engine.isOwnWrite(e)) return
     log(`changed: ${e.kind} ${e.change} ${e.rel}`)
     void engine.handleWatch(e)
   })

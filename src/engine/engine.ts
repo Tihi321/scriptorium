@@ -739,6 +739,16 @@ export class Engine {
 
   // ---- file changes ----
 
+  /** True for the change event of the engine's own spend-summary write to config/budget.md: not a config change. */
+  async isOwnWrite(e: WatchEvent): Promise<boolean> {
+    if (e.rel !== 'config/budget.md' || e.change !== 'change' || this.budget.lastSummaryText === undefined) return false
+    try {
+      return (await fs.readFile(e.path, 'utf8')) === this.budget.lastSummaryText
+    } catch {
+      return false
+    }
+  }
+
   async handleWatch(e: WatchEvent): Promise<void> {
     try {
       if (e.kind === 'agent') {
