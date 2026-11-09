@@ -486,6 +486,8 @@ This list is our own, written by hand for this project. It is modelled on how li
 | phil-comparative-religion        | Comparative Religion      | nonfiction | no     | 5      |      |             |
 | phil-everyday-philosophy         | Everyday Philosophy       | nonfiction | no     | 5      |      |             |
 | phil-stoicism                    | Stoicism                  | nonfiction | no     | 5      |      |             |
+| phil-fate-and-free-will          | Fate & Free Will          | nonfiction | no     | 5      |      |             |
+| phil-luck-and-moral-luck         | Luck & Moral Luck         | nonfiction | no     | 5      |      |             |
 
 ## Psychology & Society
 
