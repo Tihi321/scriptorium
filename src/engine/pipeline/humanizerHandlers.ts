@@ -114,30 +114,49 @@ const UNITS = new Set(['Hz', 'MHz', 'GHz', 'THz', 'MW', 'GW', 'TW', 'Wh', 'Ah', 
 const nameKey = (w: string) => w.toLowerCase().replace(/['’]s$/, '').replace(/^['’-]+|['’-]+$/g, '')
 
 /** Demonyms and group names without a telling ending: "the Greeks" is no new name. */
-const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes', 'swedes', 'poles', 'scots', 'franks', 'gauls', 'saxons', 'moors', 'kurds', 'thais', 'finns', 'slavs', 'vikings', 'normans', 'britons'])
+const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes', 'swedes', 'poles', 'scots', 'franks', 'gauls', 'saxons', 'moors', 'kurds', 'thais', 'finns', 'slavs', 'vikings', 'normans', 'britons', 'romans', 'spartans', 'trojans', 'germans', 'persians'])
 
 /** A plural group noun by its ending ("Romans", "Christians", "Buddhists", "Stoics", "Epicureans"). */
 const GROUP_ENDING = /(?:ans|ians|ists|ites|ics)$/
+/** The endings that are telling enough to count after a joiner or "of": "Evans" ends in "ans" and is a name, "Epicureans" is not. */
+const STRONG_ENDING = /(?:ians|ists|ites|ics|eans)$/
 
-/** Lower-case words after which a group-ending word is a group, not a name ("early Christians", "ancient Romans"). */
-const GROUP_ADJECTIVES = /\b(?:early|ancient|modern|later|first|many|devout|pious|pagan|medieval|classical|contemporary|fellow|other)$/
+/** Words after which a group-ending word is a group, not a name ("early Christians", "ancient Romans"). Lower case or sentence-initial. */
+const GROUP_ADJECTIVES = /\b(?:early|ancient|modern|later|first|many|devout|pious|pagan|medieval|classical|contemporary|fellow|other)$/i
 /** Words after which a group-ending word is a group ("the Stoics", "many Romans"). */
-const GROUP_CONTEXT = /\b(?:the|these|those|many|most|some|all|of)$/i
+const GROUP_CONTEXT = /\b(?:the|these|those|many|most|some|all)$/i
 /** A word, then a joiner ("and", "or" or a comma) at the end of the text before. */
 const JOINED = /([\p{L}\p{M}'’-]+)(?:,?\s+(?:and|or)|,)$/u
+/** How many joined group nouns are read back, and how many characters before the word are looked at for each step. */
+/** "of" at the end of the text before. */
+const OF = /\bof$/i
+const MAX_CHAIN = 8
+const TAIL = 120
 
 /**
- * A group-ending word counts as a group noun after "the" or a quantifier ("the Stoics", "many Romans"), after a short lower-case adjective
+ * A group-ending word counts as a group noun after "the" or a quantifier ("the Stoics", "many Romans"), after a short adjective
  * ("early Christians"), or after "and", "or" or a comma when the word before the joiner is itself a group noun or an accepted group-ending
- * word ("the Greeks and Romans", "the Stoics and Epicureans"). "then Evans came in" and "Captain Evans" are names.
+ * word ("the Greeks and Romans", "the Stoics and Epicureans"). "then Evans came in" and "Captain Evans" are names, and so are
+ * "the Stoics and Evans" and "the friend of Evans": after a joiner or "of" only a telling ending counts. The chain is read back at most
+ * MAX_CHAIN words and only the tail of the text is scanned, so a long run of joined nouns stays cheap.
  */
 function groupNounInContext(before: string, key: string): boolean {
-  if (!GROUP_ENDING.test(key)) return false
-  if (GROUP_CONTEXT.test(before) || GROUP_ADJECTIVES.test(before)) return true
-  const m = JOINED.exec(before)
-  if (!m) return false
-  const prev = nameKey(m[1]!)
-  return GROUP_NOUNS.has(prev) || groupNounInContext(before.slice(0, m.index).replace(/[ \t]+$/, ''), prev)
+  let text = before
+  let word = key
+  for (let hops = 0; hops <= MAX_CHAIN; hops++) {
+    if (!GROUP_ENDING.test(word)) return false
+    const tail = text.slice(-TAIL)
+    if (GROUP_CONTEXT.test(tail) || GROUP_ADJECTIVES.test(tail)) return true
+    const strong = STRONG_ENDING.test(word) || GROUP_NOUNS.has(word)
+    if (OF.test(tail)) return strong
+    const m = JOINED.exec(tail)
+    if (!m || !strong) return false
+    const prev = nameKey(m[1]!)
+    if (GROUP_NOUNS.has(prev)) return true
+    text = tail.slice(0, m.index).replace(/[ \t]+$/, '')
+    word = prev
+  }
+  return false
 }
 
 /** The singular and plural forms of a key, so "greeks" matches a known "greek" and "greek" a known "greeks". */

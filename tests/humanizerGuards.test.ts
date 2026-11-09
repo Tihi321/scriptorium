@@ -104,6 +104,25 @@ describe('the seed prompt', () => {
   })
 })
 
+describe('group nouns: bounds and names', () => {
+  it('a long run of joined group nouns is cheap', () => {
+    const text = 'She read about the ' + Array.from({ length: 400 }, () => 'Stoics').join(', ') + ' and Epicureans.'
+    const t0 = performance.now()
+    newNames(text, 'She read.')
+    expect(performance.now() - t0).toBeLessThan(100)
+  })
+
+  it('a name after a joiner or "of" is not a group noun', () => {
+    expect(newNames('The lamp hummed. She saw the Stoics and Evans come in.', 'The lamp hummed. She saw come in.')).toEqual(['Evans'])
+    expect(newNames('The lamp hummed. She saw the friend of Evans.', 'The lamp hummed. She saw the friend.')).toEqual(['Evans'])
+    expect(newNames('She read about the Stoics of Epicureans and Christians.', 'She read.')).toEqual([])
+  })
+
+  it('an adjective matches in any case', () => {
+    expect(newNames('Early Christians prayed here.', 'They prayed here.')).toEqual([])
+  })
+})
+
 describe('the humanizer in a pipeline: a leak at the end of the answer', () => {
   type Env = Awaited<ReturnType<typeof makePipelineEnv>>
   let env: Env | undefined
