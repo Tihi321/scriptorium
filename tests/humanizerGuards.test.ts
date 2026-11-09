@@ -130,6 +130,12 @@ describe('group nouns: bounds and names', () => {
       'the Greeks, Romans and Etruscans',
       'the Franciscans and Dominicans',
       'the Stoics, Cynics, Epicureans, Sceptics, Platonists, Aristotelians, Pythagoreans, Sophists, Megarians, Eleatics and Atomists',
+      'the Stoics, Cynics, Epicureans, Sceptics, Platonists, Aristotelians, Pythagoreans, Sophists, Megarians, Eleatics, Neoplatonists and Atomists',
+      `${'the Stoics, '.repeat(20)}and Epicureans`,
+      'the Mexicans and Cubans',
+      'the Romans and Mayans',
+      'the fate of Cubans',
+      'the Romans and Oscans',
     ]
     for (const p of phrases) expect(newNames(`She read about ${p} today.`, 'She read.'), p).toEqual([])
   })

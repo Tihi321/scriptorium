@@ -114,7 +114,7 @@ const UNITS = new Set(['Hz', 'MHz', 'GHz', 'THz', 'MW', 'GW', 'TW', 'Wh', 'Ah', 
 const nameKey = (w: string) => w.toLowerCase().replace(/['’]s$/, '').replace(/^['’-]+|['’-]+$/g, '')
 
 /** Demonyms and group names without a telling ending: "the Greeks" is no new name. */
-const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes', 'swedes', 'poles', 'scots', 'franks', 'gauls', 'saxons', 'moors', 'kurds', 'thais', 'finns', 'slavs', 'vikings', 'normans', 'britons', 'romans', 'spartans', 'trojans', 'germans', 'persians'])
+const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes', 'swedes', 'poles', 'scots', 'franks', 'gauls', 'saxons', 'moors', 'kurds', 'thais', 'finns', 'slavs', 'vikings', 'normans', 'britons', 'romans', 'spartans', 'trojans', 'germans', 'persians', 'cubans', 'mayans', 'incans', 'oscans'])
 
 /** A plural group noun by its ending ("Romans", "Christians", "Buddhists", "Stoics", "Epicureans"). */
 const GROUP_ENDING = /(?:ans|ians|ists|ites|ics)$/
@@ -134,7 +134,7 @@ const GROUP_CONTEXT = /\b(?:the|these|those|many|most|some|all)$/i
 const JOINED = /([\p{L}\p{M}'’-]+)(?:,?\s+(?:and|or)|,)$/u
 /** "of" at the end of the text before. */
 const OF = /\bof$/i
-/** How many joined group nouns are read back (a long list of schools), and how many characters before the word are looked at for each step. */
+/** How many joined group nouns are read back (a long list of schools), and how many characters before the word are looked at to find the next joiner or context word (the nearest 120 characters, per step). */
 const MAX_CHAIN = 64
 const TAIL = 120
 
@@ -143,7 +143,7 @@ const TAIL = 120
  * ("early Christians"), or after "and", "or" or a comma when the word before the joiner is itself a group noun or an accepted group-ending
  * word ("the Greeks and Romans", "the Stoics and Epicureans"). "then Evans came in" and "Captain Evans" are names, and so are
  * "the Stoics and Evans" and "the friend of Evans": after a joiner or "of" only a telling ending, a listed group noun or a long "-ans" word counts. The chain is read back at most
- * MAX_CHAIN words and only the tail of the text is scanned, so a long run of joined nouns stays cheap.
+ * MAX_CHAIN words (the real bound on the list length, however many characters it takes) and each step looks only at the last TAIL characters, so a long run of joined nouns stays cheap.
  */
 function groupNounInContext(before: string, key: string): boolean {
   let text = before
@@ -158,7 +158,8 @@ function groupNounInContext(before: string, key: string): boolean {
     if (!m || !strong) return false
     const prev = nameKey(m[1]!)
     if (GROUP_NOUNS.has(prev)) return true
-    text = tail.slice(0, m.index).replace(/[ \t]+$/, '')
+    // step back through the whole text, not just this tail, so MAX_CHAIN is the real bound on the list length
+    text = text.slice(0, text.length - tail.length + m.index).replace(/[ \t]+$/, '')
     word = prev
   }
   return false
