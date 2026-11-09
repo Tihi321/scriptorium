@@ -153,6 +153,8 @@ export class ResearchStore {
     const sourceMap = new Map<string, { url: string; title: string; retrieved: string }>()
     for (const f of o.facts) if (f.source && !sourceMap.has(f.source.url)) sourceMap.set(f.source.url, { url: f.source.url, title: f.source.title ?? '', retrieved: date })
     for (const x of (o.excerpts ?? []).slice(0, 4)) if (!sourceMap.has(x.url)) sourceMap.set(x.url, { url: x.url, title: x.title ?? '', retrieved: date })
+    // a note with only page excerpts (the extraction fallback) is still sourced by its pages
+    if (o.facts.length === 0 && !(o.excerpts ?? []).length) for (const x of (o.pages ?? []).slice(0, 3)) if (!sourceMap.has(x.url)) sourceMap.set(x.url, { url: x.url, title: x.title, retrieved: date })
     const sources = [...sourceMap.values()]
     const lines = o.facts.map((f) => `- ${f.fact.replace(/\s+/g, ' ').trim()} ${f.source ? `(source: ${f.source.url}, ${date})` : `(source: none, the model's own knowledge, ${date}; unverified)`}`)
     const excerpts = (o.excerpts ?? []).slice(0, 4).map((x) => `- "${x.text.replace(/\s+/g, ' ').replace(/"/g, "'").trim().slice(0, 500)}" (source: ${x.url}, ${date})`)

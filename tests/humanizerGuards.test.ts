@@ -77,6 +77,9 @@ describe('units and group nouns are not names', () => {
     // group nouns, plurals and singulars of known words are no new names
     expect(newNames('She read about the Greeks, the Stoics and the Romans.', 'She read about the Greek Fates.')).toEqual([])
     expect(newNames('He met a Greek there.', 'He met the Greeks.')).toEqual([])
+    // a capitalised -ans/-ics word is a group noun only after "the" or a quantifier: "Evans" is a name
+    expect(newNames('The lamp hummed, and then Evans came in.', 'The lamp hummed and came in.')).toEqual(['Evans'])
+    expect(newNames('Many Romans and the Christians feared it.', 'It was feared.')).toEqual([])
     const ch01 = 'Long ago the Greek Fates spun the thread, and every mortal waited to learn how long it would be before the cold wind came down.'
     expect(humanizeProblem(ch01, ch01.replace('Long ago the Greek Fates', 'We begin with the Greeks, whose Fates'))).toBeNull()
     const base = 'The antenna sends a signal. It hums at a low pitch, and the keeper waits for the dawn to come over the hills.'

@@ -182,7 +182,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     // 3a. pages were read but gave no facts: the note keeps bounded excerpts of them word for word (sourced, verified) instead of the model's own knowledge
     if (facts.length === 0 && readPages.size > 0) {
       const kept = [...readPages.values()]
-      ctx.log(`the pages for "${question}" gave no facts: kept ${kept.length} page excerpt(s) word for word`)
+      ctx.log(`the pages for "${question}" gave no facts: kept ${kept.length} page excerpt(s) for the fact checker only`)
       const note = await d.research.store.write({
         question,
         book,
@@ -192,7 +192,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
         purpose,
         provider: provider || undefined,
         idea,
-        excerpts: kept.map((p) => ({ text: excerptFor(question, p.text, 500), url: p.url, title: p.title })),
+        // page text only in the page excerpts section (the fact checker's, never a key fact or the writer's): no fact line, no source excerpt
         pages: kept
       })
       await indexNote(note.file, note.book, note.slug)

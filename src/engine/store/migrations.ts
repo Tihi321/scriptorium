@@ -399,7 +399,8 @@ const ACP_PROVIDER_BLOCK = [
 /**
  * SCP-44: the seed has an `acp` provider (the api-acp-proxy at 127.0.0.1:8787, switched off). A data folder from before gets it once, in
  * config/providers.md: the seed's block (with its comments) before the client provider, else before the first search provider. A file that
- * has a provider with the id `acp` (a custom one with that name too) is left alone. Everything else stays as it is, including comments and
+ * has a provider with the id `acp` (a custom one with that name too) gets no second one; its entry changes only when it is switched off
+ * and has exactly the old default URL (port 7461, SCP-56), which is rewritten to 8787. Everything else stays as it is, including comments and
  * line endings. Running it again changes nothing. A folder without the file is not touched.
  */
 export async function migrateAcpProvider(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {

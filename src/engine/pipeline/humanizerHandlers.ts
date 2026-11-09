@@ -119,6 +119,9 @@ const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes
 /** A plural group noun by its ending ("Romans", "Christians", "Buddhists", "Stoics", "Epicureans"). */
 const GROUP_ENDING = /(?:ans|ians|ists|ites|ics)$/
 
+/** A group-ending word counts as a group noun only after "the" or a quantifier ("the Stoics", "many Romans"); "then Evans came in" is a name. */
+const groupNounInContext = (before: string, key: string) => GROUP_ENDING.test(key) && /\b(?:the|these|those|many|most|some|all|of)$/i.test(before)
+
 /** The singular and plural forms of a key, so "greeks" matches a known "greek" and "greek" a known "greeks". */
 function nameForms(key: string): string[] {
   const forms = [key, key + 's', key + 'es']
@@ -149,7 +152,7 @@ export function newNames(text: string, known: string): string[] {
     if (UNITS.has(w) || /\d[\d.,]*\s*$/.test(before)) continue
     const key = nameKey(w)
     if (!key || out.includes(w) || nameForms(key).some((f) => have.has(f))) continue
-    if (GROUP_NOUNS.has(key) || GROUP_ENDING.test(key)) continue
+    if (GROUP_NOUNS.has(key) || groupNounInContext(before, key)) continue
     out.push(w)
   }
   return out
