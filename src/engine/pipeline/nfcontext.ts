@@ -88,9 +88,15 @@ export function candidateFacts(notes: NoteFile[], sources: SourceEntry[]): KeyFa
   return out
 }
 
-/** The notes as prompt text, with `[n]` instead of the URL, so the writer cites by number. */
-export function numberedNotes(notes: NoteFile[], sources: SourceEntry[], maxChars = 1800): string {
-  return notes.map((n) => numberedNoteText(formatNote(n, maxChars), sources)).join('\n\n')
+/** How much of one research note the writer and the fact checker see (the source excerpts of a note always fit inside it). */
+export const NOTE_CHARS = 1800
+
+/**
+ * The notes as prompt text, with `[n]` instead of the URL, so the writer cites by number. The sources are numbered before a note is
+ * cut, so the short `[n]` is what takes room, not the URL.
+ */
+export function numberedNotes(notes: NoteFile[], sources: SourceEntry[], maxChars = NOTE_CHARS): string {
+  return notes.map((n) => formatNote({ ...n, body: numberedNoteText(n.body, sources) }, maxChars)).join('\n\n')
 }
 
 export interface NfContextOptions {

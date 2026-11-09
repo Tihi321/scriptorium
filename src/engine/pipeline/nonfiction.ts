@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { z } from 'zod'
 import { citedNumbers } from '../memory/factbase'
-import type { KeyFact } from '../memory/factbase'
+import type { KeyFact, SourceEntry } from '../memory/factbase'
 import type { NoteFile } from '../research/notes'
 import type { Scheduler } from '../queue/scheduler'
 import { writeMd } from '../store/atomic'
@@ -9,7 +9,7 @@ import { askFromReview, clamp, recordMade, Run, unitNumber } from './handlers'
 import type { PipelineDeps } from './handlers'
 import type { ChatMessage } from '../models/types'
 import { chatJson } from './llm'
-import { candidateFacts, chapterNotes, numberedNotes, unmergedNotes } from './nfcontext'
+import { NOTE_CHARS, candidateFacts, chapterNotes, numberedNotes, unmergedNotes } from './nfcontext'
 import { calendarFor } from './calendar'
 import { appendToPrompt, buildMessages } from './prompts'
 import { dimensionsFor } from './scoring'
@@ -71,6 +71,18 @@ const FACT_CHECK_MIN_TOKENS = 4000
 
 function isTokenLimit(err: unknown): boolean {
   return /token limit/i.test((err as Error)?.message ?? '')
+}
+
+/**
+ * The research notes the fact checker sees, as prompt text: as much of each note as the writer saw (`NOTE_CHARS`), the notes whose
+ * sources the book text cites first (the order of `notes` is kept within each group), cut to `limit` characters.
+ */
+export function factCheckNotes(notes: NoteFile[], sources: SourceEntry[], bookText: string, limit: number): string {
+  const cited = new Set(citedNumbers(bookText))
+  const urls = new Set(sources.filter((s) => cited.has(s.n)).map((s) => s.url))
+  const isCited = (n: NoteFile) => n.sources.some((s) => urls.has(s.url))
+  const ordered = [...notes.filter(isCited), ...notes.filter((n) => !isCited(n))]
+  return numberedNotes(ordered, sources, NOTE_CHARS).slice(0, limit)
 }
 
 export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): void {
@@ -221,11 +233,11 @@ export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): v
       const bookText = await d.books.fullText(slug)
       const window = d.contextTokens(role)
       const roomChars = window ? Math.max(6000, Math.floor(window * 0.6 * 4) - bookText.length - digest.length) : 24000
-      const noteText = numberedNotes(notes, sources, 1500)
+      const noteText = factCheckNotes(notes, sources, bookText, Math.min(30000, roomChars))
       const { messages, version } = await buildMessages(d.dataDir, ctx, role, 'fact_check', {
         title: book.title,
         factbase: digest,
-        notes: noteText.slice(0, Math.min(30000, roomChars)) || '(no research notes at all)',
+        notes: noteText || '(no research notes at all)',
         book_text: bookText,
         coverage: coverage.length ? coverage.map((x) => `- Chapter ${x.chapter}: ${x.detail}`).join('\n') : '(every chapter has sourced facts and cites at least one source)',
         round,

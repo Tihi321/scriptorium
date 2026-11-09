@@ -8,6 +8,7 @@ import type { BookState } from '../src/engine/pipeline/advance'
 import { FactBase, buildReferences, citedNumbers, numberedNoteText } from '../src/engine/memory/factbase'
 import { BookStore } from '../src/engine/pipeline/books'
 import { candidateFacts } from '../src/engine/pipeline/nfcontext'
+import { factCheckNotes } from '../src/engine/pipeline/nonfiction'
 import { cleanProse } from '../src/engine/pipeline/llm'
 import { formatEntrySchema, qualitySchema } from '../src/shared/schemas'
 import { parseMd } from '../src/shared/md'
@@ -336,6 +337,23 @@ describe('a chapter without a source cannot pass', () => {
     expect((r0.data.chapters as number[]).length).toBe(5)
     expect(r0.body).toContain('cites no source')
   }, 150000)
+})
+
+describe('numbered notes', () => {
+  it('numbered notes keep the facts that fit once the sources are numbered', async () => {
+    // the real note of the science-blink run: its Science 1972 fact sits past 1500 characters while the source URLs are still written out
+    const doc = parseMd(await readFile(path.join(__dirname, 'fixtures', 'nonfiction', 'hafele-keating-note.md'), 'utf8'))
+    const sources = (doc.data.sources as { url: string; title: string; retrieved: string }[]).map((x) => ({ ...x, retrieved: String(x.retrieved) }))
+    const note: NoteFile = { file: 'research/hk.md', book: null, slug: 'hk', question: String(doc.data.question), unverified: false, body: doc.body.trim(), created: '2026-11-08', sources }
+    // the book's source list: the three URLs are sources 9, 10 and 11
+    const numbered = sources.map((x, i) => ({ n: 9 + i, url: x.url, title: x.title, retrieved: x.retrieved }))
+    // the fact checker sees as much of a note as the writer does
+    const line = factCheckNotes([note], numbered, 'The paper appeared in 1972 [11].', 30000)
+      .split('\n')
+      .find((l) => l.includes('Science, volume 177'))
+    expect(line).toBeDefined()
+    expect(line!.endsWith('[11]')).toBe(true)
+  })
 })
 
 describe('seed files of the non-fiction variant', () => {
