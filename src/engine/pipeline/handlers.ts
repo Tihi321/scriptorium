@@ -138,8 +138,9 @@ export interface NextPick {
  * A story of a series waits while an earlier book of its series is not published yet (`books` says which are), or an earlier story of it is still open.
  * `prefer` is the slug of the story a start job was queued for (its models were chosen for that story): it is picked when it can still start.
  * `skip` are stories whose start failed too often: they are never picked, so the others still start.
+ * `freshTopics` false (a single-idea run) never starts a book from a topic alone; the topics are still read for the story's own topic.
  */
-export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string, skip: ReadonlySet<string> = new Set()): NextPick | null {
+export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatEntry[], books: BookRef[] = [], room: SlotRoom = { books: true, articles: true }, prefer?: string, skip: ReadonlySet<string> = new Set(), freshTopics = true): NextPick | null {
   const byId = new Map(topics.map((t) => [t.id, t]))
   const waiting = waitingStories(ideas, books)
   const open = ideas.filter((i) => i.data.status === 'open' && !waiting.has(i.slug) && !skip.has(i.slug))
@@ -162,6 +163,7 @@ export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatE
     const topic = i.data.topic ? byId.get(i.data.topic) : undefined
     if (topic && topic.active && hasRoom(topic) && ok(topic, i)) return { idea: i, topic }
   }
+  if (!freshTopics) return null
   const candidates = topics.filter((t) => t.active && hasRoom(t) && ok(t))
   candidates.sort((a, b) => a.done + a.inProgress - (b.done + b.inProgress) || a.line - b.line)
   return candidates[0] ? { topic: candidates[0] } : null
@@ -444,7 +446,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     const open = await countInProgress(d.books, only)
     const room: SlotRoom = { books: open.books < d.getFactory().max_books_in_progress, articles: open.articles < d.getFactory().max_articles_in_progress }
     if (!room.books && !room.articles) return { result: 'enough books in progress already' }
-    const pick = pickNext((await d.ideas.list()).filter((i) => !only || i.slug === only), only ? [] : await d.topics.read(), formats, await bookRefs(d.books), room, ctx.job.idea)
+    const pick = pickNext((await d.ideas.list()).filter((i) => !only || i.slug === only), await d.topics.read(), formats, await bookRefs(d.books), room, ctx.job.idea, new Set(), !only)
     if (!pick) return { result: 'nothing to start' }
     const { idea, topic } = pick
     // an adaptation (a story with `source_book`) is a visual novel script: only the script formats are open to it

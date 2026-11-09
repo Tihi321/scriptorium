@@ -3,7 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { emptyBrief } from '../src/shared/brief'
 import { parseMd } from '../src/shared/md'
-import { makeEnv, sleep, waitFor } from './helpers'
+import { makeEnv, makePipelineEnv, sleep, waitFor } from './helpers'
 import type { TestEnv } from './helpers'
 
 let env: TestEnv | undefined
@@ -85,6 +85,21 @@ describe('single-idea run (only)', () => {
     expect(queued.some((n) => n.startsWith('ideas--generate--'))).toBe(false)
     expect(names).not.toContain(other)
   })
+})
+
+describe('single-idea run: the story topic', () => {
+  it("a single-idea run keeps the story's topic", async () => {
+    const e = await makePipelineEnv({ factory: { paused: true } })
+    env = e
+    e.mock.on({ task: 'start_book' }, () => JSON.stringify({ format: 'science-blink', title: 'Why Time Runs', genre: 'Science', target_words: 3000, notes: '' }))
+    const story = await e.engine.addStory({ ...emptyBrief(), title: 'Why Time Runs', premise: 'Clocks disagree.', topic: 'sci-physics', format: 'science-blink' })
+    await e.engine.setOnly(story.slug)
+    await e.engine.setPaused(false)
+    const slug = await waitFor(async () => (await e.engine.books.slugs())[0], 15000, 'the book')
+    const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
+    expect(book).toMatchObject({ topic: 'sci-physics', topic_name: 'Physics', idea: story.slug })
+    expect(await e.engine.books.slugs()).toHaveLength(1) // no book from a topic alone
+  }, 30000)
 })
 
 describe('single-idea run: the global gates', () => {
