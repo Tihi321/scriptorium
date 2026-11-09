@@ -349,6 +349,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     const kept = await readFile(bookDir(env, slug, 'chapters', 'history', 'ch-01-r0.md'), 'utf8')
     expect(parseMd(kept).body.trim()).toBe(ch.body.trim())
     expect((await doneJob(env, `${slug}--humanize--ch01--r0`)).body).toMatch(/kept as it was/)
+    expect(env.logs.some((l) => /humanizer: .+ chapter 1 kept as it was: \d+ words against/.test(l))).toBe(true)
   }, 120000)
 
   it('a visual novel uses the script prompt, and an answer that changes the script lines is not used', async () => {

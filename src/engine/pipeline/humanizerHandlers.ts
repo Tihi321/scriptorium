@@ -113,9 +113,25 @@ const UNITS = new Set(['Hz', 'MHz', 'GHz', 'THz', 'MW', 'GW', 'TW', 'Wh', 'Ah', 
 
 const nameKey = (w: string) => w.toLowerCase().replace(/['’]s$/, '').replace(/^['’-]+|['’-]+$/g, '')
 
+/** Demonyms and group names without a telling ending: "the Greeks" is no new name. */
+const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes', 'swedes', 'poles', 'scots', 'franks', 'gauls', 'saxons', 'moors', 'kurds', 'thais', 'finns', 'slavs', 'vikings', 'normans', 'britons'])
+
+/** A plural group noun by its ending ("Romans", "Christians", "Buddhists", "Stoics", "Epicureans"). */
+const GROUP_ENDING = /(?:ans|ians|ists|ites|ics)$/
+
+/** The singular and plural forms of a key, so "greeks" matches a known "greek" and "greek" a known "greeks". */
+function nameForms(key: string): string[] {
+  const forms = [key, key + 's', key + 'es']
+  if (key.endsWith('ies')) forms.push(key.slice(0, -3) + 'y')
+  if (key.endsWith('es')) forms.push(key.slice(0, -2))
+  if (key.endsWith('s')) forms.push(key.slice(0, -1))
+  return forms
+}
+
 /**
  * Capitalised words of `text` that are new: not at the start of a sentence (or a line, or a quotation), and, in lower case without
- * a possessive 's, not a word of `known` (the original chapter and the bible). A sentence's first word is skipped because every
+ * a possessive 's, not a word of `known` (the original chapter and the bible), also in its singular or plural form, and not a group noun
+ * ("Greeks", "Romans", "Stoics"). A sentence's first word is skipped because every
  * word is capitalised there, so a new name that opens a sentence is only found when it is followed by another capitalised word
  * ("Captain Rourke": Rourke is checked).
  */
@@ -132,7 +148,9 @@ export function newNames(text: string, known: string): string[] {
     // a unit or an abbreviation next to a number is not a name ("50 Hz", "the hum at 50 Hz")
     if (UNITS.has(w) || /\d[\d.,]*\s*$/.test(before)) continue
     const key = nameKey(w)
-    if (key && !have.has(key) && !out.includes(w)) out.push(w)
+    if (!key || out.includes(w) || nameForms(key).some((f) => have.has(f))) continue
+    if (GROUP_NOUNS.has(key) || GROUP_ENDING.test(key)) continue
+    out.push(w)
   }
   return out
 }
@@ -318,7 +336,10 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
       revised = leak.text
     }
     const problem = leakProblem ?? humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
-    if (problem) ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
+    if (problem) {
+      ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
+      d.log(`humanizer: ${slug} chapter ${n} kept as it was: ${problem}`)
+    }
     else ctx.log(`humanizer: chapter ${n} humanized: ${countWords(current.body)} to ${countWords(revised)} words`)
     let body = problem ? current.body : revised
     // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently), and a place the bible lacks is added to it

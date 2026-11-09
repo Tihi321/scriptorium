@@ -69,11 +69,16 @@ describe('the language guard', () => {
   })
 })
 
-describe('units are not names', () => {
+describe('units and group nouns are not names', () => {
   it('"50 Hz" and "the hum at 50 Hz" are no new name, "Captain Rourke" still is', () => {
     expect(newNames('The signal hums at 50 Hz and the antenna sends 12 MW of power.', 'The signal hums.')).toEqual([])
     expect(newNames('She heard the hum at 50 Hz, a low sound that came from the station.', 'She heard a hum.')).toEqual([])
     expect(newNames('The lamp, the hum, and then Captain Rourke came in.', 'The lamp and the hum.')).toEqual(['Captain', 'Rourke'])
+    // group nouns, plurals and singulars of known words are no new names
+    expect(newNames('She read about the Greeks, the Stoics and the Romans.', 'She read about the Greek Fates.')).toEqual([])
+    expect(newNames('He met a Greek there.', 'He met the Greeks.')).toEqual([])
+    const ch01 = 'Long ago the Greek Fates spun the thread, and every mortal waited to learn how long it would be before the cold wind came down.'
+    expect(humanizeProblem(ch01, ch01.replace('Long ago the Greek Fates', 'We begin with the Greeks, whose Fates'))).toBeNull()
     const base = 'The antenna sends a signal. It hums at a low pitch, and the keeper waits for the dawn to come over the hills.'
     expect(humanizeProblem(base, base.replace('a low pitch', '50 Hz').replace('hums', 'hums, steady,'))).toMatch(/numbers changed/) // the number is still a number change, not a name
     const withUnit = 'The antenna sends a signal at 50 Hz. It hums, and the keeper waits for the dawn to come over the hills.'
