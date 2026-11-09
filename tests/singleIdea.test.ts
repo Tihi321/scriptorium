@@ -95,8 +95,11 @@ describe('single-idea run: the story topic', () => {
     const story = await e.engine.addStory({ ...emptyBrief(), title: 'Why Time Runs', premise: 'Clocks disagree.', topic: 'sci-physics', format: 'science-blink' })
     await e.engine.setOnly(story.slug)
     await e.engine.setPaused(false)
-    const slug = await waitFor(async () => (await e.engine.books.slugs())[0], 15000, 'the book')
-    const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
+    // the book's folder exists a moment before its book.md does
+    const book = await waitFor(async () => {
+      const slug = (await e.engine.books.slugs())[0]
+      return slug ? readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8').then((t) => parseMd(t).data, () => null) : null
+    }, 15000, 'the book')
     expect(book).toMatchObject({ topic: 'sci-physics', topic_name: 'Physics', idea: story.slug })
     expect(await e.engine.books.slugs()).toHaveLength(1) // no book from a topic alone
   }, 30000)
