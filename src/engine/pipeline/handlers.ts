@@ -50,6 +50,42 @@ import type { BranchChapter } from './branches'
 import { decide, dimensionsFor } from './scoring'
 import type { ReviewResult } from './scoring'
 
+const KEYWORDS_MIN = 4
+const KEYWORDS_MAX = 8
+
+/**
+ * The publisher's keywords: trimmed, deduplicated (the first spelling wins), at most 8. Below 4 they are topped up from `fill`
+ * (the subjects, the topic name, the genre) with no model call. `note` says what changed, or is null.
+ */
+export function publishKeywords(raw: string[], fill: string[]): { keywords: string[]; note: string | null } {
+  const clean = (list: string[], into: string[], seen: Set<string>): void => {
+    for (const item of list) {
+      const t = item.replace(/\s+/g, ' ').trim()
+      if (!t || t.length > 60 || seen.has(t.toLowerCase())) continue
+      seen.add(t.toLowerCase())
+      into.push(t)
+    }
+  }
+  const seen = new Set<string>()
+  const all: string[] = []
+  clean(raw, all, seen)
+  const notes: string[] = []
+  let keywords = all
+  if (all.length > KEYWORDS_MAX) {
+    notes.push(`cut ${all.length} keywords to ${KEYWORDS_MAX}`)
+    keywords = all.slice(0, KEYWORDS_MAX)
+  }
+  if (keywords.length < KEYWORDS_MIN) {
+    const before = keywords.length
+    const extra: string[] = []
+    clean(fill, extra, seen)
+    keywords = [...keywords, ...extra].slice(0, KEYWORDS_MIN)
+    if (keywords.length > before) notes.push(`topped up ${before} keyword${before === 1 ? '' : 's'} to ${keywords.length} from the subjects`)
+    if (keywords.length < KEYWORDS_MIN) notes.push(`only ${keywords.length} keywords`)
+  }
+  return { keywords, note: notes.length ? notes.join('; ') : null }
+}
+
 export interface PipelineDeps {
   dataDir: string
   books: BookStore
@@ -1238,6 +1274,8 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const answered = r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     const title = titleFixed ? book.title : answered || book.title
     if (titleFixed && answered && answered !== book.title) ctx.log(`the publisher suggested the title "${answered}", but the owner fixed "${book.title}": kept`)
+    const kw = publishKeywords(r.value.keywords, [...r.value.subjects, book.topic_name ?? '', book.genre ?? ''])
+    if (kw.note) ctx.log('publisher: ' + kw.note)
     const year = new Date().getFullYear()
     const uuid = book.uuid ?? randomUUID()
     if (article) {
@@ -1249,7 +1287,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
         standfirst,
         blurb: standfirst,
         subjects: r.value.subjects,
-        keywords: r.value.keywords,
+        keywords: kw.keywords,
         year,
         uuid,
         score: decision.score,
@@ -1286,7 +1324,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       title,
       blurb: r.value.blurb.trim(),
       subjects: r.value.subjects,
-      keywords: r.value.keywords,
+      keywords: kw.keywords,
       year,
       uuid,
       score: decision.score,
