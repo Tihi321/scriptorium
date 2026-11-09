@@ -137,6 +137,9 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     let provider = ''
     let facts: NoteFact[] = []
     let excerpts: NoteExcerpt[] = []
+    let factPages: { url: string; title: string; text: string }[] = []
+    // pages that were read but gave no facts (at most 3 distinct URLs over the rounds): kept word for word if nothing else is found
+    const readPages = new Map<string, { url: string; title: string; text: string }>()
     let unverified = false
     const seenUrls = new Set<string>()
     const triedQueries = new Set<string>()
@@ -150,12 +153,20 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
           ctx.log(`no search provider gave results for "${query}"`)
           continue
         }
+        if (pages.list.length === 0) {
+          ctx.log(`the results for "${query}" were pages already read`)
+          continue
+        }
         provider = pages.provider
         ctx.log(`search (${pages.provider}) "${query}": ${pages.list.map((p) => p.url).join(', ')}`)
         const got = await factsFrom(question, context, pages.list)
         facts = got.facts
         excerpts = got.excerpts
-        if (facts.length === 0) ctx.log(`the pages for "${query}" did not answer the question`)
+        if (facts.length > 0) factPages = pages.list
+        else {
+          for (const p of pages.list) if (readPages.size < 3 && !readPages.has(p.url)) readPages.set(p.url, p)
+          ctx.log(`the pages for "${query}" did not answer the question`)
+        }
       }
       if (facts.length > 0 || round === 1) break
       // the pages said nothing useful: ask the model for better search words
@@ -168,27 +179,56 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
       if (queries.length === 0) break
     }
 
+    // 3a. pages were read but gave no facts: the note keeps bounded excerpts of them word for word (sourced, verified) instead of the model's own knowledge
+    if (facts.length === 0 && readPages.size > 0) {
+      const kept = [...readPages.values()]
+      ctx.log(`the pages for "${question}" gave no facts: kept ${kept.length} page excerpt(s) word for word`)
+      const note = await d.research.store.write({
+        question,
+        book,
+        facts: [],
+        unverified: false,
+        askedBy,
+        purpose,
+        provider: provider || undefined,
+        idea,
+        excerpts: kept.map((p) => ({ text: excerptFor(question, p.text, 500), url: p.url, title: p.title })),
+        pages: kept
+      })
+      await indexNote(note.file, note.book, note.slug)
+      await made(book, run)
+      return { result: `no facts, ${kept.length} page excerpt(s) from ${provider}`, resultPath: note.file }
+    }
+
     // 3b. the helpers of the steps above
     async function gatherPages(query: string, forQuestion: string, seen: Set<string>) {
       const found = await d.search.search(query, { signal: ctx.signal, book, agent: ctx.agent.id, limit: 5, ...(news ? { news: true, days: 7 } : {}) })
       if (!found) return null
       // read the results (pages that need a download: only the first three), then keep the three that talk most about what was asked
       const terms = searchTerms(forQuestion, 8).map((t) => t.toLowerCase())
-      const read: { url: string; title: string; text: string; score: number }[] = []
+      const read: { url: string; title: string; text: string; score: number; key: string }[] = []
+      let skipped = 0
       let downloads = 0
       for (const res of found.results.slice(0, 5)) {
-        if (seen.has(res.url)) continue
+        // a page is read again when it comes back with another excerpt
+        const key = res.content ? `${res.url}\n${res.content}` : res.url
+        if (seen.has(key)) {
+          skipped++
+          continue
+        }
         if (!res.content && downloads >= 3) continue
         if (!res.content) downloads++
         const text = await pageText(forQuestion, res, ctx.signal)
         if (!text) continue
         const lower = text.toLowerCase()
         const title = res.title.toLowerCase()
-        read.push({ url: res.url, title: res.title, text, score: terms.filter((t) => lower.includes(t)).length + 2 * terms.filter((t) => title.includes(t)).length })
+        read.push({ url: res.url, title: res.title, text, score: terms.filter((t) => lower.includes(t)).length + 2 * terms.filter((t) => title.includes(t)).length, key })
       }
       read.sort((a, b) => b.score - a.score) // the sort is stable: the provider's own order breaks ties
-      const list = read.slice(0, 3).map((p, i) => ({ n: i + 1, url: p.url, title: p.title, text: p.text }))
-      for (const p of list) seen.add(p.url)
+      const top = read.slice(0, 3)
+      const list = top.map((p, i) => ({ n: i + 1, url: p.url, title: p.title, text: p.text }))
+      for (const p of top) seen.add(p.key)
+      if (list.length === 0 && skipped > 0 && skipped === Math.min(found.results.length, 5)) return { provider: found.provider, list }
       return list.length ? { provider: found.provider, list } : null
     }
 
@@ -270,7 +310,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
     }
 
     // 5. write the note and index it
-    const note = await d.research.store.write({ question, book, facts, unverified, askedBy, purpose, provider: provider || undefined, idea, excerpts })
+    const note = await d.research.store.write({ question, book, facts, unverified, askedBy, purpose, provider: provider || undefined, idea, excerpts, pages: unverified ? undefined : factPages })
     await indexNote(note.file, note.book, note.slug)
     await made(book, run)
     return {
