@@ -48,7 +48,7 @@ export async function researchNotesFor(d: ResearchContextDeps, book: string | nu
       .sort((a, b) => b.score - a.score || a.n.file.localeCompare(b.n.file))
     for (const x of ranked.slice(0, max)) chosen.push(x.n)
   }
-  return chosen.map((n) => ({ name: `research: ${n.question}`, text: formatNote(n), file: n.file }))
+  return chosen.map((n) => ({ name: `research: ${n.question}`, text: formatNote(n), file: n.file })).filter((x) => x.text)
 }
 
 /** The notes that answer these questions (exact match first, then the closest by words), for the outline. */
@@ -57,7 +57,7 @@ export async function researchNotesForQuestions(d: ResearchContextDeps, book: st
   const seen = new Set<string>()
   for (const q of questions) {
     const exact = await d.research.store.findExact(q, book)
-    const items = exact ? [{ name: `research: ${exact.question}`, text: formatNote(exact), file: exact.file }] : await researchNotesFor(d, book, q, 1)
+    const items = exact ? [{ name: `research: ${exact.question}`, text: formatNote(exact), file: exact.file }].filter((x) => x.text) : await researchNotesFor(d, book, q, 1)
     for (const it of items) {
       if (seen.has(it.file)) continue
       seen.add(it.file)

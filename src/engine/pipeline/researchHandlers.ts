@@ -456,7 +456,7 @@ export function registerResearchHandlers(sched: Scheduler, d: PipelineDeps): voi
       const parts: string[] = []
       for (const [i, m] of markers.entries()) {
         const note = await d.research.store.findExact(m.question, slug)
-        const found: ResearchItem[] = note ? [{ name: note.question, text: formatNote(note), file: note.file }] : await researchNotesFor(d, slug, m.question, 1)
+        const found: ResearchItem[] = note ? [{ name: note.question, text: formatNote(note), file: note.file }].filter((x) => x.text) : await researchNotesFor(d, slug, m.question, 1)
         parts.push(`Marker ${i + 1}: ${m.question}\nSentence: ${markerSentence(chapter.body, m)}\n${found.length ? `Research notes:\n${found.map((f) => f.text).join('\n')}` : 'No notes were found for this question.'}`)
       }
       try {

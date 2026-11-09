@@ -92,7 +92,9 @@ export function factCheckNotes(notes: NoteFile[], sources: SourceEntry[], bookTe
   const begin = '<<<PAGE_EXCERPTS>>>'
   const end = '<<<END_PAGE_EXCERPTS>>>'
   // the body is cut to the room that is left, never the label or the markers
-  const room = Math.max(0, excerptLimit - head.length - begin.length - end.length - 6)
+  const room = excerptLimit - head.length - begin.length - end.length - 6
+  // below the room the label and markers need, no excerpts are added: the block never exceeds `excerptLimit`
+  if (room <= 0) return text
   const body = blocks.join('\n\n').replace(/<{2,}|>{2,}/g, ' ').slice(0, room)
   return `${text}\n\n${head}\n${begin}\n${body}\n${end}`
 }

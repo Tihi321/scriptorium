@@ -96,7 +96,7 @@ export const NOTE_CHARS = 1800
  * cut, so the short `[n]` is what takes room, not the URL.
  */
 export function numberedNotes(notes: NoteFile[], sources: SourceEntry[], maxChars = NOTE_CHARS): string {
-  return notes.map((n) => formatNote({ ...n, body: numberedNoteText(n.body, sources) }, maxChars)).join('\n\n')
+  return notes.map((n) => formatNote({ ...n, body: numberedNoteText(n.body, sources) }, maxChars)).filter(Boolean).join('\n\n')
 }
 
 export interface NfContextOptions {

@@ -1,0 +1,2 @@
+- 2026-11-09 SCP-58: `numberedNotes` and the other note renderers now drop an empty note, so a book with only fallback notes sends the writer no research block text for them; if a prompt template ever expects at least one entry, check it (src/engine/pipeline/nfcontext.ts)
+- 2026-11-09 SCP-58: stored page text is collapsed to one line when written, so a leading # or fence could only appear in a hand-edited or older note; the neutralising is on the read side (src/engine/research/notes.ts `pageExcerpts`)
