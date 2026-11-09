@@ -255,6 +255,29 @@ formats:
       speculation. Every fact comes from the sourced notes and carries the number of its source in square brackets, like [2]. Never state
       a date, number, name or quote that the notes do not give. No invented quotes, no invented people; a clearly imagined scene that
       illustrates an idea is allowed if the text frames it as imagined.
+  - id: idea-blink
+    name: Ideas explainer (short read)
+    enabled: true
+    nonfiction: true
+    humanize: true
+    max_rounds: 1
+    kinds: [nonfiction]
+    juvenile: false
+    age_band: null
+    words: [2000, 4000]
+    chapters: [6, 10]
+    read_aloud: false
+    guidance: |
+      A short-read explainer on a philosophical idea for curious general readers, in the style of a book-summary app. Each chapter is one
+      "blink" of 250 to 500 words that carries one key idea. Open the first blink with a hook: a vivid scene, a small story, a thought
+      experiment or a puzzle the reader can feel. Every blink explains one idea or argument in plain, concrete words, defines each term when
+      it first appears, names the thinker who made the argument and when, uses an everyday example or a thought experiment, and ends with a
+      line that pulls into the next. Give the strongest objection to the idea its fair hearing. The last blink is a short takeaway: the whole
+      argument in a few sentences, and what it can mean for an ordinary life. Where thinkers disagree or the question is still open, say so
+      plainly, and keep what a thinker actually argued apart from the writer's own view. Every fact comes from the sourced notes and carries
+      the number of its source in square brackets, like [2]. Never state a date, name or quote that the notes do not give, and put no words
+      in a thinker's mouth that the notes do not give. No invented people; a clearly imagined scene or thought experiment that illustrates
+      an idea is allowed if the text frames it as imagined.
   - id: nonfiction-kids
     name: Fact book for children
     enabled: true

@@ -40,6 +40,7 @@ const FORMATS: Record<string, { group: TypeGroup; choices?: boolean }> = {
   'nonfiction-short': { group: 'nonfiction' },
   'nonfiction-kids': { group: 'nonfiction' },
   'science-blink': { group: 'nonfiction' },
+  'idea-blink': { group: 'nonfiction' },
   article: { group: 'nonfiction' },
   'feature-article': { group: 'nonfiction' }
 }
