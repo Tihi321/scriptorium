@@ -1,0 +1,7 @@
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"plan.created","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"planner returned the plan (6 tasks)","data":{"approx":true}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"plan.approved","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"user approved the plan","data":{"approx":true}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"note","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"user decisions D1-D3 recorded in REQ-0003 log, not in plan body","data":{"approx":true,"D1":"10 minutes","D2":"once, all jobs","D3":"keep 7461"}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"FAIL: the D1 context-error wording","data":{"approx":true,"verdict":"FAIL"}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"note","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"polish round 1 (commit 97bd319)","data":{"approx":true,"commit":"97bd319"}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"PASS on the re-check","data":{"approx":true,"verdict":"PASS"}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0003","ticket":"SCP-55-run-fixes","detail":"ticket done after PASS re-check","data":{"approx":true}}
