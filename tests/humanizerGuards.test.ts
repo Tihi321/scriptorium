@@ -104,6 +104,47 @@ describe('the seed prompt', () => {
   })
 })
 
+describe('group nouns: bounds and names', () => {
+  it('a long run of joined group nouns is cheap', () => {
+    const text = 'She read about the ' + Array.from({ length: 400 }, () => 'Stoics').join(', ') + ' and Epicureans.'
+    const t0 = performance.now()
+    newNames(text, 'She read.')
+    expect(performance.now() - t0).toBeLessThan(100)
+  })
+
+  it('a name after a joiner or "of" is not a group noun', () => {
+    expect(newNames('The lamp hummed. She saw the Stoics and Evans come in.', 'The lamp hummed. She saw come in.')).toEqual(['Evans'])
+    expect(newNames('The lamp hummed. She saw the friend of Evans.', 'The lamp hummed. She saw the friend.')).toEqual(['Evans'])
+    expect(newNames('She read about the Stoics of Epicureans and Christians.', 'She read.')).toEqual([])
+  })
+
+  it('real group nouns after a joiner or "of" pass, whatever their ending; short surnames still do not', () => {
+    const phrases = [
+      'the Catholics and Anglicans',
+      'the Catholics and Lutherans',
+      'the Greeks and Americans',
+      'the Greeks and Africans',
+      'the fate of Americans',
+      'the fate of Puritans',
+      'the Jews and Samaritans',
+      'the Greeks, Romans and Etruscans',
+      'the Franciscans and Dominicans',
+      'the Stoics, Cynics, Epicureans, Sceptics, Platonists, Aristotelians, Pythagoreans, Sophists, Megarians, Eleatics and Atomists',
+      'the Stoics, Cynics, Epicureans, Sceptics, Platonists, Aristotelians, Pythagoreans, Sophists, Megarians, Eleatics, Neoplatonists and Atomists',
+      `${'the Stoics, '.repeat(20)}and Epicureans`,
+      'the Mexicans and Cubans',
+      'the Romans and Mayans',
+      'the fate of Cubans',
+      'the Romans and Oscans',
+    ]
+    for (const p of phrases) expect(newNames(`She read about ${p} today.`, 'She read.'), p).toEqual([])
+  })
+
+  it('an adjective matches in any case', () => {
+    expect(newNames('Early Christians prayed here.', 'They prayed here.')).toEqual([])
+  })
+})
+
 describe('the humanizer in a pipeline: a leak at the end of the answer', () => {
   type Env = Awaited<ReturnType<typeof makePipelineEnv>>
   let env: Env | undefined

@@ -1,0 +1,2 @@
+- 2026-11-09 SCP-57: "the Evans" (a name straight after "the") is still accepted as a group noun because it ends in "ans"; the plan only covers joiner and "of" (src/engine/pipeline/humanizerHandlers.ts)
+- 2026-11-09 SCP-57: "of" no longer lets a plain "-ans" word through ("of Romans" works only because romans is now in GROUP_NOUNS); other -ans demonyms (Africans, Americans) after a joiner or "of" are flagged until added to GROUP_NOUNS
