@@ -1,0 +1,2 @@
+{"ts":"2026-11-10T11:40:38Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0006","ticket":"SCP-57-humanizer-group-nouns","detail":"only failure: docs/design.md merge conflict, resolved by keeping both rows; merged 8f218f5","data":{"verdict":"FAIL","recheck":2}}
+{"ts":"2026-11-10T11:40:38Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0006","ticket":"SCP-57-humanizer-group-nouns","detail":"done on the user's word after 2nd re-check FAIL"}

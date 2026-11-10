@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: done
 request: REQ-0006
 repos: [scriptorium]
 branch: SCP-57_humanizer-group-nouns
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # SCP-57: humanizer group nouns

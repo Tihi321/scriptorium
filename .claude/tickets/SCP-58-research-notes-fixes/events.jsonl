@@ -1,0 +1,2 @@
+{"ts":"2026-11-10T10:45:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0006","ticket":"SCP-58-research-notes-fixes","detail":"re-check PASS after FAIL and polish round 1","data":{"verdict":"PASS","rounds":1}}
+{"ts":"2026-11-10T10:45:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0006","ticket":"SCP-58-research-notes-fixes","detail":"done; merged 74da6c6 to scriptorium master"}

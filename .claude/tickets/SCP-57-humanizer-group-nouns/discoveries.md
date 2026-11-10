@@ -1,2 +1,8 @@
 - 2026-11-09 SCP-57: "the Evans" (a name straight after "the") is still accepted as a group noun because it ends in "ans"; the plan only covers joiner and "of" (src/engine/pipeline/humanizerHandlers.ts)
 - 2026-11-09 SCP-57: "of" no longer lets a plain "-ans" word through ("of Romans" works only because romans is now in GROUP_NOUNS); other -ans demonyms (Africans, Americans) after a joiner or "of" are flagged until added to GROUP_NOUNS
+- 2026-11-10 director-checker: case-insensitive adjectives let a name through after a capitalised sentence opener, e.g. "First Evans spoke." and "Later Evans came back." (src/engine/pipeline/humanizerHandlers.ts:130) - suggested: match adjectives case-insensitively only when not sentence-initial, or require a group-noun ending after them
+- 2026-11-10 director-checker: hops <= MAX_CHAIN lets 65 words through, while the docs say 64 (src/engine/pipeline/humanizerHandlers.ts:151) - suggested: make the check and the docs agree on 64
+- 2026-11-10 director-checker: the comment overstates cheapness, since each step re-scans the text before it (src/engine/pipeline/humanizerHandlers.ts:146) - suggested: reword the comment
+- 2026-11-10 director-checker: the 20x "the Stoics, " test row passes on the "the" rule and does not test a long chain (tests/humanizerGuards.test.ts:134) - suggested: add a test with a chain over the cap
+- 2026-11-10 director-checker: test is flaky under CPU load, ENOENT on book.md (tests/adapt.test.ts:433-458) - suggested: check the book.md setup for a shared-file race
+- 2026-11-10 director-checker: test is flaky under CPU load, ENOENT on book.md (tests/novel.test.ts) - suggested: same check as tests/adapt.test.ts
