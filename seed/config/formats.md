@@ -40,6 +40,24 @@ formats:
     read_aloud: false
     guidance: |
       A complete short story with one clear central problem and a satisfying ending. Few characters, one main setting, a strong voice.
+  - id: linked-collection
+    name: Linked story collection
+    enabled: true
+    kinds: [fiction]
+    juvenile: false
+    age_band: null
+    words: [20000, 60000]
+    chapters: [8, 16]
+    max_rounds: 1
+    read_aloud: false
+    guidance: |
+      A collection of linked short stories. Every chapter is one complete short story with its own beginning, middle and end,
+      its own small problem, its own turn and its own quiet point or moral, so a reader can read any one of them alone. The
+      stories are linked by a recurring main character and the people around them, who come back and change a little from
+      story to story; a reader of the whole book sees those small changes add up, but there is no single plot and no single
+      climax for the whole book. Judge structure, pacing and arc story by story: each story needs a clear shape and a
+      satisfying ending of its own, and the recurring characters need to stay consistent and grow. Chapters of 2,500 to
+      3,500 words. A point or moral lands through what the characters do and notice, never as a lecture or a summary at the end.
   - id: chapter-book
     name: Chapter book
     enabled: true
@@ -431,6 +449,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `age_band`: used in prompts and metadata.
 - `guidance`: instructions added to the writer and reviewer prompts.
 - `long`: use the book memory (see below). `max_rounds`: rewrite rounds for this format (default: `quality.max_rounds`).
+- `linked-collection` is a short format on purpose: each chapter is a whole story, reviewed with the format guidance against the whole book, with no act reviews, tension scoring or thread check.
 - `nonfiction`: the non-fiction variant. Research for every chapter (required), a fact base in `factbase/` instead of a story bible, non-fiction prompts (`*_nf.md` in `prompts/`), the fact-checker in place of the continuity checker (it must pass), and a references section at the end of the EPUB and the reader. Non-fiction formats are short books (not `long`).
 - `article`: a newspaper article (one chapter, `chapters: [1, 1]`, with `nonfiction: true`). It is researched like a non-fiction book, with the `_article` prompts (`pitch_article.md`, `research_plan_article.md`, `outline_article.md`, `draft_chapter_article.md`, `rewrite_chapter_article.md`, `humanize_chapter_article.md`, `publish_article.md`; roles without an `_article` prompt use their `_nf` one), a search for recent news, and research notes that belong to the article alone (never reused from or added to the shared library notes). It gets no cover, no EPUB and no Kindle: the publisher writes `out/article.html` (a styled page with headline, standfirst, byline, date, text and numbered references) and `out/article.md`. Articles are for topics of kind `article` (the sections of the newspaper, in `topics.md`) and never for another kind, and they have their own limit, `max_articles_in_progress` in `config/factory.md`.
 - `research: false`: the book needs no real-world facts (the bedtime formats): the architect makes no research plan and the writer no prep, so those model calls are saved. Without it a format is researched as usual; a `bedtime-*` format with no `research` line counts as `false`.
