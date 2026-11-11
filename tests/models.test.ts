@@ -290,6 +290,10 @@ describe('router', () => {
     expect(problemKind(new ProviderError('HTTP 402: insufficient credits', 402))).toBe('no-credit')
     expect(problemKind(new ProviderError('HTTP 404: no such model', 404))).toBe('not-found')
     expect(problemKind(new ProviderError('HTTP 400: bad', 400))).toBe('bad-request')
+    // the api-acp-proxy's answer to an over-cap prompt (AAP-30): "The" comes first, so the match must not depend on the position
+    const tooLong = new ProviderError('HTTP 400: {"error":{"message":"The prompt is too long for Google Antigravity: 251987 characters, the limit is 180000. The agent would silently drop the rest, so the proxy refused it. Shorten the prompt or use another model.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}', 400)
+    expect(problemKind(tooLong)).toBe('too-big')
+    expect(isRefusedRequest(tooLong, false)).toBe(false)
     expect(problemKind(new ProviderError('HTTP 503: overloaded', 503, true))).toBe('server')
     expect(problemKind(new Error('something'))).toBe('other')
   })
@@ -412,6 +416,33 @@ describe('router', () => {
       for await (const ev of r.chat(r.candidates('writer'), req)) void ev
     }
     await expect(drain()).rejects.toThrow(/all models failed\. a\/x: .*token limit.* \| b\/y: .*exceeds the available context.* \| c\/z: bad request/)
+  })
+
+  it('a prompt larger than a model context skips it without a request', async () => {
+    const { registry, mock } = await registryWith({
+      providers: [{ id: 'a', models: ['x'] }, { id: 'b', models: ['y'] }],
+      roles: { writer: ['a/x', 'b/y'] }
+    })
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      return 'ok'
+    })
+    registry.getModel('a/x')!.context = 100
+    const r = new ModelRouter(registry, undefined)
+    const req = { messages: [{ role: 'user' as const, content: 'w'.repeat(1000) }], meta: { role: 'writer' } }
+    const problems: { kind: string; ref: string; message: string }[] = []
+    for await (const ev of r.chat(r.candidates('writer'), req)) if (ev.type === 'problem') problems.push({ kind: ev.kind, ref: ev.model.ref, message: ev.message })
+    expect(seen).toEqual(['y'])
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatchObject({ kind: 'too-big', ref: 'a/x' })
+    expect(problems[0]!.message).toMatch(/prompt is too long/)
+    registry.getModel('b/y')!.context = 100
+    const drain = async () => {
+      for await (const ev of r.chat(r.candidates('writer'), req)) void ev
+    }
+    await expect(drain()).rejects.toThrow(/all models failed\. a\/x: prompt is too long.* \| b\/y: prompt is too long/)
+    expect(seen).toEqual(['y']) // no new call
   })
 
   it('refuses paid models over the cap and falls to a local one; throws BudgetError when nothing is left', async () => {

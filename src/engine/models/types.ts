@@ -64,6 +64,14 @@ export class ProviderError extends Error {
   }
 }
 
+/** A request that had to stay on one model (a JSON repair round) would go to another one. `model` is the ref it would go to. */
+export class ModelSwitchedError extends Error {
+  constructor(readonly model: string) {
+    super(`the request would go to ${model}`)
+    this.name = 'ModelSwitchedError'
+  }
+}
+
 /**
  * A local server a job needs is not running (connection refused). Not a failure of the job: the scheduler requeues it for later
  * without counting an attempt, and the server is marked down for every job until it answers again.

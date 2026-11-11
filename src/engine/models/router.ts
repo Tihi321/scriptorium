@@ -3,7 +3,7 @@ import type { Budget } from '../budget/spend'
 import { ProviderLimiter } from './limiter'
 import { computeCost, isPaidModel } from './registry'
 import type { ModelInfo, ModelRegistry, ProviderInfo } from './registry'
-import { BudgetError, emptyUsage, isAbortError, ProviderError } from './types'
+import { BudgetError, emptyUsage, estimateTokens, isAbortError, ProviderError } from './types'
 import type { ChatMessage, RequestMeta, Usage } from './types'
 import type { ProblemKind } from '../../shared/protocol'
 
@@ -166,6 +166,7 @@ export class ModelRouter {
     let budgetRefusal: string | undefined
     let attempts = 0
     const failures: string[] = []
+    const promptTokens = estimateTokens(req.messages.map((m) => m.content).join('\n'))
     for (const [i, model] of models.entries()) {
       // a server that went down, or a daily limit used up, after the job started: skip it while a later model can answer
       if (!this.usable(model.provider) && models.slice(i + 1).some((m) => this.usable(m.provider))) continue
@@ -173,6 +174,14 @@ export class ModelRouter {
       if (this.retired.has(model.ref) && models.slice(i + 1).some((m) => !this.retired.has(m.ref))) continue
       // so does a model set aside for refusing a request
       if (this.isRefused(model) && models.slice(i + 1).some((m) => !this.isRefused(m) && !this.retired.has(m.ref))) continue
+      // the prompt does not fit the model's context: skip it without a request, also when it is the last one (a silent cut is worse than an error)
+      if (model.context !== undefined && promptTokens > model.context) {
+        const message = `prompt is too long for ${model.ref}: about ${promptTokens} tokens, its context is ${model.context}`
+        yield { type: 'problem', model, kind: 'too-big', message }
+        lastError = new ProviderError(message, undefined, false)
+        failures.push(`${model.ref}: ${message}`)
+        continue
+      }
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
         const paid = isPaidModel(model)

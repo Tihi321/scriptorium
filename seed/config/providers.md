@@ -257,6 +257,7 @@ Strata (`D:\Strata`) is a fast local server with an OpenAI-style API. It is the 
 - Start the proxy with `PROXY_IGNORE_SAMPLING=1`: Scriptorium sends `temperature`, `max_tokens` and `stream_options`, which the proxy has to ignore.
 - It is text only: no vision.
 - `PROXY_TIMEOUT_MS` (5 minutes by default) must cover your longest request: a chapter can take a while.
+- The Antigravity agent keeps only about the first 192,000 characters of a prompt and drops the rest without an error. After Detect models, give each `antigravity/*` model `context: 45000` (estimated tokens, characters / 4): the engine then sends a longer prompt to the next model. The proxy (AAP-30) also refuses such prompts with HTTP 400 "prompt is too long".
 - Terms risk: driving Antigravity this way may break its terms of use. Read the section "Antigravity models and the ACP proxy" of the creative-hub ROADMAP before you rely on it.
 - A data folder that already exists gets the entry at the next start, once (before the `client` provider), without changing the entries, comments and order you have.
 

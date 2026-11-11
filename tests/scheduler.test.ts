@@ -2,10 +2,12 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { ProviderError, ServerDownError } from '../src/engine/models/types'
 import { emptyBrief } from '../src/shared/brief'
 import { parseMd } from '../src/shared/md'
 import type { EngineEvent } from '../src/shared/protocol'
+import { chatJson } from '../src/engine/pipeline/llm'
 import { writeMd } from '../src/engine/store/atomic'
 import { watchDataFolder } from '../src/engine/store/watcher'
 import { makeEnv, sleep, waitFor } from './helpers'
@@ -454,6 +456,110 @@ describe('agent controls and hot reload', () => {
     expect(env.events.some((e) => e.type === 'job.model' && e.model === 'b/y')).toBe(true)
   })
 
+  it('a model change during a JSON repair starts again from the original messages on the new model', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }],
+      roles: { writer: ['a/x'] },
+      agents: [{ role: 'writer', name: 'W' }]
+    })
+    const seen: { model: string; messages: { role: string; content: string }[]; schema: unknown }[] = []
+    env.mock.onAny((req) => {
+      seen.push({ model: req.model, messages: req.messages.map((m) => ({ role: m.role, content: m.content })), schema: req.schema })
+      if (req.model === 'y') return '{"a": 1}'
+      return req.messages.length === 1 ? 'not json' : { text: 'slow '.repeat(40), chunkDelayMs: 50, chunks: 40 }
+    })
+    env.engine.scheduler.register('t', async (ctx) => {
+      const r = await chatJson(ctx, [{ role: 'user', content: 'give a' }], z.object({ a: z.number() }))
+      return { result: `a=${r.value.a}` }
+    })
+    await env.engine.jobs.enqueue({ id: 'j1', task: 't', role: 'writer' })
+    await waitFor(() => seen.length === 2 && env!.events.filter((e) => e.type === 'job.token').length > 1, 5000, 'repair streaming')
+    await env.engine.handleCommand({ type: 'setModel', agent: 'writer-w', model: 'b/y' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'done on the new model')
+    const done = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'j1.md'), 'utf8'))
+    expect(done.body).toContain('a=1')
+    expect(done.data.attempts).toBe(0) // first attempt: the repair is not re-sent to the old model, which is still in the new list [b/y, a/x]
+    expect(seen.map((c) => c.model)).toEqual(['x', 'x', 'y'])
+    const onY = seen.filter((c) => c.model === 'y')
+    expect(seen.slice(0, 2).map((c) => c.model)).toEqual(['x', 'x'])
+    expect(onY).toHaveLength(1)
+    expect(onY[0]!.messages).toEqual([{ role: 'user', content: 'give a' }]) // not the old reply
+    expect(onY[0]!.schema).toBeTruthy()
+  })
+
+  it('a model change during a restarted JSON request (after the repair fell back) goes to the new model, not back to the narrowed one', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }, { id: 'c', local: true, models: ['z'] }],
+      roles: { writer: ['a/x', 'b/y'] },
+      agents: [{ role: 'writer', name: 'W' }]
+    })
+    const seen: { model: string; messages: { role: string; content: string }[] }[] = []
+    env.mock.onAny((req) => {
+      seen.push({ model: req.model, messages: req.messages.map((m) => ({ role: m.role, content: m.content })) })
+      if (req.model === 'z') return '{"a": 1}'
+      if (req.model === 'y') return { text: 'slow '.repeat(40), chunkDelayMs: 50, chunks: 40 }
+      if (req.messages.length === 1) return 'not json'
+      throw new ProviderError('HTTP 500: boom', 500, false)
+    })
+    env.engine.scheduler.register('t', async (ctx) => {
+      const r = await chatJson(ctx, [{ role: 'user', content: 'give a' }], z.object({ a: z.number() }))
+      return { result: `a=${r.value.a}` }
+    })
+    await env.engine.jobs.enqueue({ id: 'j1', task: 't', role: 'writer' })
+    await waitFor(() => seen.length === 3 && env!.events.filter((e) => e.type === 'job.token').length > 1, 5000, 'restarted request streaming on y')
+    await env.engine.handleCommand({ type: 'setModel', agent: 'writer-w', model: 'c/z' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'done on z')
+    const done = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'j1.md'), 'utf8'))
+    expect(done.body).toContain('a=1')
+    const first = [{ role: 'user', content: 'give a' }]
+    expect(seen.map((c) => `${c.model}:${c.messages.length}`)).toEqual(['x:1', 'x:3', 'y:1', 'z:1'])
+    expect(seen[3]!.messages).toEqual(first)
+  })
+
+  it('a reload that keeps the model list during a JSON request after a fallback does not restart it', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'a', local: true, models: ['x'] }, { id: 'b', local: true, models: ['y'] }],
+      roles: { writer: ['a/x', 'b/y'] },
+      agents: [{ role: 'writer', name: 'W' }]
+    })
+    const seen: string[] = []
+    env.mock.onAny((req) => {
+      seen.push(`${req.model}:${req.messages.length}`)
+      if (req.model === 'x') throw new ProviderError('HTTP 500: boom', 500, false)
+      return req.messages.length === 1 ? { text: 'slow '.repeat(40), chunkDelayMs: 50, chunks: 40 } : '{"a": 1}'
+    })
+    env.engine.scheduler.register('t', async (ctx) => {
+      const r = await chatJson(ctx, [{ role: 'user', content: 'give a' }], z.object({ a: z.number() }))
+      return { result: `a=${r.value.a}` }
+    })
+    await env.engine.jobs.enqueue({ id: 'j1', task: 't', role: 'writer' })
+    await waitFor(() => seen.length === 2 && env!.events.filter((e) => e.type === 'job.token').length > 1, 5000, 'first ask streaming on y')
+    expect(env.engine.scheduler.changeModel()).toBe(0) // the list is unchanged: nothing is aborted
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'done')
+    const done = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'j1.md'), 'utf8'))
+    expect(done.body).toContain('a=1')
+    expect(done.data.attempts).toBe(0)
+    expect(seen).toEqual(['x:1', 'y:1', 'y:3']) // the repair goes to y, the first ask is not repeated
+  })
+
+  it('the JSON repair asks with the schema and carries the whole reply without reasoning', async () => {
+    env = await makeEnv({ roles: { writer: ['loc/m1'] }, agents: [{ role: 'writer', name: 'W' }] })
+    const prose = 'finding '.repeat(1500)
+    const seen: { messages: { role: string; content: string }[]; schema: unknown }[] = []
+    env.mock.onAny((req) => {
+      seen.push({ messages: req.messages.map((m) => ({ role: m.role, content: m.content })), schema: req.schema })
+      return req.messages.length === 1 ? `<think>${'r'.repeat(500)}</think>${prose}` : '{"a": 1}'
+    })
+    env.engine.scheduler.register('t', async (ctx) => {
+      const r = await chatJson(ctx, [{ role: 'user', content: 'give a' }], z.object({ a: z.number() }))
+      return { result: `a=${r.value.a}` }
+    })
+    await env.engine.jobs.enqueue({ id: 'j1', task: 't', role: 'writer' })
+    await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 5000, 'done')
+    expect(seen).toHaveLength(2)
+    expect(seen[1]!.schema).toBeTruthy()
+    expect(seen[1]!.messages[1]!.content).toBe(prose)
+  })
   it('fallback_shared gives every role the fallback rows in order, and off keeps each role its own', async () => {
     env = await makeEnv({
       providers: [{ id: 'api', price: 1, models: ['p', 'q'] }, { id: 'strata', local: true, models: ['s'] }, { id: 'lmstudio', local: true, models: ['l'] }],
