@@ -20,6 +20,7 @@ export const TYPE_GROUPS: { id: TypeGroup; label: string }[] = [
 /** The seed format ids (`seed/config/formats.md`). A disabled format has no FormatSummary, so the renderer keeps this table. */
 const FORMATS: Record<string, { group: TypeGroup; choices?: boolean }> = {
   'short-story': { group: 'stories' },
+  'linked-collection': { group: 'stories' },
   'chapter-book': { group: 'stories' },
   'middle-grade': { group: 'stories' },
   novella: { group: 'stories' },

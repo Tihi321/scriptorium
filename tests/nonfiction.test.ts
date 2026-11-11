@@ -360,6 +360,7 @@ describe('seed files of the non-fiction variant', () => {
   it('the formats, the gate and the prompt variants are in the seed', async () => {
     const root = path.resolve(__dirname, '..')
     const formats = (parseMd(await readFile(path.join(root, 'seed/config/formats.md'), 'utf8')).data.formats as Record<string, unknown>[]).map((f) => formatEntrySchema.parse(f))
+    expect(formats.find((f) => f.id === 'linked-collection')).toMatchObject({ kinds: ['fiction'], long: false, nonfiction: false, chapters: [8, 16], max_rounds: 1 })
     const nf = formats.filter((f) => f.nonfiction)
     expect(nf.map((f) => f.id).sort()).toEqual(['article', 'feature-article', 'idea-blink', 'nonfiction-kids', 'nonfiction-short', 'science-blink'])
     for (const f of nf) expect(f.long).toBe(false)
