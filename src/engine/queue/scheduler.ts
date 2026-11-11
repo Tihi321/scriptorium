@@ -8,7 +8,7 @@ import type { LogSession, LogWriter } from '../logs/logs'
 import { isPaidModel } from '../models/registry'
 import type { ModelInfo } from '../models/registry'
 import type { ModelRouter } from '../models/router'
-import { BudgetError, emptyUsage, isAbortError, ProviderError, ServerDownError } from '../models/types'
+import { BudgetError, emptyUsage, isAbortError, ModelSwitchedError, ProviderError, ServerDownError } from '../models/types'
 import type { ChatMessage, Usage } from '../models/types'
 import type { JobFile, JobStore, NewJob } from './jobs'
 
@@ -19,6 +19,10 @@ export interface ChatOptions {
   temperature?: number
   /** Instruction lines of the prompt that the answer must not repeat (`instructionLines`): a client answer that does is refused up front. */
   forbid?: string[]
+  /** Only this `provider/model` ref may answer (a JSON repair round); another model throws `ModelSwitchedError` before any request is sent. */
+  sameModel?: string
+  /** This request starts the job's model list at this ref (the whole list when the ref is not in it). */
+  fromModel?: string
 }
 
 export interface ChatResult {
@@ -547,11 +551,30 @@ export class Scheduler {
         let text = ''
         let result: ChatResult | undefined
         logAll(`### Output\n`)
+        const startAt = o.sameModel ?? o.fromModel
+        // sameModel/fromModel narrow only this request; the job-wide list and rj.first stay as they were
+        const narrow = (list: ModelInfo[]) => {
+          const at = startAt ? list.findIndex((m) => m.ref === startAt) : -1
+          return at > 0 ? list.slice(at) : list
+        }
+        let narrowed = true
+        let use = narrow(models)
         for (;;) {
           if (rj.modelChanged) {
             rj.modelChanged = false
             const next = this.modelsFor(rj)
-            if (next.length > 0) models = next
+            if (next.length > 0) {
+              // a repair needs the new first model itself: compare before narrowing, or the old model (still in the list) would be picked again.
+              // A sameModel/fromModel request is narrowed only until the first real model change: when the new first model differs from the list it ran on, it uses the new list unnarrowed.
+              // A reload that keeps the first model changes nothing for it; a sameModel request then throws only if its model left the list (use[0] check below)
+              if (next[0]?.ref !== models[0]?.ref) narrowed = false
+              models = next
+              use = narrowed ? narrow(next) : next
+            }
+          }
+          if (o.sameModel && use[0]?.ref !== o.sameModel) {
+            logAll(`_the repair round would go to ${use[0]?.ref}: the JSON request starts again from its first message_\n`)
+            throw new ModelSwitchedError(use[0]?.ref ?? '')
           }
           // a model change aborts only this request; stopping the job aborts it too
           const request = new AbortController()
@@ -562,7 +585,7 @@ export class Scheduler {
           rj.first = models[0]?.ref
           try {
             for await (const ev of this.d.router.chat(
-              models,
+              use,
               {
                 messages: o.messages,
                 schema: o.schema,
@@ -574,6 +597,10 @@ export class Scheduler {
               rj.held
             )) {
               if (ev.type === 'attempt') {
+                if (o.sameModel && ev.model.ref !== o.sameModel) {
+                  logAll(`\n_the repair round would go to ${ev.model.ref}: the JSON request starts again from its first message_\n`)
+                  throw new ModelSwitchedError(ev.model.ref)
+                }
                 text = ''
                 if (ev.model.ref !== (usedModels[usedModels.length - 1] ?? leased.ref)) {
                   emit({ type: 'job.model', jobId: j.id, agent: agent.id, model: ev.model.ref })
@@ -587,6 +614,7 @@ export class Scheduler {
                 rj.model = ev.model.ref
                 logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
               } else if (ev.type === 'problem') {
+                if (ev.kind === 'too-big') logAll(`\n_${ev.model.ref} too big: ${ev.message.slice(0, 300)}_\n`)
                 this.setProblem(rt, { kind: ev.kind, model: ev.model.ref, message: ev.message.slice(0, 300), at: this.now() })
               } else if (ev.type === 'delta') {
                 text += ev.text
