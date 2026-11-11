@@ -1,0 +1,11 @@
+## A-001 SCP-59 failed its 2nd re-check (N2). Another round, done, or dropped?
+- status: answered
+- asked: 2026-11-11 --:--
+- by: director
+- why: 2 polish rounds used. N1 is fixed (743 tests). N2 (low-medium): a hot reload that keeps the model list, landing while a fallback model writes the first reply, makes the repair round throw ModelSwitchedError and repeat the first ask (scheduler.ts:563-577). Bounded by MAX_RESTARTS. Comes from the round-1 B1 fix, not a round-2 regression.
+- options:
+  - one more targeted round for N2
+  - done as is, with N2 as a follow-up
+  - dropped
+- default: none given; SCP-59 waits for the answer
+- answer: "One more round for N2" (user, 2026-11-11 --:--)
