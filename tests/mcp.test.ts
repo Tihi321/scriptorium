@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import JSZip from 'jszip'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadMcpConfig, startMcpServer } from '../src/engine/mcp/server'
 import type { McpHandle } from '../src/engine/mcp/server'
@@ -75,7 +76,7 @@ describe('MCP server', () => {
     const h = await start()
     const c = await connect(h.url)
     const names = (await c.listTools()).tools.map((t) => t.name)
-    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'set_factory_only', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'get_screenplay', 'build_vn_pack', 'get_vn_pack', 'refresh_factbase']) {
+    for (const n of ['factory_status', 'list_books', 'get_book', 'read_book_file', 'list_stories', 'get_story', 'add_story', 'update_story', 'list_series', 'get_series', 'add_series', 'update_series', 'adapt_book', 'add_book_note', 'set_factory_paused', 'set_factory_only', 'set_book_byline', 'hire_agent', 'set_model', 'assign_agent', 'retry_book', 'reopen_book', 'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'wait_for_book', 'get_script', 'get_screenplay', 'build_vn_pack', 'get_vn_pack', 'refresh_factbase']) {
       expect(names).toContain(n)
     }
     for (const n of ['set_secret', 'send_to_kindle', 'save_settings', 'stop_now', 'detect_models']) expect(names).not.toContain(n)
@@ -459,6 +460,32 @@ describe('MCP client tasks and reopen_book', () => {
 })
 
 describe('MCP book models', () => {
+  it('a byline is kept in the story, and set_book_byline changes a book and its EPUB without touching the writer credit', async () => {
+    env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }], roles: { writer: ['loc/m1'] }, paused: true })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    await call(c, 'add_story', { title: 'The Rooster', premise: 'A rooster.', byline: ' Ivan Owner ' })
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-rooster.md'), 'utf8')).data.byline).toBe('Ivan Owner')
+    expect((await call(c, 'get_story', { story: 'the-rooster' })).data.brief.byline).toBe('Ivan Owner')
+    await call(c, 'update_story', { story: 'the-rooster', byline: '' })
+    expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'the-rooster.md'), 'utf8')).data.byline).toBeUndefined()
+
+    await makeBook(env, 'done-book', 'published')
+    await env.engine.books.update('done-book', () => ({ author: 'Culo', writer_agent: 'writer-culo' }))
+    const set = await call(c, 'set_book_byline', { book: 'done-book', byline: 'Ivan Owner' })
+    expect(set.isError).toBe(false)
+    expect(set.data.author).toBe('Ivan Owner')
+    const stored = (await env.engine.books.read('done-book'))!.data
+    expect(stored).toMatchObject({ byline: 'Ivan Owner', author: 'Culo' })
+    expect(await readFile(path.join(env.dir, 'books', 'done-book', 'out', 'cover.html'), 'utf8')).toContain('Ivan Owner')
+    const zip = await JSZip.loadAsync(await readFile(path.join(env.dir, 'books', 'done-book', 'out', 'done-book.epub')))
+    expect(await zip.file('OEBPS/content.opf')!.async('string')).toContain('<dc:creator id="creator">Ivan Owner</dc:creator>')
+    expect(await zip.file('OEBPS/title.xhtml')!.async('string')).toContain('Written by an AI writer (Culo)')
+    expect((await call(c, 'set_book_byline', { book: 'done-book', byline: '' })).data.author).toBe('Culo')
+    expect((await env.engine.books.read('done-book'))!.data.byline).toBeUndefined()
+    expect((await call(c, 'set_book_byline', { book: 'nobody', byline: 'X' })).isError).toBe(true)
+  })
+
   it('add_story with models is stored in the story, set_book_model checks its input, and a model can be removed', async () => {
     env = await makeEnv({ providers: [{ id: 'loc', local: true, models: ['m1'] }, { id: 'client', kind: 'client', models: ['claude-code'] }], roles: { writer: ['loc/m1'] }, paused: true })
     mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })

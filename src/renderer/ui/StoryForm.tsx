@@ -15,6 +15,7 @@ function cleaned(b: StoryBrief): StoryBrief {
     format: b.format || undefined,
     topic: b.topic || undefined,
     genre: b.genre?.trim() || undefined,
+    byline: b.byline?.trim() || undefined,
     series: b.series || undefined,
     seriesIndex: b.series ? b.seriesIndex : undefined
   }
@@ -152,6 +153,7 @@ export function StoryForm() {
             </select>
           </div>
           <input style={full} value={brief.genre ?? ''} placeholder="Genre" data-testid="story-genre" onChange={(e) => set({ genre: e.target.value })} />
+          <input style={full} value={brief.byline ?? ''} placeholder="Byline: the author name on the cover (empty: the default in settings, else the writer's name)" data-testid="story-byline" onChange={(e) => set({ byline: e.target.value })} />
           <textarea style={full} rows={3} value={brief.premise} placeholder="Premise: what the story is about" data-testid="story-premise" onChange={(e) => set({ premise: e.target.value })} />
           <textarea style={full} rows={3} value={brief.plot} placeholder="Plot: what happens" data-testid="story-plot" onChange={(e) => set({ plot: e.target.value })} />
           {brief.characters.map((c, n) => (

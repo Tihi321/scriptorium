@@ -43,6 +43,8 @@ export interface StoryBrief {
   sourceBook?: string
   /** `false`: the book gets no humanizer pass (frontmatter `humanize: false`). Unset: the format decides. */
   humanize?: boolean
+  /** The name shown as the author of the book made from this story (frontmatter `byline`, copied to book.md). Unset: the default of settings.md, else the writer's pen name. */
+  byline?: string
   /** The puzzles of a mystery with puzzles (frontmatter `puzzles`): VN Studio's puzzle cores with names and canonical clue sentences. Not part of the text. */
   puzzles?: PuzzleEntry[]
 }
@@ -162,6 +164,8 @@ export function briefOf(data: Record<string, unknown>, body: string): StoryBrief
   if (topic) brief.topic = topic
   if (genre) brief.genre = genre
   if (data.humanize === false) brief.humanize = false
+  const byline = str(data.byline)
+  if (byline) brief.byline = byline
   const sourceBook = str(data.source_book)
   if (sourceBook) brief.sourceBook = sourceBook
   const puzzles = parsePuzzleEntries(data.puzzles)

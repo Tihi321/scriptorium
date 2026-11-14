@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { parseMd } from '../../shared/md'
+import { displayAuthor } from '../../shared/byline'
 import { COVER_HEIGHT, COVER_WIDTH, genreClass, writeCoverHtml } from '../publish/cover'
 import type { Scheduler } from '../queue/scheduler'
 import { advance, chaptersToRewrite, needsResearch, reviewersFor, TERMINAL_STAGES, THREAD_CHECK } from './advance'
@@ -624,7 +625,7 @@ export class Pipeline {
     }
     await writeCoverHtml(this.o.dataDir, slug, {
       title: d.title,
-      author: d.author ?? 'Unknown',
+      author: displayAuthor(d) ?? 'Unknown',
       genre: d.topic_name ?? d.genre,
       year: Number(d.year ?? new Date().getFullYear()),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : genreClass({ topicName: d.topic_name, format: d.format })

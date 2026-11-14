@@ -275,6 +275,8 @@ export const settingsSchema = configBase('settings').extend({
   smtp_port: z.number().int().default(587),
   smtp_user: z.string().default(''),
   smtp_secure: z.boolean().default(false),
+  /** SCP-60: the author name every new book shows (cover, EPUB), unless its story sets its own `byline`. Empty: the writer agent's pen name. */
+  byline: z.string().default(''),
   /**
    * The fallback list (SCP-19): `provider/model` refs, first row first, at least one. A row's kind comes from its provider (`paid` for an API
    * provider, otherwise the provider's id). A kind name in roles.md (`paid`, `strata`, `lmstudio`, `client` ...) stands for the first row of
@@ -352,6 +354,8 @@ export const ideaSchema = z.looseObject({
   series_index: z.number().int().positive().optional(),
   /** `false`: the book made from this story gets no humanizer pass. */
   humanize: z.boolean().optional(),
+  /** The name the book made from this story shows as its author (SCP-60). Missing: the default of settings.md, else the writer's pen name. */
+  byline: z.string().optional(),
   /** Slug of a published book this story adapts (a visual novel script of a prose book). The story waits until that book is published. */
   source_book: z.string().optional(),
   /** The puzzle cores of a mystery with puzzles (see src/shared/puzzles.ts), handed over by the hub. */
@@ -392,6 +396,8 @@ export const bookSchema = z.looseObject({
   standfirst: z.string().optional(),
   /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
   humanize: z.boolean().optional(),
+  /** SCP-60: the name shown as the author on the cover, in the EPUB and on the title page (`set_book_byline`). `author` stays the writer agent's pen name, kept in the credits line. Empty or missing: `author` is shown. */
+  byline: z.string().optional(),
   /** The year the story is set in: the architect's outline sets it, you may set it by hand. The reviewers get the calendar of that year. `null`: the architect said the story has no fixed year (nothing is guessed from the texts); missing: an older book. */
   story_year: z.number().int().nullable().optional(),
   age_band: z.string().nullable().default(null),

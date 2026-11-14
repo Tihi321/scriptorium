@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { emptyBrief } from '../shared/brief'
+import { displayAuthor } from '../shared/byline'
 import type { StoryBrief } from '../shared/brief'
 import type { Command, EngineEvent, IdeaSummary, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
 import { parseMdWith } from '../shared/md'
@@ -201,6 +202,7 @@ export class Engine {
       contextTokens: (role) => this.router.candidates(role)[0]?.context,
       getFormats: () => this.formats,
       getFactory: () => this.factory,
+      getByline: () => this.settings.byline,
       emit: this.emit,
       log: this.log,
       coverRenderer: !!opts.coverRenderer,
@@ -722,6 +724,23 @@ export class Engine {
     this.scheduler.kick()
   }
 
+  /**
+   * SCP-60: sets (or, empty, removes) the name a book shows as its author. A published book's cover, EPUB and reader are made again
+   * (`remakeCover`: the old cover PNG goes, the EPUB is rebuilt now and again when the new PNG is drawn); a book in progress uses it at its publish.
+   */
+  private async setBookByline(book: string, byline: string): Promise<void> {
+    const b = await this.books.read(book)
+    if (!b) return this.log(`setBookByline: no book "${book}"`)
+    const clean = byline.replace(/s+/g, ' ').trim().slice(0, 200)
+    await this.books.update(book, (data) => {
+      if (clean) return { byline: clean }
+      delete data.byline
+    })
+    this.log(`book ${book}: byline ${clean ? `"${clean}"` : 'removed'}`)
+    if (b.data.stage === 'published') await this.pipeline.remakeCover(book)
+    await this.emitBookUpdated(book)
+  }
+
   /** A published or rejected book has no more jobs: its assigned agents go back to taking any job. */
   private async releasePins(book: string): Promise<void> {
     for (const def of this.agents.list()) {
@@ -1080,7 +1099,7 @@ export class Engine {
     if (!(await fs.access(epubPath).then(() => true, () => false))) return fail(gamebook ? 'this book has no gamebook EPUB yet (build it first)' : 'this book has no EPUB yet')
     try {
       const transport = (this.opts.mailTransport ?? smtpTransport)(s, resolveKey('SCRIPTORIUM_SMTP_PASSWORD'))
-      await sendEpub(transport, s, { title: book.data.title, author: book.data.author ?? 'Unknown', slug: gamebook ? `${slug}-gamebook` : slug, epubPath })
+      await sendEpub(transport, s, { title: book.data.title, author: displayAuthor(book.data) ?? 'Unknown', slug: gamebook ? `${slug}-gamebook` : slug, epubPath })
       this.log(`sent ${slug} to ${s.kindleAddress}`)
       this.emit({ type: 'kindle.sent', book: slug, ok: true })
     } catch (err) {
@@ -1213,6 +1232,8 @@ export class Engine {
         return
       case 'setBookModel':
         return this.setBookModel(cmd.book, cmd.role, cmd.model)
+      case 'setBookByline':
+        return this.setBookByline(cmd.book, cmd.byline)
       case 'reopenBook':
         await this.reopenBook(cmd.book, cmd.mode, cmd.chapters)
         return

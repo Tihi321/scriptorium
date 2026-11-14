@@ -6,6 +6,7 @@ smtp_host: ""
 smtp_port: 587
 smtp_user: ""
 smtp_secure: false
+byline: ""
 fallbacks:
   - deepseek/deepseek-flash
   - strata/default
@@ -24,6 +25,10 @@ Sending books to your Kindle by email.
 - `from_address`: the sender address. It must be on the approved list in your Amazon account (Content & Devices, Preferences, Personal Document Settings).
 - `smtp_host`, `smtp_port`, `smtp_user`, `smtp_secure`: your mail server. `smtp_secure: true` for port 465, `false` for 587 with STARTTLS.
 - The password is not stored here. Enter it in the app's settings, which keeps it in the Windows credential store (account `SCRIPTORIUM_SMTP_PASSWORD`). The environment variable of the same name also works.
+
+## Byline
+
+- `byline`: the author name every new book shows on its cover, in its EPUB (`dc:creator`) and on its title page, unless its story sets its own (`add_story {byline}`, `update_story`, the Byline field of the story form) or the book is changed later (`set_book_byline`). Empty (the default): the writer agent's pen name, as before. The credits line ("Written by an AI writer (<agent>) and edited by AI reviewers") always names the agent. The byline is copied into the book's `book.md` when the book starts, so changing it here does not touch books that already started.
 
 ## Default models
 

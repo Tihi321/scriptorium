@@ -417,6 +417,7 @@ export type Command =
   /** Gives a rejected book one more round: `rewrite` (the given chapters, or the ones the reviews name, then reviewed again) or `review` (reviewed again, no rewrite). Then the publisher decides again. */
   /** Sets (or with `model: null` removes) the model one book uses for a role (`role_models` in book.md). Its jobs of that role try it first. */
   | { type: 'setBookModel'; book: string; role: string; model: string | null }
+  | { type: 'setBookByline'; book: string; byline: string }
   | { type: 'reopenBook'; book: string; mode: 'rewrite' | 'review'; chapters?: number[] }
   /** Draws a published book's cover again from templates/cover.html and book.md, then rebuilds the EPUB. Answers with `book.updated`. */
   | { type: 'regenerateCover'; book: string }
@@ -529,6 +530,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   retryBook: true,
   reopenBook: true,
   setBookModel: true,
+  setBookByline: true,
   regenerateCover: true,
   renameBook: true
 }
