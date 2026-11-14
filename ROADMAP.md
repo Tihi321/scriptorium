@@ -83,3 +83,7 @@ Found on the VN adaptation `the-local-patch-2` (hub run log `runs/the-local-patc
 ## Open: deferred from the REQ-0004 checks (2026-11-09)
 
 - **`candidateFacts` matches source-excerpt lines.** The lines under "## Source excerpts" in a normal note (verbatim, up to 500 characters) still match `candidateFacts` (`src/engine/research/notes.ts`, `src/engine/pipeline/nfcontext.ts`). Pre-existing, no harm seen. Decide whether `candidateFacts` should skip excerpt lines. From SCP-56 `discoveries.md` item 4, deferred in SCP-58.
+
+## Open: found by the hub's *The Rooster* run (2026-11-14)
+
+- **SCP-59: the byline is the writer persona.** The cover, `book.md` `author` and the EPUB credit the agent's name ("Culo") as the author of a book whose idea, brief and plot came from the owner. Add a per-book `byline` (story brief / `add_story {byline}` / `update_story`, defaulting to a setting in `config/settings.md`), used on the cover and in the EPUB metadata, and keep the agent names in the credits page only.
