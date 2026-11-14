@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { briefOf, isEmptyBrief } from '../../shared/brief'
+import { displayAuthor } from '../../shared/byline'
 import type { StoryBrief } from '../../shared/brief'
 import { parseMd, parseMdWith } from '../../shared/md'
 import { bookSchema } from '../../shared/schemas'
@@ -403,7 +404,7 @@ export class BookStore {
       headline: d.headline?.trim() || d.title,
       standfirst: d.standfirst?.trim() ?? '',
       section: d.topic_name ?? '',
-      byline: d.author ?? '',
+      byline: displayAuthor(d) ?? '',
       date: Number.isNaN(published.getTime()) ? new Date() : published,
       body,
       sources
@@ -432,7 +433,8 @@ export class BookStore {
     const dir = this.file(slug, 'out', 'reader')
     await writeReaderDir(dir, {
       title: d.title,
-      author: d.author ?? 'Unknown',
+      author: displayAuthor(d) ?? 'Unknown',
+      writer: d.author ?? undefined,
       blurb: typeof d.blurb === 'string' ? d.blurb : undefined,
       year: Number(d.year ?? new Date().getFullYear()),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
@@ -463,7 +465,8 @@ export class BookStore {
     if (notes) extra.push({ title: 'Your notes', body: notes })
     await writeReaderDir(this.file(slug, 'out', 'draft'), {
       title: d.title,
-      author: d.author ?? 'Unknown',
+      author: displayAuthor(d) ?? 'Unknown',
+      writer: d.author ?? undefined,
       blurb: `Draft: ${planned}, ${words} words. Stage: ${d.stage}${d.round ? `, round ${d.round}` : ''}.`,
       year: new Date().getFullYear(),
       genreClass: typeof d.genre_class === 'string' ? d.genre_class : undefined,
@@ -544,7 +547,8 @@ export class BookStore {
     }
     const bytes = await buildEpub({
       title: d.title,
-      author: d.author ?? 'Unknown',
+      author: displayAuthor(d) ?? 'Unknown',
+      writer: d.author ?? undefined,
       uuid,
       subject: d.topic_name ?? d.genre ?? 'Fiction',
       subjects: Array.isArray(d.subjects) ? (d.subjects as string[]) : [],
@@ -585,7 +589,7 @@ export class BookStore {
     const lang = opts.lang ?? (typeof d.language === 'string' ? d.language : typeof d.lang === 'string' ? d.lang : 'en')
     const bytes = await buildGamebookPdf({
       title: d.title,
-      author: d.author ?? undefined,
+      author: displayAuthor(d) ?? undefined,
       lang,
       sections: chapters.map((c, i) => {
         const l = links(c)

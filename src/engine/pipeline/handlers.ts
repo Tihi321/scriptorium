@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import type { EngineEvent } from '../../shared/protocol'
+import { displayAuthor } from '../../shared/byline'
 import type { FactoryConfig, FormatEntry, QualityConfig } from '../../shared/schemas'
 import { briefOf, briefPromptText } from '../../shared/brief'
 import { parseMd } from '../../shared/md'
@@ -107,6 +108,8 @@ export interface PipelineDeps {
   contextTokens(role: string): number | undefined
   getFormats(): FormatEntry[]
   getFactory(): FactoryConfig
+  /** The default byline of settings.md (SCP-60); empty: none. */
+  getByline?(): string
   /** The one idea the factory works on (`only` in factory.md), or undefined for all of them. */
   onlyIdea?: () => string | undefined
   emit(e: EngineEvent): void
@@ -554,6 +557,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     }
     const title = fixedTitle || r.value.title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     const slug = await d.books.freeSlug(title)
+    const byline = idea?.data.byline?.trim() || d.getByline?.().trim() || ''
     await d.books.create(
       slug,
       {
@@ -572,6 +576,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(fmt.puzzles ? { puzzles: true } : {}),
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
+        ...(byline ? { byline } : {}),
         target_words: target,
         ...(sourceWords ? { target_from_source_words: sourceWords } : {}),
         ...(idea && idea.data.role_models && typeof idea.data.role_models === 'object' ? { role_models: idea.data.role_models } : {}),
@@ -1246,7 +1251,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const { messages, version } = await buildMessages(d.dataDir, ctx, 'publisher', variant(fmt, 'publish'), {
       open_threads: openThreads.length ? openThreads.map((t) => `- ${t.id}: ${t.text} (opened in chapter ${t.opened})`).join('\n') : '(none)',
       title: book.title,
-      author: book.author ?? '',
+      author: displayAuthor(book) ?? '',
       pitch: (await d.books.pitch(slug)) ?? '',
       book_text: await d.books.fullText(slug),
       score: decision.score,
@@ -1334,7 +1339,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       open_threads: openThreads.map((t) => `${t.id}: ${t.text}`),
       genre_class: cls
     }))
-    await writeCoverHtml(d.dataDir, slug, { title, author: book.author ?? 'Unknown', genre: book.topic_name ?? book.genre, year, genreClass: cls })
+    await writeCoverHtml(d.dataDir, slug, { title, author: displayAuthor(book) ?? 'Unknown', genre: book.topic_name ?? book.genre, year, genreClass: cls })
     await made(slug, run)
     if (d.memory.ready()) {
       try {

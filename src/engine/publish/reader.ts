@@ -8,6 +8,8 @@ import type { PuzzleView } from './xhtml'
 export interface ReaderBook {
   title: string
   author: string
+  /** The writer agent's pen name for the credits line when `author` is a byline (SCP-60). Default: `author`. */
+  writer?: string
   blurb?: string
   year: number
   chapters: { title: string; body: string; script?: boolean; screenplay?: boolean; puzzles?: Record<string, PuzzleView>; characters?: string[]; choices?: { text: string; to: number }[]; ending?: string }[]
@@ -41,7 +43,7 @@ export async function writeReaderDir(dir: string, book: ReaderBook): Promise<voi
     'title.xhtml',
     xhtmlPage(
       book.title,
-      `<div class="titlepage"><h1>${escapeXml(book.title)}</h1><p class="author">${escapeXml(book.author)}</p>${book.blurb ? `<p>${escapeXml(book.blurb)}</p>` : ''}<p class="ai">Written by an AI writer (${escapeXml(book.author)}) and edited by AI reviewers, made with Scriptorium. ${book.year}.</p></div>`
+      `<div class="titlepage"><h1>${escapeXml(book.title)}</h1><p class="author">${escapeXml(book.author)}</p>${book.blurb ? `<p>${escapeXml(book.blurb)}</p>` : ''}<p class="ai">Written by an AI writer (${escapeXml(book.writer ?? book.author)}) and edited by AI reviewers, made with Scriptorium. ${book.year}.</p></div>`
     )
   )
   const single = book.chapters.length === 1

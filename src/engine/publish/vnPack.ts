@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { parseMd } from '../../shared/md'
 import { parsePuzzleEntries } from '../../shared/puzzles'
+import { displayAuthor } from '../../shared/byline'
 import type { PuzzleEntry } from '../../shared/puzzles'
 import type { BookStore, OutlineChapter } from '../pipeline/books'
 import { checkBranches, isBranching } from '../pipeline/branches'
@@ -928,7 +929,7 @@ export async function vnPackFromFolder(dir: string, opts: { puzzles?: PuzzleEntr
   const result = compileVnPack({
     slug: String(data.slug ?? path.basename(dir)),
     title: String(data.title ?? ''),
-    author: typeof data.author === 'string' ? data.author : '',
+    author: displayAuthor(data) ?? '',
     genre: String(data.genre ?? ''),
     format: String(data.format ?? ''),
     blurb: typeof data.blurb === 'string' ? data.blurb : '',

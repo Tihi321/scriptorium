@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { readReaderPages } from './publish/reader'
 import { briefOf } from '../shared/brief'
+import { displayAuthor } from '../shared/byline'
 import type { AgentSummary, BookSummary, FormatSummary, IdeaSummary, ModelSummary, ProviderSummary, SeriesSummary, ServerStatus, TopicSummary } from '../shared/protocol'
 import type { FormatEntry } from '../shared/schemas'
 import type { AgentDef } from './agents/agents'
@@ -90,7 +91,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
   return {
     slug,
     title: d.title,
-    author: d.author,
+    author: displayAuthor(d),
     topic: d.topic ? { id: d.topic, name: d.topic_name ?? topic?.topic ?? d.topic } : null,
     kind: topic?.kind ?? null,
     format: d.format,

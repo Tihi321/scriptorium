@@ -25,6 +25,8 @@ export interface EpubChapter {
 export interface EpubBook {
   title: string
   author: string
+  /** The writer agent's pen name, for the credits line when `author` is a byline (SCP-60). Default: `author`. */
+  writer?: string
   /** `urn:uuid:...` or a bare uuid. */
   uuid: string
   subject: string
@@ -140,7 +142,7 @@ export async function buildEpub(book: EpubBook): Promise<Uint8Array> {
       `<div class="titlepage">
 <h1>${escapeXml(book.title)}</h1>
 <p class="author">${escapeXml(book.author)}</p>
-<p class="ai">Written by an AI writer (${escapeXml(book.author)}) and edited by AI reviewers, made with Scriptorium. ${book.year}.</p>
+<p class="ai">Written by an AI writer (${escapeXml(book.writer ?? book.author)}) and edited by AI reviewers, made with Scriptorium. ${book.year}.</p>
 </div>`,
       { epubType: 'titlepage' }
     )

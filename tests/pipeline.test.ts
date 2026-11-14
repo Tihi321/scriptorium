@@ -488,6 +488,27 @@ describe('choosing what to write', () => {
     expect(parseMd(await readFile(path.join(env.dir, 'books', slug, 'brief.md'), 'utf8')).data.role_models).toEqual({ writer: 'w/writer-model' })
   }, 90000)
 
+  it('the byline default of settings.md is copied into book.md; the EPUB shows it, the credits line keeps the writer', async () => {
+    env = await makePipelineEnv({
+      activate: ['jfic-bedtime-and-dreams'],
+      format: 'bedtime-toddler',
+      beforeStart: async (dir) => {
+        const file = path.join(dir, 'config', 'settings.md')
+        const doc = parseMd(await readFile(file, 'utf8'))
+        await writeMd(file, { ...doc.data, byline: 'Ivan Owner' }, doc.body)
+      }
+    })
+    const slug = (await waitStage(env, 'published'))!
+    const { data } = await bookMd(env, slug)
+    expect(data.byline).toBe('Ivan Owner')
+    expect(data.author).not.toBe('Ivan Owner') // the pen name of the writer agent stays
+    const zip = await checkEpub(path.join(env.dir, 'books', slug, 'out', `${slug}.epub`), { chapters: 1, title: 'The Sleepy Fox', author: 'Ivan Owner' })
+    const title = await zip.file('OEBPS/title.xhtml')!.async('string')
+    expect(title).toContain('<p class="author">Ivan Owner</p>')
+    expect(title).toContain(`Written by an AI writer (${data.author})`)
+    expect(await readFile(path.join(env.dir, 'books', slug, 'out', 'cover.html'), 'utf8')).toContain('Ivan Owner')
+  }, 90000)
+
   it('your ideas are picked before generated ones', async () => {
     env = await makePipelineEnv({
       activate: ['jfic-bedtime-and-dreams'],

@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { briefOf, briefPromptText, emptyBrief, renderBrief } from '../../shared/brief'
+import { displayAuthor } from '../../shared/byline'
 import type { BriefCharacter, StoryBrief } from '../../shared/brief'
 import type { BookSummary } from '../../shared/protocol'
 import { ROLES } from '../../shared/schemas'
@@ -222,7 +223,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         if (from && (!b.publishedAt || Date.parse(b.publishedAt) < from)) continue
         rows.push({
           publishedAt: b.publishedAt,
-          row: { slug, headline: b.headline ?? b.title, standfirst: b.standfirst, section: b.topic?.name ?? null, sectionId: b.topic?.id ?? null, byline: b.author, publishedAt: b.publishedAt, stage: b.stage, words: b.words, score: b.score, page: b.articlePage, pagePath: abs(b.articlePage) }
+          row: { slug, headline: b.headline ?? b.title, standfirst: b.standfirst, section: b.topic?.name ?? null, sectionId: b.topic?.id ?? null, byline: displayAuthor(b) , publishedAt: b.publishedAt, stage: b.stage, words: b.words, score: b.score, page: b.articlePage, pagePath: abs(b.articlePage) }
         })
       }
       return rows.sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')).map((r) => r.row)
@@ -320,7 +321,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       return {
         slug,
         title: b!.data.title,
-        author: b!.data.author,
+        author: displayAuthor(b!.data),
         genre: b!.data.genre,
         format: b!.data.format,
         style: bible.style,
@@ -442,7 +443,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       return {
         slug,
         title: b!.data.title,
-        author: b!.data.author,
+        author: displayAuthor(b!.data),
         genre: b!.data.genre,
         format: b!.data.format,
         aspect: vertical ? '9:16' : '16:9',
@@ -566,11 +567,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
           .array(puzzleEntrySchema)
           .optional()
           .describe('A mystery with puzzles (format "mystery-puzzle-visual-novel"): the puzzles, each as VN Studio makes them (vno_puzzle_generate): {key, kind: "murdle", title?, core (the whole core), names (item id -> name in the story), text (clue id and "murder" -> the canonical sentence)}; for a testimony also {testimony: {witness, breaks: [{statement, evidence}], evidence: [{key, description}]}}. Scriptorium keeps them as bible/puzzles.md, the outline places each in a chapter and the writers plant the clues (docs/visual-novel.md "Puzzles")'),
+        byline: z.string().optional().describe('The name the book shows as its author on the cover, in the EPUB and on its title page (e.g. the owner). Left out: the byline default of config/settings.md, else the pen name of the writer agent. The agent stays named in the credits line'),
         models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; puzzles?: PuzzleEntry[]; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; byline?: string; puzzles?: PuzzleEntry[]; models?: Record<string, string> }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -589,6 +591,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.genre ? { genre: a.genre } : {}),
           ...(a.series ? { series: a.series } : {}),
           ...(a.humanize === false ? { humanize: false } : {}),
+          ...(a.byline?.trim() ? { byline: a.byline.trim() } : {}),
           ...(a.puzzles?.length ? { puzzles: a.puzzles } : {}),
           ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
         }
@@ -639,6 +642,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
         humanize: z.boolean().optional().describe('false: the humanizer skips this book; true: back to the default'),
+        byline: z.string().optional().describe('The name the book shows as its author; an empty string goes back to the default of config/settings.md (else the pen name of the writer)'),
         models: modelsSchema.optional().describe('Replaces the models of this story (role -> provider/model); {} clears them')
       }
     },
@@ -658,6 +662,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre?: string
         series?: string
         humanize?: boolean
+        byline?: string
         models?: Record<string, string>
       }) => {
         const idea = await needStory(a.story)
@@ -673,6 +678,10 @@ export function registerTools(server: McpServer, engine: Engine): void {
         }
         if (a.humanize === false) brief.humanize = false
         else if (a.humanize === true) delete brief.humanize
+        if (a.byline !== undefined) {
+          if (a.byline.trim()) brief.byline = a.byline.trim()
+          else delete brief.byline
+        }
         if (a.title !== undefined) brief.title = a.title.trim()
         if (a.premise !== undefined) brief.premise = a.premise
         if (a.plot !== undefined) brief.plot = a.plot
@@ -850,6 +859,21 @@ export function registerTools(server: McpServer, engine: Engine): void {
       const b = await engine.books.read(await needBook(slug))
       if (b?.data.stage !== 'failed') fail(`"${slug}" is not a failed book (stage: ${b?.data.stage})`)
       await engine.handleCommand({ type: 'retryBook', book: slug })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'set_book_byline',
+    {
+      description:
+        'Set the name ONE book shows as its author (its byline): on the cover, in book.md (`byline`; `author` stays the pen name of the writer agent), in the EPUB metadata (dc:creator) and title page, in the reader and the VN pack. The credits line ("Written by an AI writer (<agent>) ...") keeps the name of the agent. An empty string removes the byline: the pen name shows again. A published book gets its cover, EPUB and reader made again at once (the cover PNG is drawn by the app; headless it stays pending), a book still in progress uses the byline when it is published. Works for any book.',
+      inputSchema: { book: z.string(), byline: z.string().describe('The author name to show, or an empty string to remove it') },
+      annotations: WRITE
+    },
+    run(async ({ book: slug, byline }: { book: string; byline: string }) => {
+      await needBook(slug)
+      await engine.handleCommand({ type: 'setBookByline', book: slug, byline })
       return book(slug)
     })
   )
