@@ -86,4 +86,4 @@ Found on the VN adaptation `the-local-patch-2` (hub run log `runs/the-local-patc
 
 ## Open: found by the hub's *The Rooster* run (2026-11-14)
 
-- **SCP-59: the byline is the writer persona.** The cover, `book.md` `author` and the EPUB credit the agent's name ("Culo") as the author of a book whose idea, brief and plot came from the owner. Add a per-book `byline` (story brief / `add_story {byline}` / `update_story`, defaulting to a setting in `config/settings.md`), used on the cover and in the EPUB metadata, and keep the agent names in the credits page only.
+- **SCP-60: the byline is the writer persona.** The cover, `book.md` `author` and the EPUB credit the agent's name ("Culo") as the author of a book whose idea, brief and plot came from the owner. Add a per-book `byline` (story brief / `add_story {byline}` / `update_story`, defaulting to a setting in `config/settings.md`), used on the cover and in the EPUB metadata, and keep the agent names in the credits page only.
