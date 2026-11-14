@@ -731,7 +731,7 @@ export class Engine {
   private async setBookByline(book: string, byline: string): Promise<void> {
     const b = await this.books.read(book)
     if (!b) return this.log(`setBookByline: no book "${book}"`)
-    const clean = byline.replace(/s+/g, ' ').trim().slice(0, 200)
+    const clean = byline.replace(/\s+/g, ' ').trim().slice(0, 200)
     await this.books.update(book, (data) => {
       if (clean) return { byline: clean }
       delete data.byline
