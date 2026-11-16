@@ -1,0 +1,3 @@
+{"ts":"2026-11-16T10:40:00Z","actor":"director-scribe","type":"plan.approved","request":"creative-hub/REQ-0026","ticket":"SCP-62-fallback-and-quota-visibility","detail":"user approved the plan: build all four"}
+{"ts":"2026-11-16T11:30:00Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0026","ticket":"SCP-62-fallback-and-quota-visibility","detail":"PASS after fixing 3 gaps (round 2); last doc sentence checked by director"}
+{"ts":"2026-11-16T11:30:00Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0026","ticket":"SCP-62-fallback-and-quota-visibility","detail":"done on PASS; merge and push in progress"}

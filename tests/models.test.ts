@@ -15,6 +15,7 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
+import { readProxyExhausted } from '../src/engine/models/proxyHealth'
 import { ModelRouter, isDailyLimitError, isRefusedRequest, isRetiredModelError, isUsageLimitError, problemKind } from '../src/engine/models/router'
 import { BudgetError, collect, httpError, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
@@ -40,6 +41,15 @@ async function registryWith(o: Parameters<typeof writeTestConfig>[1], mock = new
 }
 
 describe('seed configs', () => {
+  it('on this machine (SCP-62): a local openai-compat provider except acp, unless on_device says otherwise', async () => {
+    const seed = new ModelRegistry(dir, { keys: () => undefined })
+    await seed.load()
+    const on = (r: ModelRegistry) => Object.fromEntries([...r.providers.values()].map((p) => [p.id, p.onDevice]))
+    expect(on(seed)).toMatchObject({ lmstudio: true, strata: true, ollama: true, acp: false, client: false, deepseek: false })
+    const { registry } = await registryWith({ providers: [{ id: 'x', local: true, onDevice: true, models: ['m'] }, { id: 'y', local: true, onDevice: false, models: ['m'] }, { id: 'z', local: true, models: ['m'] }] })
+    expect(on(registry)).toEqual({ x: true, y: false, z: false })
+  })
+
   it('providers.md and roles.md load, and every role model exists', async () => {
     const registry = new ModelRegistry(dir, { keys: () => undefined })
     await registry.load()
@@ -472,6 +482,32 @@ describe('router', () => {
     registry.getModel('acp/b')!.context = 100
     expect(await run()).toEqual(['too-big:acp/a', 'too-big:acp/b'])
     expect(seen).toEqual(['b', 'g']) // the loud fallback: the list is used up
+  })
+
+  it('the proxy\'s /healthz sets aside every model of an exhausted provider and gives them back; a real answer stays; a non-proxy answer is told apart from no answer (SCP-62)', async () => {
+    const future = new Date(Date.now() + 3_600_000).toISOString()
+    const health = (body: unknown) => (async () => new Response(typeof body === 'string' ? body : JSON.stringify(body))) as unknown as typeof fetch
+    const url = 'http://127.0.0.1:9/v1'
+    expect(await readProxyExhausted(url, health({ status: 'ok', providers: { codex: { active: 0, exhausted_until: future }, claude: { active: 0 } } }))).toEqual({ kind: 'ok', exhausted: { codex: future } })
+    expect(await readProxyExhausted(url, health({ providers: {} }))).toEqual({ kind: 'ok', exhausted: {} })
+    expect(await readProxyExhausted(url, health({ ok: true }))).toEqual({ kind: 'not-proxy' })
+    expect(await readProxyExhausted(url, health('<html>not the proxy</html>'))).toEqual({ kind: 'not-proxy' })
+    // a refused connection is not "not the proxy": the engine asks again later instead of giving up
+    expect(await readProxyExhausted(url, (async () => { throw new Error('refused') }) as unknown as typeof fetch)).toEqual({ kind: 'unreachable' })
+
+    const { registry } = await registryWith({ providers: [{ id: 'acp', models: ['codex/a', 'codex/b', 'claude/c'] }] })
+    const r = new ModelRouter(registry, undefined)
+    const model = (id: string) => registry.getModel(`acp/${id}`)!
+    const set: string[] = []
+    r.onModelLimited = (m) => set.push(m.ref)
+    for (const id of ['codex/a', 'codex/b']) r.setLimited(model(id), Date.parse(future), 'the ACP proxy reports codex used up', 'proxy')
+    r.setLimited(model('codex/a'), Date.parse(future), 'again', 'proxy')
+    expect(set).toEqual(['acp/codex/a', 'acp/codex/b']) // one event per model
+    expect(r.limitedModels().map((l) => l.model)).toEqual(['acp/codex/a', 'acp/codex/b']) // never acp/claude/*
+    r.setLimited(model('codex/b'), Date.parse(future), 'the provider said so', 'answer') // a real answer replaces the proxy entry
+    r.clearLimited('acp/codex/a', 'proxy')
+    r.clearLimited('acp/codex/b', 'proxy')
+    expect(r.limitedModels().map((l) => l.model)).toEqual(['acp/codex/b'])
   })
 
   it('a usage limit (the proxy 429 or Codex text) costs one request, sets only that model aside until the reset, and then it is back', async () => {

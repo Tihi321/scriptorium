@@ -78,10 +78,14 @@ interface RunningJob {
   request?: AbortController
   /** The first model of the list the request in flight was sent with. */
   first?: string
+  /** The model list the request in flight was sent with (the router may fall back to any of them). */
+  use?: ModelInfo[]
   /** The agent's or role's model changed: the job's next request builds its model list again. */
   modelChanged?: boolean
   /** The book's own models for the job's role (`role_models` in book.md), in order at the front of its model list. */
   bookModels?: string[]
+  /** The book (or story) forbids models on this machine outside `bookModels` (`no_local_fallback`, SCP-62). */
+  noLocalFallback?: boolean
 }
 
 interface AgentRuntime {
@@ -122,6 +126,8 @@ export interface SchedulerDeps {
   getBookModel?: (book: string, role: string) => Promise<string[] | undefined>
   /** The models a story sets for a role (`role_models` in ideas/<story>.md): for a job of no book yet, such as `start_book`. */
   getIdeaModel?: (idea: string, role: string) => Promise<string[] | undefined>
+  /** `no_local_fallback` of the job's book, else of its story (SCP-62): models on this machine outside the book's own list are never used for the job. */
+  getNoLocalFallback?: (book: string | null | undefined, idea: string | null | undefined) => Promise<boolean>
   /** A job of a book was answered by a model outside the book's list for its role (once per job and model): the engine records it in book.md. */
   onDeviation?: (book: string, d: ModelDeviation) => void | Promise<void>
 }
@@ -236,7 +242,29 @@ export class Scheduler {
   /** The models a running job may use now: the agent's own model (as its file says now), then its role's list. */
   private modelsFor(rj: RunningJob): ModelInfo[] {
     const def = this.d.agents.get(rj.agentId)
-    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family, bookModels: rj.bookModels })
+    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family, bookModels: rj.bookModels, noLocalFallback: rj.noLocalFallback })
+  }
+
+  /**
+   * A book's `no_local_fallback` was set or cleared (SCP-62). Its running jobs take the flag; when it is on, a job whose current model is on this
+   * machine and not in the book's list goes back to the queue (no attempt counted), else the jobs just rebuild their model list.
+   * A job whose in-flight request was sent with a model on this machine outside the book's list goes back to the queue too: that request could
+   * still fall back to it if its current model fails.
+   */
+  bookFallbackChanged(book: string, flag: boolean): number {
+    let n = 0
+    for (const rj of this.running.values()) {
+      if (rj.job.data.book !== book) continue
+      rj.noLocalFallback = flag
+      const m = this.d.router.registry.getModel(rj.model)
+      const own = (rj.bookModels ?? []).map((r) => this.d.router.registry.resolve(r) ?? r)
+      const local = (x: ModelInfo | undefined) => !!x?.provider.onDevice && !own.includes(x.ref)
+      if (flag && (local(m) || (rj.request && (rj.use ?? []).some(local)))) {
+        this.abort(rj, 'stop')
+        n++
+      }
+    }
+    return n + this.changeModel({ book })
   }
 
   /** A book's models for a role were set or cleared: its running jobs of that role switch (see `changeModel`). */
@@ -344,8 +372,9 @@ export class Scheduler {
         if (!agent) continue
         const rt = this.runtimeFor(agent.id)
         const bookModels = j.book ? await this.d.getBookModel?.(j.book, j.role) : j.idea ? await this.d.getIdeaModel?.(j.idea, j.role) : undefined
-        const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family, bookModels })
-        if (models.length === 0) {
+        const noLocal = (await this.d.getNoLocalFallback?.(j.book, j.idea)) === true
+        const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family, bookModels, noLocalFallback: noLocal })
+        if (models.length === 0 && !noLocal) {
           rt.errorUntil = t + 3000
           this.setState(rt, agent, 'error', 'no model available for this role')
           continue
@@ -356,6 +385,12 @@ export class Scheduler {
         let unusable = 0 // models skipped because they are down or used up for the day
         let otherSkips = false // a model skipped for its budget or because it is busy or rate-limited: the job just waits for it
         for (const m of models) {
+          if (router.isLimited(m)) {
+            // its usage limit is used up: like a server that is down, never send a request that answers 429 again
+            unusable++
+            reasons.push(`${m.ref}: ${router.setAsideReason(m)}`)
+            continue
+          }
           if (isPaidModel(m) && !budget.isExhausted(j.book).ok) {
             otherSkips = true
             continue // paid and over a cap: try the next (local) model
@@ -380,7 +415,9 @@ export class Scheduler {
         const lastResort = !chosen && !otherSkips && unusable === models.length ? router.registry.lastResort() : undefined
         if (lastResort && !models.some((m) => m.ref === lastResort.ref)) {
           const p = lastResort.provider
-          if (!router.usable(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
+          if (noLocal && p.onDevice && !(bookModels ?? []).some((r) => (router.registry.resolve(r) ?? r) === lastResort.ref)) reasons.push(`${lastResort.ref} (last resort): runs on this machine`)
+          else if (router.isLimited(lastResort)) reasons.push(`${lastResort.ref} (last resort): ${router.setAsideReason(lastResort)}`)
+          else if (!router.usable(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
           else if (isPaidModel(lastResort) && !budget.isExhausted(j.book).ok) reasons.push(`${lastResort.ref} (last resort): over budget`)
           else if (!router.limiter.hasCapacity(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
           else {
@@ -391,7 +428,11 @@ export class Scheduler {
           }
         }
         if (!chosen) {
-          if (reasons.length) {
+          if (noLocal && (reasons.length || models.length === 0)) {
+            const reason = `no local fallback: ${j.book ?? j.idea ?? 'this job'} uses no model on this machine outside its list; ${reasons.length ? reasons.join('; ') : `no other model of ${j.role} is configured`}`
+            if (!blocked.has(agent.id)) blocked.set(agent.id, reason)
+            blockedJobs.push({ job: job.id, role: j.role, agent: agent.id, reason })
+          } else if (reasons.length) {
             const reason = reasons.join('; ')
             if (!blocked.has(agent.id)) blocked.set(agent.id, reason)
             blockedJobs.push({ job: job.id, role: j.role, agent: agent.id, reason })
@@ -410,7 +451,7 @@ export class Scheduler {
           continue
         }
         for (const l of j.locks) this.locks.add(l)
-        this.launch(claimed, agent, launchWith.slice(launchWith.indexOf(chosen)), chosen, bookModels)
+        this.launch(claimed, agent, launchWith.slice(launchWith.indexOf(chosen)), chosen, bookModels, noLocal)
       }
     }
     this.blocked = blockedJobs
@@ -476,10 +517,10 @@ export class Scheduler {
 
   // ---- running a job ----
 
-  private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo, bookModels?: string[]): void {
+  private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo, bookModels?: string[], noLocalFallback?: boolean): void {
     const rt = this.runtimeFor(agent.id)
     const controller = new AbortController()
-    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref, bookModels }
+    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref, bookModels, noLocalFallback }
     this.running.set(job.id, rj)
     rt.running.set(job.id, rj)
     rj.done = this.run(rj, agent, models, leased).catch((err) => { console.error('[engine] job runner failed:', err) }).finally(() => {
@@ -620,6 +661,7 @@ export class Scheduler {
           if (rj.controller.signal.aborted) request.abort()
           rj.request = request
           rj.first = models[0]?.ref
+          rj.use = use
           try {
             for await (const ev of this.d.router.chat(
               use,
@@ -689,6 +731,7 @@ export class Scheduler {
           } finally {
             rj.controller.signal.removeEventListener('abort', onStop)
             rj.request = undefined
+            rj.use = undefined
           }
         }
         logAll('\n')
@@ -734,6 +777,16 @@ export class Scheduler {
         rt.waitUntil = this.now() + 30_000
         rt.waitNote = err.message.slice(0, 120)
         this.setState(rt, agent, 'waiting-provider', rt.waitNote, j)
+        emit({ type: 'job.done', jobId: j.id, agent: agent.id, ok: false, error: err.message })
+      } else if (err instanceof ProviderError && models.length > 0 && models.every((m) => this.d.router.isLimited(m))) {
+        // every model of the job is set aside for its usage limit: it waits for the earliest reset instead of burning attempts on 429s
+        const lim = this.d.router.limitedModels().filter((l) => models.some((m) => m.ref === l.model)).map((l) => Date.parse(l.until))
+        const until = Math.min(this.now() + 3_600_000, ...lim)
+        await jobs.requeue(j.id, { not_before: new Date(until).toISOString() })
+        const at = new Date(until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+        logAll(`### Result
+Waiting: every model of this job is set aside for its usage limit until ${at}. No attempt counted.
+`)
         emit({ type: 'job.done', jobId: j.id, agent: agent.id, ok: false, error: err.message })
       } else if (err instanceof BudgetError) {
         await jobs.requeue(j.id, { not_before: new Date(this.now() + 15_000).toISOString() })

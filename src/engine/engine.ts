@@ -3,7 +3,7 @@ import path from 'node:path'
 import { emptyBrief } from '../shared/brief'
 import { displayAuthor } from '../shared/byline'
 import type { StoryBrief } from '../shared/brief'
-import type { Command, EngineEvent, IdeaSummary, ModelDeviation, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
+import type { Command, EngineEvent, IdeaSummary, ModelDeviation, QuotaWarning, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
 import { parseMdWith } from '../shared/md'
 import { factorySchema, formatsSchema, qualitySchema, roleModelList, roleModelValueOf, ROLES, settingsSchema } from '../shared/schemas'
 import type { FactoryConfig, FormatEntry, QualityConfig, RoleModels, SettingsConfig } from '../shared/schemas'
@@ -18,6 +18,7 @@ import { ModelRegistry, guessFamily, modelDefaultsOf } from './models/registry'
 import type { ListedModel } from './models/openaiCompat'
 import type { RegistryOptions } from './models/registry'
 import { ModelRouter } from './models/router'
+import { isLoopbackUrl, readProxyExhausted } from './models/proxyHealth'
 import type { RouterOptions } from './models/router'
 import { JobStore } from './queue/jobs'
 import { Bible } from './memory/bible'
@@ -137,6 +138,7 @@ export class Engine {
       this.log(`models: ${p.id} used up its requests for today, jobs use the next model in their role until ${at}`)
       this.emit({ type: 'engine.warning', message: `${p.id} used up its requests for today: jobs use their next model until ${at}.` })
       void this.snapshot().then((s) => this.emit(s))
+      void this.emitQuota()
       this.scheduler.kick()
     }
     // a model the provider retired or does not know: say so once, with the provider's text; jobs use their next model from now on
@@ -156,6 +158,8 @@ export class Engine {
       const at = new Date(until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
       this.log(`models: ${m.ref} hit its usage limit until ${at}: jobs use the next model of their list until then. Provider said: ${message.slice(0, 300)}`)
       this.emit({ type: 'engine.warning', message: `${m.ref} hit its usage limit until ${at}: jobs use their next model until then.` })
+      void this.snapshot().then((s) => this.emit(s))
+      void this.emitQuota()
       this.scheduler.kick()
     }
     this.jobs = new JobStore(dir)
@@ -176,6 +180,7 @@ export class Engine {
       inScope: (job) => this.jobInScope(job),
       getBookModel: (book, role) => this.bookModel(book, role),
       getIdeaModel: (idea, role) => this.ideaModel(idea, role),
+      getNoLocalFallback: (book, idea) => this.noLocalFallback(book, idea),
       onDeviation: (book, d) => this.recordDeviation(book, d)
     })
     this.books = new BookStore(dir)
@@ -259,6 +264,7 @@ export class Engine {
 
   /** Asks `concurrency: auto` servers for their slot count; a higher count frees waiting requests at once. */
   private async syncSlots(): Promise<void> {
+    await this.syncProxyHealth()
     let changed
     const wasDown = new Map([...this.registry.providers.values()].map((p) => [p.id, p.down]))
     try {
@@ -285,6 +291,129 @@ export class Engine {
       if (changed.served.length && this.started) this.emit(await this.snapshot()) // the models list carries `served`
       this.scheduler.kick()
     }
+  }
+
+  /** Loopback providers whose `/healthz` answered, but not in the proxy's shape, this many times in a row (only such answers count; a proxy answer resets it): at 2 not asked again in this engine run. */
+  private readonly proxyMisses = new Map<string, number>()
+  /** Loopback providers whose `/healthz` did not answer (refused, timed out) or answered with a 5xx: not asked again before this time (ms), then asked again; never given up. */
+  private readonly proxyRetryAt = new Map<string, number>()
+  /** Provider id -> the models its proxy's `/healthz` set aside (SCP-62). */
+  private readonly proxySet = new Map<string, Set<string>>()
+
+  /**
+   * SCP-62 (4b): asks each OpenAI-compatible provider that is not on this machine and sits on a loopback address (the ACP proxy) for its `/healthz`,
+   * and sets aside every chat model of a proxy provider the proxy reports exhausted, until its `exhausted_until`. A provider that is no longer
+   * reported has its proxy-set models back; an entry from a real 429 stays until its own time.
+   */
+  private async syncProxyHealth(): Promise<void> {
+    for (const p of this.registry.providers.values()) {
+      if (!p.enabled || !p.available || p.kind !== 'openai-compat' || p.onDevice || !isLoopbackUrl(p.baseUrl)) continue
+      if ((this.proxyMisses.get(p.id) ?? 0) >= 2) continue
+      if ((this.proxyRetryAt.get(p.id) ?? 0) > Date.now()) continue
+      const health = await readProxyExhausted(p.baseUrl!)
+      if (health.kind === 'not-proxy') {
+        this.proxyMisses.set(p.id, (this.proxyMisses.get(p.id) ?? 0) + 1)
+        continue
+      }
+      if (health.kind === 'unreachable') {
+        // not started yet, or restarting (hub.ps1): ask again in a minute; its proxy-set entries stay until their own time
+        this.proxyRetryAt.set(p.id, Date.now() + 60_000)
+        continue
+      }
+      const exhausted = health.exhausted
+      this.proxyMisses.set(p.id, 0)
+      this.proxyRetryAt.delete(p.id)
+      const before = this.router.limitedModels().length
+      const set = new Set<string>()
+      for (const [proxyId, until] of Object.entries(exhausted)) {
+        const t = Date.parse(until)
+        if (t <= Date.now()) continue
+        for (const m of this.registry.models.values()) {
+          if (m.provider.id !== p.id || m.embedding || !m.id.startsWith(`${proxyId}/`)) continue
+          this.router.setLimited(m, t, `the ACP proxy reports ${proxyId} used up until ${until}`, 'proxy')
+          set.add(m.ref)
+        }
+      }
+      for (const ref of this.proxySet.get(p.id) ?? []) if (!set.has(ref)) this.router.clearLimited(ref, 'proxy')
+      this.proxySet.set(p.id, set)
+      if (this.started && this.router.limitedModels().length < before) {
+        this.scheduler.kick()
+        void this.snapshot().then((s) => this.emit(s))
+      }
+    }
+    if (this.started) await this.emitQuota()
+  }
+
+  private lastQuota = '[]'
+  private readonly quotaLogged = new Set<string>()
+
+  /** Sends `{type: 'quota'}` when the warnings changed, and writes one engine log line for a warning that newly names a book. */
+  private async emitQuota(): Promise<void> {
+    const warnings = await this.quotaWarnings()
+    const json = JSON.stringify(warnings)
+    if (json === this.lastQuota) return
+    this.lastQuota = json
+    for (const w of warnings) {
+      const key = `${w.kind}|${w.ref}|${w.books.join(',')}`
+      if (w.books.length && !this.quotaLogged.has(key)) {
+        this.quotaLogged.add(key)
+        this.log(`quota: ${w.detail} (books: ${w.books.join(', ')})`)
+      }
+    }
+    this.emit({ type: 'quota', warnings })
+  }
+
+  /**
+   * SCP-62: the quotas that are used up or nearly: a model set aside for a usage limit, a provider whose daily requests are used up, a provider at
+   * 80% of its `rpd`; each with the in-progress books whose queued or running jobs it serves (the model is in the book's list for the job's role,
+   * or is the role's first row; for the day kinds, any model of the provider). Subscription providers report no remaining quota: no early warning.
+   */
+  async quotaWarnings(): Promise<QuotaWarning[]> {
+    const local = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+    const dayEnd = this.router.limiter.dayResetsAt()
+    const raw: Omit<QuotaWarning, 'books'>[] = []
+    for (const l of this.router.limitedModels()) {
+      raw.push({ kind: 'usage-limit', ref: l.model, until: l.until, detail: `${l.model} is set aside for its usage limit until ${local(Date.parse(l.until))}` })
+    }
+    for (const p of this.registry.providers.values()) {
+      if (!p.available || p.kind === 'search' || p.kind === 'client') continue
+      const used = this.router.limiter.requestsToday(p.id)
+      if (this.router.limiter.dayFull(p)) {
+        raw.push({ kind: 'day-full', ref: p.id, until: new Date(dayEnd).toISOString(), detail: `${p.id} used up ${p.rpd ? `its ${p.rpd} requests` : 'its requests'} for today, until ${local(dayEnd)}` })
+      } else if (p.rpd && used >= 0.8 * p.rpd) {
+        raw.push({ kind: 'day-nearly-full', ref: p.id, until: new Date(dayEnd).toISOString(), detail: `${p.id} used ${used} of its ${p.rpd} requests today; the day starts again at ${local(dayEnd)}` })
+      }
+    }
+    if (raw.length === 0) return []
+    // the in-progress books and the models their queued and running jobs may use: the book's list for the role, else the role's first row
+    const open = new Map<string, boolean>()
+    const served = new Map<string, Set<string>>() // book -> refs
+    for (const state of ['queued', 'running'] as const) {
+      for (const job of await this.jobs.list(state)) {
+        const slug = job.data.book
+        if (!slug) continue
+        if (!open.has(slug)) {
+          const b = await this.books.read(slug)
+          open.set(slug, !!b && !TERMINAL_BOOK_STAGES.has(b.data.stage))
+        }
+        if (!open.get(slug)) continue
+        const refs = served.get(slug) ?? new Set<string>()
+        for (const r of (await this.bookModel(slug, job.data.role)) ?? []) refs.add(this.registry.resolve(r) ?? r)
+        const first = this.registry.roleModelRefs(job.data.role)[0]
+        if (first) refs.add(first)
+        served.set(slug, refs)
+      }
+    }
+    const order = { 'usage-limit': 0, 'day-full': 1, 'day-nearly-full': 2 }
+    return raw
+      .map((w) => ({
+        ...w,
+        books: [...served]
+          .filter(([, refs]) => [...refs].some((r) => (w.kind === 'usage-limit' ? r === w.ref : r.startsWith(`${w.ref}/`))))
+          .map(([slug]) => slug)
+          .sort()
+      }))
+      .sort((a, b) => order[a.kind] - order[b.kind] || a.ref.localeCompare(b.ref))
   }
 
   async stop(): Promise<void> {
@@ -678,10 +807,10 @@ export class Engine {
   }
 
   /** Book slug -> its `role_models` (each role as an ordered list), read from book.md and kept for a few seconds (the scheduler asks for every queued job on every tick). */
-  private bookModels = new Map<string, { at: number; models: Record<string, string[]> }>()
+  private bookModels = new Map<string, { at: number; models: Record<string, string[]>; noLocalFallback: boolean }>()
 
   /** Story slug -> its `role_models`, for the `start_book` job that makes the story's book (the book does not exist yet). */
-  private ideaModels = new Map<string, { at: number; models: Record<string, string[]> }>()
+  private ideaModels = new Map<string, { at: number; models: Record<string, string[]>; noLocalFallback: boolean }>()
 
   private static listsOf(raw: RoleModels | undefined): Record<string, string[]> {
     return Object.fromEntries(Object.entries(raw ?? {}).map(([role, v]) => [role, roleModelList(v)] as const))
@@ -690,7 +819,8 @@ export class Engine {
   private async ideaModel(idea: string, role: string): Promise<string[] | undefined> {
     let hit = this.ideaModels.get(idea)
     if (!hit || Date.now() - hit.at > 3000) {
-      hit = { at: Date.now(), models: Engine.listsOf((await this.ideas.list()).find((i) => i.slug === idea)?.data.role_models) }
+      const data = (await this.ideas.list()).find((i) => i.slug === idea)?.data
+      hit = { at: Date.now(), models: Engine.listsOf(data?.role_models), noLocalFallback: data?.no_local_fallback === true }
       this.ideaModels.set(idea, hit)
     }
     return hit.models[role]?.length ? hit.models[role] : undefined
@@ -699,10 +829,24 @@ export class Engine {
   private async bookModel(book: string, role: string): Promise<string[] | undefined> {
     let hit = this.bookModels.get(book)
     if (!hit || Date.now() - hit.at > 3000) {
-      hit = { at: Date.now(), models: Engine.listsOf((await this.books.read(book))?.data.role_models) }
+      const data = (await this.books.read(book))?.data
+      hit = { at: Date.now(), models: Engine.listsOf(data?.role_models), noLocalFallback: data?.no_local_fallback === true }
       this.bookModels.set(book, hit)
     }
     return hit.models[role]?.length ? hit.models[role] : undefined
+  }
+
+  /** SCP-62: `no_local_fallback` of the book, else of the story the job comes from (from the same caches as the book's models). */
+  private async noLocalFallback(book: string | null | undefined, idea: string | null | undefined): Promise<boolean> {
+    if (book) {
+      await this.bookModel(book, '')
+      return this.bookModels.get(book)?.noLocalFallback === true
+    }
+    if (idea) {
+      await this.ideaModel(idea, '')
+      return this.ideaModels.get(idea)?.noLocalFallback === true
+    }
+    return false
   }
 
   /**
@@ -713,7 +857,7 @@ export class Engine {
    */
   private contextTokens(role: string, book?: string | null, pick: 'first' | 'largest' = 'first'): number | undefined {
     const own = book ? this.bookModels.get(book)?.models[role] : undefined
-    const list = this.router.candidates(role, { bookModels: own?.length ? own : undefined })
+    const list = this.router.candidates(role, { bookModels: own?.length ? own : undefined, noLocalFallback: book ? this.bookModels.get(book)?.noLocalFallback === true : false })
     if (pick === 'largest' && list.length > 0) {
       // the models the job may use: the book's list when it has one, else every candidate. A model with no known window can take any prompt.
       const wanted = new Set((own ?? []).map((r) => this.registry.resolve(r) ?? r))
@@ -756,9 +900,27 @@ export class Engine {
     else delete next[role]
     await this.books.update(book, () => ({ role_models: next }))
     // refill the cache with the new map (the prompt window of a running job reads it at once)
-    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(next) })
+    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(next), noLocalFallback: this.bookModels.get(book)?.noLocalFallback ?? b.data.no_local_fallback === true })
     this.log(`book ${book}: ${role} ${list.length ? `uses ${list.join(', ')}` : 'back to its role list'}`)
     this.scheduler.bookModelChanged(book, role, list.length ? list : undefined)
+    await this.emitBookUpdated(book)
+    this.scheduler.kick()
+  }
+
+  /**
+   * SCP-62: allows or forbids models on this machine outside the book's own list for its jobs (`no_local_fallback` in book.md). A running job on such a
+   * model goes back to the queue; the others rebuild their model list.
+   */
+  private async setBookLocalFallback(book: string, flag: boolean): Promise<void> {
+    const b = await this.books.read(book)
+    if (!b) return this.log(`setBookLocalFallback: no book "${book}"`)
+    await this.books.update(book, (data) => {
+      if (flag) data.no_local_fallback = true
+      else delete data.no_local_fallback
+    })
+    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(b.data.role_models), noLocalFallback: flag })
+    this.log(`book ${book}: local fallback ${flag ? 'off' : 'on'}`)
+    this.scheduler.bookFallbackChanged(book, flag)
     await this.emitBookUpdated(book)
     this.scheduler.kick()
   }
@@ -1271,6 +1433,8 @@ export class Engine {
         return
       case 'setBookModel':
         return this.setBookModel(cmd.book, cmd.role, cmd.model)
+      case 'setBookLocalFallback':
+        return this.setBookLocalFallback(cmd.book, cmd.noLocalFallback)
       case 'setBookByline':
         return this.setBookByline(cmd.book, cmd.byline)
       case 'reopenBook':
@@ -1470,6 +1634,8 @@ export class Engine {
       providers: providerSummaries(this.registry, this.router.limiter),
       roleDefaults: roleDefaults(this.registry),
       servers: serverStatuses(this.registry),
+      limitedModels: this.router.limitedModels(),
+      quotaWarnings: await this.quotaWarnings(),
       spend: this.budget.snapshot(),
       running: this.scheduler.runningJobs(),
       settings: this.settingsSummary(),

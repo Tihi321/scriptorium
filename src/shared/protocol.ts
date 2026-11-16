@@ -72,6 +72,8 @@ export interface ProviderSummary {
   /** Send the JSON schema as `response_format`. */
   jsonSchema: boolean
   local: boolean
+  /** Runs on this machine (`on_device`, SCP-62): what `no_local_fallback` keeps out of a book's jobs. */
+  onDevice: boolean
   /** Switched on and usable (has a key, or is local). */
   available: boolean
   /** Why it isn't available: switched off, or no key. */
@@ -183,6 +185,8 @@ export interface BookSummary {
   reasons: string[]
   /** Jobs a shared fallback answered instead of the book's own models for a role, newest last (at most 20); empty when none. */
   modelDeviations: ModelDeviation[]
+  /** `no_local_fallback` in book.md: models on this machine outside the book's own list are never used for its jobs (SCP-62). */
+  noLocalFallback: boolean
   /** Who worked on it (from made.md): per agent, its role, finished jobs, the models it used and what it cost. */
   team: { agent: string; role: string; jobs: number; models: string[]; costUsd: number }[]
   /** The last finished jobs, newest first. */
@@ -304,6 +308,28 @@ export interface SettingsSummary {
 
 export type ModelSettingKey = 'fallbacks' | 'fallbackShared' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
 
+/** A model set aside for a used-up usage limit until `until` (SCP-61, shown in the Models panel by SCP-62). */
+export interface LimitedModel {
+  /** `provider/model`. */
+  model: string
+  /** When it comes back, ISO UTC. */
+  until: string
+  message: string
+}
+
+/** A quota that is used up or nearly (SCP-62): shown in the status bar, the book info and `factory_status.quotaWarnings`. */
+export interface QuotaWarning {
+  kind: 'usage-limit' | 'day-full' | 'day-nearly-full'
+  /** A `provider/model` ref for usage-limit, a provider id for the day kinds. */
+  ref: string
+  /** ISO UTC: the limit's reset, or the day's reset (midnight UTC). */
+  until: string
+  /** One line for people, times in the engine machine's local time. */
+  detail: string
+  /** In-progress book slugs whose jobs this serves, sorted; may be empty. */
+  books: string[]
+}
+
 export interface SnapshotEvent {
   type: 'snapshot'
   dataDir: string
@@ -325,6 +351,10 @@ export interface SnapshotEvent {
   /** Role -> `provider/model` of the role default (first in the role's list). */
   roleDefaults: Record<string, string>
   servers: ServerStatus[]
+  /** The models set aside for a usage limit now. A new limit sends a new snapshot. */
+  limitedModels: LimitedModel[]
+  /** Used-up and nearly used-up quotas, with the books they serve. */
+  quotaWarnings: QuotaWarning[]
   spend: { today: number; month: number; dailyCap: number; monthlyCap: number }
   running: { jobId: string; agent: string }[]
   settings: SettingsSummary
@@ -343,6 +373,8 @@ export type EngineEvent =
   | { type: 'pong'; id?: string; at: string }
   | SnapshotEvent
   | { type: 'engine.warning'; message: string }
+  /** The quota warnings changed (sent only then). */
+  | { type: 'quota'; warnings: QuotaWarning[] }
   /** Answer to `testCustomProvider`: `GET /models` of the address worked (`count` models) or failed (`error`). */
   | { type: 'provider.tested'; baseUrl: string; ok: boolean; count?: number; error?: string; at: string }
   /** `saveCustomProvider` or `removeCustomProvider` was refused (`error`), or went through (`id`). */
@@ -433,6 +465,7 @@ export type Command =
   /** Gives a rejected book one more round: `rewrite` (the given chapters, or the ones the reviews name, then reviewed again) or `review` (reviewed again, no rewrite). Then the publisher decides again. */
   /** Sets (or with `model: null` removes) the model, or the ordered list of models, one book uses for a role (`role_models` in book.md). Its jobs of that role try them first, in order. */
   | { type: 'setBookModel'; book: string; role: string; model: string | string[] | null }
+  | { type: 'setBookLocalFallback'; book: string; noLocalFallback: boolean }
   | { type: 'setBookByline'; book: string; byline: string }
   | { type: 'reopenBook'; book: string; mode: 'rewrite' | 'review'; chapters?: number[] }
   /** Draws a published book's cover again from templates/cover.html and book.md, then rebuilds the EPUB. Answers with `book.updated`. */
@@ -546,6 +579,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   retryBook: true,
   reopenBook: true,
   setBookModel: true,
+  setBookLocalFallback: true,
   setBookByline: true,
   regenerateCover: true,
   renameBook: true

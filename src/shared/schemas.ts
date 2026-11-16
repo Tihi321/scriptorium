@@ -86,6 +86,8 @@ export const providerEntrySchema = z.looseObject({
   price_per_request: z.number().nonnegative().default(0),
   /** `kind: search`, `engine: client`: minutes a web search task waits for an MCP client before the search gives up and the next provider is tried. Default 10. */
   wait_minutes: z.number().positive().optional(),
+  /** SCP-62: the provider runs on this machine (LM Studio, Strata, Ollama). Default: a local `openai-compat` provider except `acp`. A custom provider that is another proxy sets `false`. `no_local_fallback` books never use such a model outside their own list. */
+  on_device: z.boolean().optional(),
   rpm: z.number().int().positive().optional(),
   tpm: z.number().int().positive().optional(),
   /**
@@ -376,6 +378,8 @@ export const ideaSchema = z.looseObject({
   series_index: z.number().int().positive().optional(),
   /** `false`: the book made from this story gets no humanizer pass. */
   humanize: z.boolean().optional(),
+  /** `true`: the book made from this story never uses a model on this machine outside its own `role_models` list (SCP-62). */
+  no_local_fallback: z.boolean().optional(),
   /** The name the book made from this story shows as its author (SCP-60). Missing: the default of settings.md, else the writer's pen name. */
   byline: z.string().optional(),
   /** Slug of a published book this story adapts (a visual novel script of a prose book). The story waits until that book is published. */
@@ -418,6 +422,8 @@ export const bookSchema = z.looseObject({
   standfirst: z.string().optional(),
   /** `false`: no humanizer pass for this book (`add_story {humanize: false}`), whatever the format says. */
   humanize: z.boolean().optional(),
+  /** `true`: no model on this machine outside the book's `role_models` list is used for its jobs, nor as the last resort (SCP-62, `set_book_local_fallback`). Absent or `false`: off. */
+  no_local_fallback: z.boolean().optional(),
   /** SCP-60: the name shown as the author on the cover, in the EPUB and on the title page (`set_book_byline`). `author` stays the writer agent's pen name, kept in the credits line. Empty or missing: `author` is shown. */
   byline: z.string().optional(),
   /** The year the story is set in: the architect's outline sets it, you may set it by hand. The reviewers get the calendar of that year. `null`: the architect said the story has no fixed year (nothing is guessed from the texts); missing: an older book. */

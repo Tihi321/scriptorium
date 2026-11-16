@@ -170,11 +170,11 @@ export function installFakeEngine(params: URLSearchParams): void {
   type ProviderBase = Omit<ProviderSummary, 'name' | 'custom' | 'enabled' | 'hasKey' | 'jsonSchema'> & Partial<Pick<ProviderSummary, 'name' | 'custom' | 'enabled' | 'hasKey' | 'jsonSchema'>>
   const withDefaults = (p: ProviderBase): ProviderSummary => ({ name: p.id, custom: false, enabled: p.available, hasKey: false, jsonSchema: true, ...p })
   const PROVIDERS: ProviderSummary[] = ([
-    { id: 'deepseek', kind: 'openai-compat', local: false, available: true, canList: true, ...limits(8, { requestsToday: 214 }) },
-    { id: 'openrouter', kind: 'openai-compat', local: false, available: true, canList: true, ...limits(4, { rpm: 20, rpd: 50, requestsToday: 37 }) },
-    { id: 'anthropic', kind: 'anthropic', local: false, available: false, reason: 'no key (set ANTHROPIC_API_KEY or run: npm run key:set ANTHROPIC_API_KEY)', canList: false, ...limits(4) },
-    { id: 'lmstudio', kind: 'openai-compat', local: true, available: true, canList: true, ...limits(4, { concurrencyAuto: true }) },
-    { id: 'strata', kind: 'openai-compat', local: true, available: true, canList: true, ...limits(4, { concurrencyAuto: true }) }
+    { id: 'deepseek', kind: 'openai-compat', local: false, onDevice: false, available: true, canList: true, ...limits(8, { requestsToday: 214 }) },
+    { id: 'openrouter', kind: 'openai-compat', local: false, onDevice: false, available: true, canList: true, ...limits(4, { rpm: 20, rpd: 50, requestsToday: 37 }) },
+    { id: 'anthropic', kind: 'anthropic', local: false, onDevice: false, available: false, reason: 'no key (set ANTHROPIC_API_KEY or run: npm run key:set ANTHROPIC_API_KEY)', canList: false, ...limits(4) },
+    { id: 'lmstudio', kind: 'openai-compat', local: true, onDevice: true, available: true, canList: true, ...limits(4, { concurrencyAuto: true }) },
+    { id: 'strata', kind: 'openai-compat', local: true, onDevice: true, available: true, canList: true, ...limits(4, { concurrencyAuto: true }) }
   ] as ProviderBase[]).map(withDefaults)
   /** What the demo providers list in the Models dialog. */
   const CATALOG: Record<string, CatalogModel[]> = {
@@ -239,6 +239,8 @@ export function installFakeEngine(params: URLSearchParams): void {
     settings,
     secretsSet: [...secretsSet],
     keyNames: ['DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', ...PROVIDERS.filter((p) => p.custom && p.hasKey).map((p) => `CUSTOM_${p.id.toUpperCase().replace(/-/g, '_')}_API_KEY`)],
+    limitedModels: [],
+    quotaWarnings: [],
     mcp: { url: 'http://127.0.0.1:7341/mcp' },
     at: new Date().toISOString()
   })
@@ -636,6 +638,7 @@ export function installFakeEngine(params: URLSearchParams): void {
             hasKey: !!command.apiKey || !!PROVIDERS.find((x) => x.id === id)?.hasKey,
             jsonSchema: command.jsonSchema,
             local: command.free,
+            onDevice: command.free,
             available: command.enabled,
             canList: true,
             ...limits(command.concurrency === 'auto' ? 1 : command.concurrency, { concurrencyAuto: command.concurrency === 'auto' })

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { sendCommand } from '../api'
-import { useOffice } from '../store/hooks'
-import { providerLabel } from '../store/model'
+import { useNow, useOffice } from '../store/hooks'
+import { limitedLines, providerLabel } from '../store/model'
 import { officeStore } from '../store/store'
 import type { ModelSummary, ProviderSummary, SettingsSummary } from '../../shared/protocol'
 
@@ -136,6 +136,9 @@ export function ModelsDialog() {
   const servers = useOffice((s) => s.servers)
   const providerTest = useOffice((s) => s.providerTest)
   const providerSaved = useOffice((s) => s.providerSaved)
+  const limitedModels = useOffice((s) => s.limitedModels)
+  const now = useNow(30_000)
+  const limited = limitedLines(limitedModels, now)
   const [form, setForm] = useState<ProviderForm | null>(null)
   /** Waiting for the engine to say it saved the form (`provider.saved`), and what it said when it refused. */
   const [saving, setSaving] = useState(false)
@@ -438,6 +441,14 @@ export function ModelsDialog() {
     <div className="dialog-backdrop" onClick={close}>
       <div className="dialog models" onClick={(e) => e.stopPropagation()} data-testid="models-dialog">
         <div className="panel-title">Models</div>
+        {limited.length > 0 && (
+          <div className="warn" data-testid="models-limited">
+            <div>Set aside for a usage limit (jobs use their next model until then):</div>
+            {limited.map((l) => (
+              <div key={l}>{l}</div>
+            ))}
+          </div>
+        )}
         <div className="dim">Fallback models: each row is a kind (API, Strata, LM Studio ...) and its model. roles.md names a kind for its first row (paid, strata, lmstudio ...) and kind-2, kind-3 for the next ones.</div>
         <label className="inline">
           <input type="checkbox" checked={shared} onChange={(e) => settings && saveModelSettings(settings, { fallbackShared: e.target.checked })} data-testid="order-shared" />

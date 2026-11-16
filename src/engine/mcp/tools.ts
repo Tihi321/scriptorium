@@ -144,7 +144,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
+      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `quotaWarnings` ({kind: usage-limit | day-full | day-nearly-full, ref, until, detail, books}: a model set aside for a usage limit, a provider whose daily requests are used up or at 80% of its rpd, each with the in-progress books whose jobs it serves; subscription providers (the ACP proxy, client) report no remaining quota, so there is no early warning for them: a usage-limit entry appears when the limit is reached, or when the proxy reports the provider exhausted), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -172,6 +172,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         blocked: engine.scheduler.blockedJobs(),
         lastResort: engine.registry.lastResort()?.ref ?? null,
         limitedModels: engine.router.limitedModels(),
+        quotaWarnings: await engine.quotaWarnings(),
         providers: [...engine.registry.providers.values()]
           .filter((p) => p.kind !== 'search' && p.kind !== 'client' && p.available)
           .map((p) => {
@@ -576,6 +577,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
         humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),
+        noLocalFallback: z.boolean().optional().describe('true: the book made from this story never uses a model on this machine (LM Studio, Strata, Ollama) outside its own `models` list, nor the last resort when that is one; a job with nothing else left waits (see set_book_local_fallback). Default: off'),
         puzzles: z
           .array(puzzleEntrySchema)
           .optional()
@@ -585,7 +587,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; byline?: string; puzzles?: PuzzleEntry[]; models?: RoleModels }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; noLocalFallback?: boolean; byline?: string; puzzles?: PuzzleEntry[]; models?: RoleModels }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -604,6 +606,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.genre ? { genre: a.genre } : {}),
           ...(a.series ? { series: a.series } : {}),
           ...(a.humanize === false ? { humanize: false } : {}),
+          ...(a.noLocalFallback === true ? { noLocalFallback: true } : {}),
           ...(a.byline?.trim() ? { byline: a.byline.trim() } : {}),
           ...(a.puzzles?.length ? { puzzles: a.puzzles } : {}),
           ...(a.models && Object.keys(normModels(a.models)).length ? { models: normModels(a.models) } : {})
@@ -655,6 +658,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
         humanize: z.boolean().optional().describe('false: the humanizer skips this book; true: back to the default'),
+        noLocalFallback: z.boolean().optional().describe('true: the book made from this story never uses a model on this machine outside its own models list; false: removes the flag'),
         byline: z.string().optional().describe('The name the book shows as its author; an empty string goes back to the default of config/settings.md (else the pen name of the writer)'),
         models: modelsSchema.optional().describe('Replaces the models of this story (role -> a provider/model or an ordered list of them); {} clears them')
       }
@@ -675,6 +679,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre?: string
         series?: string
         humanize?: boolean
+        noLocalFallback?: boolean
         byline?: string
         models?: RoleModels
       }) => {
@@ -691,6 +696,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
         }
         if (a.humanize === false) brief.humanize = false
         else if (a.humanize === true) delete brief.humanize
+        if (a.noLocalFallback === true) brief.noLocalFallback = true
+        else if (a.noLocalFallback === false) delete brief.noLocalFallback
         if (a.byline !== undefined) {
           if (a.byline.trim()) brief.byline = a.byline.trim()
           else delete brief.byline
@@ -861,6 +868,21 @@ export function registerTools(server: McpServer, engine: Engine): void {
     run(async ({ book: slug, paused }: { book: string; paused: boolean }) => {
       await needBook(slug)
       await engine.handleCommand({ type: 'pauseBook', book: slug, paused })
+      return book(slug)
+    })
+  )
+
+  server.registerTool(
+    'set_book_local_fallback',
+    {
+      description:
+        'Allow or forbid models on this machine (LM Studio, Strata, Ollama: providers with `on_device`, by default the local OpenAI-compatible servers except the ACP proxy) as fallbacks for ONE book. With `noLocalFallback: true` the jobs of the book use its own `role_models` list (set_book_model), the model of the agent and the other rows of the role, but never a model on this machine outside that list, nor the last resort when that is one; a job with nothing else left waits, and `factory_status.blocked` says `no local fallback: ...`. Running jobs on such a model go back to the queue. Works at any stage.',
+      inputSchema: { book: z.string(), noLocalFallback: z.boolean() },
+      annotations: WRITE
+    },
+    run(async ({ book: slug, noLocalFallback }: { book: string; noLocalFallback: boolean }) => {
+      await needBook(slug)
+      await engine.handleCommand({ type: 'setBookLocalFallback', book: slug, noLocalFallback })
       return book(slug)
     })
   )

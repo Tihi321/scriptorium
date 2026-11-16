@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { STAGE_COLUMNS, stageColumn, type BookView } from '../store/model'
+import { STAGE_COLUMNS, deviationTooltip, stageColumn, type BookView } from '../store/model'
 import { useAgentList, useOffice } from '../store/hooks'
 import { agentsPerBook, officeStore } from '../store/store'
 import { typeBadge } from '../store/bookTypes'
@@ -109,6 +109,7 @@ export function Whiteboard() {
 function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
   const agents = useOffice((s) => s.agents)
   const nameOf = (id: string) => agents[id]?.name ?? id
+  const quota = useOffice((s) => s.quotaWarnings)
   const b = book.summary
   if (!b) return <div className="dim book-info">{book.title}: {book.stage}</div>
   const pct = (n: number, of: number) => (of > 0 ? ` (${Math.round((n / of) * 100)}%)` : '')
@@ -154,13 +155,29 @@ function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
       {b.modelDeviations.length > 0 && (
         <>
           <span>Fallback</span>
-          <span className="err" data-testid="book-deviation" title={b.modelDeviations[b.modelDeviations.length - 1]!.reason}>
+          <span className="err" data-testid="book-deviation" title={deviationTooltip(b.modelDeviations)}>
             {(() => {
               const last = b.modelDeviations[b.modelDeviations.length - 1]!
               const n = b.modelDeviations.filter((d) => d.role === last.role && d.model === last.model).length
               return `${last.role.replace(/-/g, ' ')} ran on ${last.model} (${n} time${n === 1 ? '' : 's'})`
             })()}
           </span>
+        </>
+      )}
+      {quota.some((w) => w.books.includes(b.slug)) && (
+        <>
+          <span>Quota</span>
+          <span className="warn" data-testid="book-quota">
+            {quota.filter((w) => w.books.includes(b.slug)).map((w) => (
+              <div key={`${w.kind}-${w.ref}`}>{w.detail}</div>
+            ))}
+          </span>
+        </>
+      )}
+      {b.noLocalFallback && (
+        <>
+          <span>Local fallback</span>
+          <span data-testid="book-no-local">off: own models and cloud fallbacks only</span>
         </>
       )}
       {b.team.length > 0 && (

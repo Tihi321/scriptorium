@@ -5,7 +5,7 @@ import { computeCost, isPaidModel } from './registry'
 import type { ModelInfo, ModelRegistry, ProviderInfo } from './registry'
 import { BudgetError, emptyUsage, estimateTokens, isAbortError, ProviderError } from './types'
 import type { ChatMessage, RequestMeta, Usage } from './types'
-import type { ProblemKind } from '../../shared/protocol'
+import type { LimitedModel, ProblemKind } from '../../shared/protocol'
 
 export interface CandidateOptions {
   /** The agent's own `provider/model` override. Goes first. */
@@ -14,6 +14,8 @@ export interface CandidateOptions {
   bookModels?: string[] | null
   /** Reviewers prefer another family than the book's writer. Models of this family go last. */
   avoidFamily?: string | null
+  /** SCP-62: leave out every model on this machine (`provider.onDevice`) that is not in `bookModels`. Hard: the list may end up empty. */
+  noLocalFallback?: boolean
 }
 
 export interface RoutedRequest {
@@ -76,7 +78,7 @@ export class ModelRouter {
   /** Called once when a model reports that its own usage limit is used up: jobs use the next model of their list until `until` (ms since epoch). */
   onModelLimited?: (m: ModelInfo, until: number, message: string) => void
   /** Models whose usage limit is used up (`provider/model` ref), with the time they come back. Only that model is set aside, not its provider. */
-  private readonly limited = new Map<string, { until: number; message: string }>()
+  private readonly limited = new Map<string, { until: number; message: string; source: 'answer' | 'proxy' }>()
   private readonly now: () => number
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
@@ -119,9 +121,28 @@ export class ModelRouter {
     return false
   }
 
+  /**
+   * Sets a model aside until `until` (ms since epoch). `answer`: the provider refused a request with its usage limit. `proxy`: the ACP proxy's
+   * `/healthz` says its provider is used up (SCP-62). `onModelLimited` fires only for a model not limited before; a real answer replaces a proxy entry.
+   */
+  setLimited(m: ModelInfo, until: number, message: string, source: 'answer' | 'proxy'): void {
+    const was = this.isLimited(m) ? this.limited.get(m.ref) : undefined
+    if (was && (source === 'proxy' || was.source === 'answer')) {
+      if (was.source === 'proxy' && source === 'proxy') was.until = until // the proxy moved the reset
+      return
+    }
+    this.limited.set(m.ref, { until, message, source })
+    if (!was) this.onModelLimited?.(m, until, message)
+  }
+
+  /** Takes a model out of the set-aside list, only when `source` set it (an entry from a real answer stays until its time). */
+  clearLimited(ref: string, source: 'proxy'): void {
+    if (this.limited.get(ref)?.source === source) this.limited.delete(ref)
+  }
+
   /** The models set aside for a usage limit now, for `factory_status`. */
-  limitedModels(): { model: string; until: string; message: string }[] {
-    const out: { model: string; until: string; message: string }[] = []
+  limitedModels(): LimitedModel[] {
+    const out: LimitedModel[] = []
     for (const [model, r] of [...this.limited]) {
       if (r.until <= this.now()) this.limited.delete(model)
       else out.push({ model, until: new Date(r.until).toISOString(), message: r.message })
@@ -169,6 +190,8 @@ export class ModelRouter {
       const m = this.registry.getModel(ref)
       if (m && m.provider.available && m.provider.client && !m.embedding) list.push(m)
     }
+    // a book that forbids local fallback never gets a model on this machine outside its own list, even when nothing else is left
+    if (o.noLocalFallback) list = list.filter((m) => !m.provider.onDevice || book.includes(m.ref))
     const up = list.filter((m) => this.usable(m.provider))
     if (up.length > 0) list = up
     // a model the provider retired answers 404 every time: leave it out while another model is left (the chain's last entry stays so the error shows)
@@ -297,10 +320,7 @@ export class ModelRouter {
           if (isUsageLimitError(err)) {
             const text = err instanceof Error ? err.message : String(err)
             const until = usageLimitUntil(err, this.now())
-            if (!this.isLimited(model)) {
-              this.limited.set(model.ref, { until, message: text })
-              this.onModelLimited?.(model, until, text)
-            }
+            this.setLimited(model, until, text, 'answer')
             failures.push(`${model.ref}: usage limit until ${new Date(until).toISOString()}`)
             break
           }

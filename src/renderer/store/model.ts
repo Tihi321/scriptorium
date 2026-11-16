@@ -1,5 +1,5 @@
 /** Pure types and helpers for the renderer state. No DOM, no React, no Phaser, so tests can run in plain Node. */
-import type { AgentProblem, AgentState, BookSummary, ProblemKind } from '../../shared/protocol'
+import type { AgentProblem, AgentState, BookSummary, LimitedModel, ModelDeviation, ProblemKind, QuotaWarning } from '../../shared/protocol'
 
 export const AGENT_STATES: readonly AgentState[] = [
   'working',
@@ -239,4 +239,27 @@ const PROBLEMS: Record<ProblemKind, { title: string; short: string; hint: string
 
 export function problemInfo(p: AgentProblem): { title: string; short: string; hint: string; serious: boolean } {
   return PROBLEMS[p.kind] ?? PROBLEMS.other
+}
+
+/** The models set aside for a usage limit, soonest reset first, one line each; an entry whose time has passed is left out. */
+export function limitedLines(list: LimitedModel[], now: number): string[] {
+  return list
+    .filter((l) => Date.parse(l.until) > now)
+    .sort((a, b) => Date.parse(a.until) - Date.parse(b.until))
+    .map((l) => `${l.model} until ${new Date(l.until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}: ${l.message.slice(0, 160)}`)
+}
+
+/** One quota warning for people: its detail, and the books it serves when it names any. */
+export function quotaLine(w: QuotaWarning): string {
+  return w.books.length ? `${w.detail} (books: ${w.books.join(', ')})` : w.detail
+}
+
+/** The Fallback tooltip of a book: every deviation (the stored list is newest last), newest first, one line each. */
+export function deviationTooltip(list: ModelDeviation[]): string {
+  const when = (at: string): string => {
+    const t = Date.parse(at)
+    return Number.isNaN(t) ? at : new Date(t).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+  }
+  const lines = [...list].reverse().map((d) => `${when(d.at)} · ${d.role.replace(/-/g, ' ')} (${d.job}) · ${d.model} · ${d.reason}`)
+  return [`${list.length} fallback${list.length === 1 ? '' : 's'}, newest first:`, ...lines].join('\n')
 }

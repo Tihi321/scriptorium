@@ -5,6 +5,8 @@ import {
   bookColor,
   budgetLevel,
   budgetPct,
+  deviationTooltip,
+  limitedLines,
   handoverAlpha,
   providerOf,
   stageColumn
@@ -35,6 +37,7 @@ export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSum
     stage: 'drafting',
     paused: false,
     modelDeviations: [],
+    noLocalFallback: false,
     chaptersWritten: 1,
     chaptersPlanned: 1,
     targetWords: 500,
@@ -81,6 +84,8 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     providers: [],
     roleDefaults: {},
     servers: [],
+    limitedModels: [],
+    quotaWarnings: [],
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },
     running: [],
     settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 },
@@ -454,5 +459,30 @@ describe('library and protocol events', () => {
     expect(groupTopics(topics, { query: 'juvenile' }).map((g) => g.section)).toEqual(['Children'])
     expect(groupTopics(topics, { activeOnly: true }).flatMap((g) => g.topics.map((t) => t.id)).sort()).toEqual(['c1', 'f2'])
     expect(groupTopics(topics, { query: 'zzz' })).toEqual([])
+  })
+})
+
+describe('book info', () => {
+  it('lists every deviation in the Fallback tooltip, newest first, with time, role, job, model and reason', () => {
+    const dev = (n: number, model: string, reason: string) => ({ at: `2026-11-1${n}T10:00:00Z`, job: `job-${n}`, role: 'line-editor', model, wanted: ['acp/a'], reason })
+    const tip = deviationTooltip([dev(1, 'lmstudio/old', 'reason one'), dev(2, 'strata/mid', 'reason two'), dev(3, 'lmstudio/new', 'reason three')])
+    const lines = tip.split('\n')
+    expect(lines).toHaveLength(4)
+    expect(lines[0]).toBe('3 fallbacks, newest first:')
+    expect(lines[1]).toContain('lmstudio/new')
+    expect(lines[1]).toContain('line editor (job-3)')
+    for (const r of ['reason one', 'reason two', 'reason three']) expect(tip).toContain(r)
+  })
+
+  it('lists the models set aside for a usage limit with their reset, and drops one after its time', () => {
+    const list = [
+      { model: 'acp/late', until: '2026-11-17T10:00:00Z', message: 'x'.repeat(200) },
+      { model: 'acp/soon', until: '2026-11-16T10:00:00Z', message: 'used up' }
+    ]
+    const before = limitedLines(list, Date.parse('2026-11-16T09:00:00Z'))
+    expect(before.map((l) => l.split(' ')[0])).toEqual(['acp/soon', 'acp/late'])
+    expect(before[0]).toContain('used up')
+    expect(before[1]!.length).toBeLessThan(260)
+    expect(limitedLines(list, Date.parse('2026-11-16T11:00:00Z'))).toHaveLength(1)
   })
 })

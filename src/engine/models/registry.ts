@@ -25,6 +25,8 @@ export interface ProviderInfo {
   kind: ProviderEntry['kind']
   enabled: boolean
   local: boolean
+  /** SCP-62: runs on this machine: `on_device` of providers.md, else a local `openai-compat` provider except `acp` (the proxy to cloud subscriptions). */
+  onDevice: boolean
   baseUrl?: string
   apiKeyEnv?: string
   concurrency: number
@@ -204,6 +206,7 @@ export class ModelRegistry {
         enabled: p.enabled,
         // a client provider is the owner's own Claude Code: local, free, no key, never budget-checked
         local: p.kind === 'client' ? true : p.local,
+        onDevice: p.on_device ?? (p.local && p.kind === 'openai-compat' && p.id !== 'acp'),
         baseUrl: p.base_url,
         apiKeyEnv: p.api_key_env,
         concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : (set.concurrency ?? p.concurrency),
