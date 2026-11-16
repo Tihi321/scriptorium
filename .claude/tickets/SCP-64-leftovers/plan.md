@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: REQ-0028
 repos: [scriptorium]
 branch: SCP-64_leftovers
