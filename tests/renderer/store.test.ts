@@ -6,6 +6,7 @@ import {
   budgetLevel,
   budgetPct,
   deviationTooltip,
+  limitedLines,
   handoverAlpha,
   providerOf,
   stageColumn
@@ -82,6 +83,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     providers: [],
     roleDefaults: {},
     servers: [],
+    limitedModels: [],
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },
     running: [],
     settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 },
@@ -468,5 +470,17 @@ describe('book info', () => {
     expect(lines[1]).toContain('lmstudio/new')
     expect(lines[1]).toContain('line editor (job-3)')
     for (const r of ['reason one', 'reason two', 'reason three']) expect(tip).toContain(r)
+  })
+
+  it('lists the models set aside for a usage limit with their reset, and drops one after its time', () => {
+    const list = [
+      { model: 'acp/late', until: '2026-11-17T10:00:00Z', message: 'x'.repeat(200) },
+      { model: 'acp/soon', until: '2026-11-16T10:00:00Z', message: 'used up' }
+    ]
+    const before = limitedLines(list, Date.parse('2026-11-16T09:00:00Z'))
+    expect(before.map((l) => l.split(' ')[0])).toEqual(['acp/soon', 'acp/late'])
+    expect(before[0]).toContain('used up')
+    expect(before[1]!.length).toBeLessThan(260)
+    expect(limitedLines(list, Date.parse('2026-11-16T11:00:00Z'))).toHaveLength(1)
   })
 })

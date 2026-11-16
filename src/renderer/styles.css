@@ -559,6 +559,9 @@ textarea {
 .err {
   color: #ff8a8f;
 }
+.warn {
+  color: var(--ochre);
+}
 .dialog hr {
   border: none;
   border-top: 1px solid var(--line);

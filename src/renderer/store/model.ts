@@ -1,5 +1,5 @@
 /** Pure types and helpers for the renderer state. No DOM, no React, no Phaser, so tests can run in plain Node. */
-import type { AgentProblem, AgentState, BookSummary, ModelDeviation, ProblemKind } from '../../shared/protocol'
+import type { AgentProblem, AgentState, BookSummary, LimitedModel, ModelDeviation, ProblemKind } from '../../shared/protocol'
 
 export const AGENT_STATES: readonly AgentState[] = [
   'working',
@@ -239,6 +239,14 @@ const PROBLEMS: Record<ProblemKind, { title: string; short: string; hint: string
 
 export function problemInfo(p: AgentProblem): { title: string; short: string; hint: string; serious: boolean } {
   return PROBLEMS[p.kind] ?? PROBLEMS.other
+}
+
+/** The models set aside for a usage limit, soonest reset first, one line each; an entry whose time has passed is left out. */
+export function limitedLines(list: LimitedModel[], now: number): string[] {
+  return list
+    .filter((l) => Date.parse(l.until) > now)
+    .sort((a, b) => Date.parse(a.until) - Date.parse(b.until))
+    .map((l) => `${l.model} until ${new Date(l.until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}: ${l.message.slice(0, 160)}`)
 }
 
 /** The Fallback tooltip of a book: every deviation (the stored list is newest last), newest first, one line each. */

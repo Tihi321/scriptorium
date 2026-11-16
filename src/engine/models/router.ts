@@ -5,7 +5,7 @@ import { computeCost, isPaidModel } from './registry'
 import type { ModelInfo, ModelRegistry, ProviderInfo } from './registry'
 import { BudgetError, emptyUsage, estimateTokens, isAbortError, ProviderError } from './types'
 import type { ChatMessage, RequestMeta, Usage } from './types'
-import type { ProblemKind } from '../../shared/protocol'
+import type { LimitedModel, ProblemKind } from '../../shared/protocol'
 
 export interface CandidateOptions {
   /** The agent's own `provider/model` override. Goes first. */
@@ -120,8 +120,8 @@ export class ModelRouter {
   }
 
   /** The models set aside for a usage limit now, for `factory_status`. */
-  limitedModels(): { model: string; until: string; message: string }[] {
-    const out: { model: string; until: string; message: string }[] = []
+  limitedModels(): LimitedModel[] {
+    const out: LimitedModel[] = []
     for (const [model, r] of [...this.limited]) {
       if (r.until <= this.now()) this.limited.delete(model)
       else out.push({ model, until: new Date(r.until).toISOString(), message: r.message })

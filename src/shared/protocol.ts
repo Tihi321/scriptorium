@@ -304,6 +304,15 @@ export interface SettingsSummary {
 
 export type ModelSettingKey = 'fallbacks' | 'fallbackShared' | 'lmstudioParallel' | 'lmstudioContext' | 'lmstudioTtlMinutes' | 'maxBooksInProgress'
 
+/** A model set aside for a used-up usage limit until `until` (SCP-61, shown in the Models panel by SCP-62). */
+export interface LimitedModel {
+  /** `provider/model`. */
+  model: string
+  /** When it comes back, ISO UTC. */
+  until: string
+  message: string
+}
+
 export interface SnapshotEvent {
   type: 'snapshot'
   dataDir: string
@@ -325,6 +334,8 @@ export interface SnapshotEvent {
   /** Role -> `provider/model` of the role default (first in the role's list). */
   roleDefaults: Record<string, string>
   servers: ServerStatus[]
+  /** The models set aside for a usage limit now. A new limit sends a new snapshot. */
+  limitedModels: LimitedModel[]
   spend: { today: number; month: number; dailyCap: number; monthlyCap: number }
   running: { jobId: string; agent: string }[]
   settings: SettingsSummary

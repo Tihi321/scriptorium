@@ -156,6 +156,7 @@ export class Engine {
       const at = new Date(until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
       this.log(`models: ${m.ref} hit its usage limit until ${at}: jobs use the next model of their list until then. Provider said: ${message.slice(0, 300)}`)
       this.emit({ type: 'engine.warning', message: `${m.ref} hit its usage limit until ${at}: jobs use their next model until then.` })
+      void this.snapshot().then((s) => this.emit(s))
       this.scheduler.kick()
     }
     this.jobs = new JobStore(dir)
@@ -1470,6 +1471,7 @@ export class Engine {
       providers: providerSummaries(this.registry, this.router.limiter),
       roleDefaults: roleDefaults(this.registry),
       servers: serverStatuses(this.registry),
+      limitedModels: this.router.limitedModels(),
       spend: this.budget.snapshot(),
       running: this.scheduler.runningJobs(),
       settings: this.settingsSummary(),
