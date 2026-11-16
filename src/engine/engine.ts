@@ -18,7 +18,7 @@ import { ModelRegistry, guessFamily, modelDefaultsOf } from './models/registry'
 import type { ListedModel } from './models/openaiCompat'
 import type { RegistryOptions } from './models/registry'
 import { ModelRouter } from './models/router'
-import { isLoopbackUrl, readProxyExhausted } from './models/proxyHealth'
+import { isLoopbackUrl, proxyRetryDelayMs, readProxyExhausted } from './models/proxyHealth'
 import type { RouterOptions } from './models/router'
 import { JobStore } from './queue/jobs'
 import { Bible } from './memory/bible'
@@ -295,8 +295,10 @@ export class Engine {
 
   /** Loopback providers whose `/healthz` answered, but not in the proxy's shape, this many times in a row (only such answers count; a proxy answer resets it): at 2 not asked again in this engine run. */
   private readonly proxyMisses = new Map<string, number>()
-  /** Loopback providers whose `/healthz` did not answer (refused, timed out) or answered with a 5xx: not asked again before this time (ms), then asked again; never given up. */
+  /** Loopback providers whose `/healthz` did not answer (refused, timed out) or answered with a 5xx: not asked again before this time (ms), then asked again; never given up (SCP-63: the wait doubles per failed ask, 60 s to 5 min). */
   private readonly proxyRetryAt = new Map<string, number>()
+  /** Failed asks in a row per provider (unreachable or 5xx); an ok answer resets it. */
+  private readonly proxyFailures = new Map<string, number>()
   /** Provider id -> the models its proxy's `/healthz` set aside (SCP-62). */
   private readonly proxySet = new Map<string, Set<string>>()
 
@@ -316,13 +318,16 @@ export class Engine {
         continue
       }
       if (health.kind === 'unreachable') {
-        // not started yet, or restarting (hub.ps1): ask again in a minute; its proxy-set entries stay until their own time
-        this.proxyRetryAt.set(p.id, Date.now() + 60_000)
+        // not started yet, or restarting (hub.ps1): ask again after 60 s, 120 s, 240 s, then every 5 min; its proxy-set entries stay until their own time
+        const failures = (this.proxyFailures.get(p.id) ?? 0) + 1
+        this.proxyFailures.set(p.id, failures)
+        this.proxyRetryAt.set(p.id, Date.now() + proxyRetryDelayMs(failures))
         continue
       }
       const exhausted = health.exhausted
       this.proxyMisses.set(p.id, 0)
       this.proxyRetryAt.delete(p.id)
+      this.proxyFailures.delete(p.id)
       const before = this.router.limitedModels().length
       const set = new Set<string>()
       for (const [proxyId, until] of Object.entries(exhausted)) {

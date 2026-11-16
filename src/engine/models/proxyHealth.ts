@@ -43,6 +43,11 @@ export async function readProxyExhausted(baseUrl: string, fetchFn: typeof fetch 
 }
 
 /** A loopback address: the only place the proxy is looked for. */
+/** SCP-63: how long to wait before asking an unreachable proxy again after its n-th failed ask in a row: 60 s, 120 s, 240 s, then 5 min at most. */
+export function proxyRetryDelayMs(failures: number): number {
+  return Math.min(60_000 * 2 ** Math.max(0, failures - 1), 300_000)
+}
+
 export function isLoopbackUrl(baseUrl: string | undefined): boolean {
   if (!baseUrl) return false
   try {
