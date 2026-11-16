@@ -246,15 +246,19 @@ export class Scheduler {
   /**
    * A book's `no_local_fallback` was set or cleared (SCP-62). Its running jobs take the flag; when it is on, a job whose current model is on this
    * machine and not in the book's list goes back to the queue (no attempt counted), else the jobs just rebuild their model list.
+   * A job whose in-flight request was given a model list that the flag now shortens goes back to the queue too: that request could still fall
+   * back to a model on this machine if its current model fails.
    */
   bookFallbackChanged(book: string, flag: boolean): number {
     let n = 0
     for (const rj of this.running.values()) {
       if (rj.job.data.book !== book) continue
+      const turnedOn = flag && rj.noLocalFallback !== true
+      const before = turnedOn ? this.modelsFor(rj).length : 0
       rj.noLocalFallback = flag
       const m = this.d.router.registry.getModel(rj.model)
       const own = (rj.bookModels ?? []).map((r) => this.d.router.registry.resolve(r) ?? r)
-      if (flag && m?.provider.onDevice && !own.includes(m.ref)) {
+      if ((flag && m?.provider.onDevice && !own.includes(m.ref)) || (turnedOn && this.modelsFor(rj).length < before)) {
         this.abort(rj, 'stop')
         n++
       }
@@ -411,6 +415,7 @@ export class Scheduler {
         if (lastResort && !models.some((m) => m.ref === lastResort.ref)) {
           const p = lastResort.provider
           if (noLocal && p.onDevice && !(bookModels ?? []).some((r) => (router.registry.resolve(r) ?? r) === lastResort.ref)) reasons.push(`${lastResort.ref} (last resort): runs on this machine`)
+          else if (router.isLimited(lastResort)) reasons.push(`${lastResort.ref} (last resort): ${router.setAsideReason(lastResort)}`)
           else if (!router.usable(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
           else if (isPaidModel(lastResort) && !budget.isExhausted(j.book).ok) reasons.push(`${lastResort.ref} (last resort): over budget`)
           else if (!router.limiter.hasCapacity(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)

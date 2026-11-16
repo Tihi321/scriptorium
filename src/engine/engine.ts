@@ -293,8 +293,10 @@ export class Engine {
     }
   }
 
-  /** Loopback proxies that did not answer `/healthz` in the proxy's shape, twice in a row: not asked again in this engine run. */
+  /** Loopback providers whose `/healthz` answered, but not in the proxy's shape, this many times in a row: at 2 not asked again in this engine run. */
   private readonly proxyMisses = new Map<string, number>()
+  /** Loopback providers whose `/healthz` did not answer (refused, timed out): not asked again before this time (ms), then asked again; never given up. */
+  private readonly proxyRetryAt = new Map<string, number>()
   /** Provider id -> the models its proxy's `/healthz` set aside (SCP-62). */
   private readonly proxySet = new Map<string, Set<string>>()
 
@@ -307,12 +309,20 @@ export class Engine {
     for (const p of this.registry.providers.values()) {
       if (!p.enabled || !p.available || p.kind !== 'openai-compat' || p.onDevice || !isLoopbackUrl(p.baseUrl)) continue
       if ((this.proxyMisses.get(p.id) ?? 0) >= 2) continue
-      const exhausted = await readProxyExhausted(p.baseUrl!)
-      if (!exhausted) {
+      if ((this.proxyRetryAt.get(p.id) ?? 0) > Date.now()) continue
+      const health = await readProxyExhausted(p.baseUrl!)
+      if (health.kind === 'not-proxy') {
         this.proxyMisses.set(p.id, (this.proxyMisses.get(p.id) ?? 0) + 1)
         continue
       }
+      if (health.kind === 'unreachable') {
+        // not started yet, or restarting (hub.ps1): ask again in a minute; its proxy-set entries stay until their own time
+        this.proxyRetryAt.set(p.id, Date.now() + 60_000)
+        continue
+      }
+      const exhausted = health.exhausted
       this.proxyMisses.set(p.id, 0)
+      this.proxyRetryAt.delete(p.id)
       const before = this.router.limitedModels().length
       const set = new Set<string>()
       for (const [proxyId, until] of Object.entries(exhausted)) {

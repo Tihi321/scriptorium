@@ -484,15 +484,16 @@ describe('router', () => {
     expect(seen).toEqual(['b', 'g']) // the loud fallback: the list is used up
   })
 
-  it('the proxy\'s /healthz sets aside every model of an exhausted provider and gives them back; a real answer stays; a non-proxy answer is null (SCP-62)', async () => {
+  it('the proxy\'s /healthz sets aside every model of an exhausted provider and gives them back; a real answer stays; a non-proxy answer is told apart from no answer (SCP-62)', async () => {
     const future = new Date(Date.now() + 3_600_000).toISOString()
     const health = (body: unknown) => (async () => new Response(typeof body === 'string' ? body : JSON.stringify(body))) as unknown as typeof fetch
     const url = 'http://127.0.0.1:9/v1'
-    expect(await readProxyExhausted(url, health({ status: 'ok', providers: { codex: { active: 0, exhausted_until: future }, claude: { active: 0 } } }))).toEqual({ codex: future })
-    expect(await readProxyExhausted(url, health({ providers: {} }))).toEqual({})
-    expect(await readProxyExhausted(url, health({ ok: true }))).toBeNull()
-    expect(await readProxyExhausted(url, health('<html>not the proxy</html>'))).toBeNull()
-    expect(await readProxyExhausted(url, (async () => { throw new Error('refused') }) as unknown as typeof fetch)).toBeNull()
+    expect(await readProxyExhausted(url, health({ status: 'ok', providers: { codex: { active: 0, exhausted_until: future }, claude: { active: 0 } } }))).toEqual({ kind: 'ok', exhausted: { codex: future } })
+    expect(await readProxyExhausted(url, health({ providers: {} }))).toEqual({ kind: 'ok', exhausted: {} })
+    expect(await readProxyExhausted(url, health({ ok: true }))).toEqual({ kind: 'not-proxy' })
+    expect(await readProxyExhausted(url, health('<html>not the proxy</html>'))).toEqual({ kind: 'not-proxy' })
+    // a refused connection is not "not the proxy": the engine asks again later instead of giving up
+    expect(await readProxyExhausted(url, (async () => { throw new Error('refused') }) as unknown as typeof fetch)).toEqual({ kind: 'unreachable' })
 
     const { registry } = await registryWith({ providers: [{ id: 'acp', models: ['codex/a', 'codex/b', 'claude/c'] }] })
     const r = new ModelRouter(registry, undefined)

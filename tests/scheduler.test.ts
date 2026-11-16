@@ -770,7 +770,7 @@ describe('book models in the scheduler', () => {
   })
   it('no_local_fallback: a book whose list model is used up never runs on a model or last resort on this machine, waits with a reason and spends no attempt; an unflagged book falls back (SCP-62)', async () => {
     env = await makeEnv({
-      providers: [{ id: 'acp', models: ['a'] }, { id: 'loc', local: true, onDevice: true, models: ['g'] }],
+      providers: [{ id: 'acp', models: ['a'] }, { id: 'loc', local: true, onDevice: true, models: ['g'] }, { id: 'cl', models: ['r'] }],
       roles: { writer: ['acp/a', 'loc/g'] },
       agents: [{ role: 'writer', name: 'Ann' }, { role: 'writer', name: 'Bob' }]
     })
@@ -811,6 +811,14 @@ describe('book models in the scheduler', () => {
     expect(blocked.reason).toMatch(/^no local fallback: b4 uses no model on this machine outside its list; acp\/a: usage limit until .*loc\/g \(last resort\): runs on this machine/)
     expect(seen.filter((m) => m === 'g')).toHaveLength(1) // only b2 ever ran on loc/g
     expect((await queued('b4--t--u1--r0')).attempts).toBe(0)
+
+    // a last resort that is not on this machine but is used up itself is not launched either
+    await writeMd(settings, { ...doc.data, last_resort_model: 'cl/r' }, doc.body)
+    await e.loadSettings()
+    e.router.setLimited(e.registry.getModel('cl/r')!, Date.now() + 3_600_000, 'usage limit', 'answer')
+    e.scheduler.kick()
+    await waitFor(() => /cl\/r \(last resort\): usage limit until /.test(e.scheduler.blockedJobs().find((b) => b.job === 'b4--t--u1--r0')?.reason ?? ''), 5000, 'b4 names the used-up last resort')
+    expect(seen).not.toContain('r')
   })
 })
 
