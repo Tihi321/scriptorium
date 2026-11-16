@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla'
-import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, FormatSummary, IdeaSummary, LimitedModel, ModelSummary, ProviderSummary, SeriesSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
+import type { AgentSummary, BookSummary, CatalogModel, EngineEvent, FormatSummary, IdeaSummary, LimitedModel, ModelSummary, QuotaWarning, ProviderSummary, SeriesSummary, ServerStatus, SettingsSummary, TopicSummary } from '../../shared/protocol'
 import {
   asAgentState,
   bookColor,
@@ -52,6 +52,8 @@ export interface OfficeState {
   keyNames: string[]
   /** The models set aside for a usage limit (the Models panel lists them). */
   limitedModels: LimitedModel[]
+  /** Used-up and nearly used-up quotas with the books they serve (the status bar pill, the book info). */
+  quotaWarnings: QuotaWarning[]
   /** Answer to the last Test in the Add provider form, and to the last save or removal of a custom provider. */
   providerTest: { baseUrl: string; ok: boolean; count?: number; error?: string; at: string } | null
   providerSaved: { id?: string; removed?: boolean; error?: string; at: string } | null
@@ -140,6 +142,7 @@ function initial(): OfficeState {
     secretsSet: [],
     keyNames: [],
     limitedModels: [],
+    quotaWarnings: [],
     providerTest: null,
     providerSaved: null,
     mcp: null,
@@ -222,6 +225,8 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
       return { connected: true, dataDir: e.dataDir }
     case 'engine.heartbeat':
       return { connected: true }
+    case 'quota':
+      return { quotaWarnings: e.warnings }
     case 'engine.warning':
       return { warnings: [...s.warnings.slice(-19), e.message] }
     case 'snapshot': {
@@ -252,6 +257,7 @@ export function reduceEvent(s: OfficeState, e: EngineEvent, now: number): Partia
         secretsSet: e.secretsSet,
         keyNames: e.keyNames ?? [],
         limitedModels: e.limitedModels ?? [],
+        quotaWarnings: e.quotaWarnings ?? [],
         mcp: e.mcp ?? null,
         selectedAgent: s.selectedAgent && agents[s.selectedAgent] ? s.selectedAgent : null
       }

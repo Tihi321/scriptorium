@@ -85,6 +85,7 @@ function snapshot(extra: Partial<SnapshotEvent> = {}): EngineEvent {
     roleDefaults: {},
     servers: [],
     limitedModels: [],
+    quotaWarnings: [],
     spend: { today: 1.6, month: 6, dailyCap: 2, monthlyCap: 30 },
     running: [],
     settings: { kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 32768, lmstudioTtlMinutes: 60, maxBooksInProgress: 3 },

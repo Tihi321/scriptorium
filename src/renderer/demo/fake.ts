@@ -240,6 +240,7 @@ export function installFakeEngine(params: URLSearchParams): void {
     secretsSet: [...secretsSet],
     keyNames: ['DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', ...PROVIDERS.filter((p) => p.custom && p.hasKey).map((p) => `CUSTOM_${p.id.toUpperCase().replace(/-/g, '_')}_API_KEY`)],
     limitedModels: [],
+    quotaWarnings: [],
     mcp: { url: 'http://127.0.0.1:7341/mcp' },
     at: new Date().toISOString()
   })

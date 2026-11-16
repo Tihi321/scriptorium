@@ -1,5 +1,5 @@
 /** Pure types and helpers for the renderer state. No DOM, no React, no Phaser, so tests can run in plain Node. */
-import type { AgentProblem, AgentState, BookSummary, LimitedModel, ModelDeviation, ProblemKind } from '../../shared/protocol'
+import type { AgentProblem, AgentState, BookSummary, LimitedModel, ModelDeviation, ProblemKind, QuotaWarning } from '../../shared/protocol'
 
 export const AGENT_STATES: readonly AgentState[] = [
   'working',
@@ -247,6 +247,11 @@ export function limitedLines(list: LimitedModel[], now: number): string[] {
     .filter((l) => Date.parse(l.until) > now)
     .sort((a, b) => Date.parse(a.until) - Date.parse(b.until))
     .map((l) => `${l.model} until ${new Date(l.until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}: ${l.message.slice(0, 160)}`)
+}
+
+/** One quota warning for people: its detail, and the books it serves when it names any. */
+export function quotaLine(w: QuotaWarning): string {
+  return w.books.length ? `${w.detail} (books: ${w.books.join(', ')})` : w.detail
 }
 
 /** The Fallback tooltip of a book: every deviation (the stored list is newest last), newest first, one line each. */

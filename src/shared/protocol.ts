@@ -317,6 +317,19 @@ export interface LimitedModel {
   message: string
 }
 
+/** A quota that is used up or nearly (SCP-62): shown in the status bar, the book info and `factory_status.quotaWarnings`. */
+export interface QuotaWarning {
+  kind: 'usage-limit' | 'day-full' | 'day-nearly-full'
+  /** A `provider/model` ref for usage-limit, a provider id for the day kinds. */
+  ref: string
+  /** ISO UTC: the limit's reset, or the day's reset (midnight UTC). */
+  until: string
+  /** One line for people, times in the engine machine's local time. */
+  detail: string
+  /** In-progress book slugs whose jobs this serves, sorted; may be empty. */
+  books: string[]
+}
+
 export interface SnapshotEvent {
   type: 'snapshot'
   dataDir: string
@@ -340,6 +353,8 @@ export interface SnapshotEvent {
   servers: ServerStatus[]
   /** The models set aside for a usage limit now. A new limit sends a new snapshot. */
   limitedModels: LimitedModel[]
+  /** Used-up and nearly used-up quotas, with the books they serve. */
+  quotaWarnings: QuotaWarning[]
   spend: { today: number; month: number; dailyCap: number; monthlyCap: number }
   running: { jobId: string; agent: string }[]
   settings: SettingsSummary
@@ -358,6 +373,8 @@ export type EngineEvent =
   | { type: 'pong'; id?: string; at: string }
   | SnapshotEvent
   | { type: 'engine.warning'; message: string }
+  /** The quota warnings changed (sent only then). */
+  | { type: 'quota'; warnings: QuotaWarning[] }
   /** Answer to `testCustomProvider`: `GET /models` of the address worked (`count` models) or failed (`error`). */
   | { type: 'provider.tested'; baseUrl: string; ok: boolean; count?: number; error?: string; at: string }
   /** `saveCustomProvider` or `removeCustomProvider` was refused (`error`), or went through (`id`). */

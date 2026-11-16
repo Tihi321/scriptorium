@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { sendCommand } from '../api'
-import { providerColor, providerLabel } from '../store/model'
+import { providerColor, providerLabel, quotaLine } from '../store/model'
 import { useAgentList, useOffice } from '../store/hooks'
 import { TeamPopover } from './TeamPopover'
 import { countByProvider, countByRole, countStates, officeStore, type StateCounts } from '../store/store'
@@ -59,6 +59,19 @@ function McpPill() {
   )
 }
 
+/** Quotas that are used up or nearly, when one serves a book in progress (SCP-62). */
+function QuotaPill() {
+  const warnings = useOffice((s) => s.quotaWarnings)
+  const named = warnings.filter((w) => w.books.length > 0)
+  if (named.length === 0) return null
+  return (
+    <span className="pill" data-testid="quota-warning" title={named.map(quotaLine).join('\n')}>
+      <span className="dot" style={{ background: 'var(--ochre)' }} />
+      quota <b>{named.length}</b>
+    </span>
+  )
+}
+
 export function StatusBar() {
   const agents = useAgentList()
   const connected = useOffice((s) => s.connected)
@@ -73,6 +86,7 @@ export function StatusBar() {
       </span>
       <Servers />
       <McpPill />
+      <QuotaPill />
       <span className="pill" data-testid="count-working">
         <span className="dot" style={{ background: 'var(--verdigris)' }} />
         working <b>{counts.working}</b>

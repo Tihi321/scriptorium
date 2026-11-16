@@ -109,6 +109,7 @@ export function Whiteboard() {
 function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
   const agents = useOffice((s) => s.agents)
   const nameOf = (id: string) => agents[id]?.name ?? id
+  const quota = useOffice((s) => s.quotaWarnings)
   const b = book.summary
   if (!b) return <div className="dim book-info">{book.title}: {book.stage}</div>
   const pct = (n: number, of: number) => (of > 0 ? ` (${Math.round((n / of) * 100)}%)` : '')
@@ -160,6 +161,16 @@ function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
               const n = b.modelDeviations.filter((d) => d.role === last.role && d.model === last.model).length
               return `${last.role.replace(/-/g, ' ')} ran on ${last.model} (${n} time${n === 1 ? '' : 's'})`
             })()}
+          </span>
+        </>
+      )}
+      {quota.some((w) => w.books.includes(b.slug)) && (
+        <>
+          <span>Quota</span>
+          <span className="warn" data-testid="book-quota">
+            {quota.filter((w) => w.books.includes(b.slug)).map((w) => (
+              <div key={`${w.kind}-${w.ref}`}>{w.detail}</div>
+            ))}
           </span>
         </>
       )}

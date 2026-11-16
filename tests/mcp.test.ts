@@ -564,6 +564,20 @@ describe('MCP book models', () => {
     expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'no-gemma.md'), 'utf8')).data.no_local_fallback).toBe(true)
     await call(c, 'update_story', { story: 'no-gemma', noLocalFallback: false })
     expect(parseMd(await readFile(path.join(env.dir, 'ideas', 'no-gemma.md'), 'utf8')).data.no_local_fallback).toBeUndefined()
+
+    // SCP-62: quotaWarnings name the in-progress books a limited model, or a provider near its daily requests, serves
+    await env.engine.books.create('live', { title: 'Live', stage: 'drafting', format: 'novel', target_words: 5000, role_models: { writer: ['acp/a'] } }, '')
+    await env.engine.jobs.enqueue({ id: 'live--nohandler--u1--r0', task: 'nohandler', role: 'writer', book: 'live', unit: 'u1', requested_by: 'engine' })
+    expect((await call(c, 'factory_status')).data.quotaWarnings).toEqual([])
+    env.engine.router.setLimited(env.engine.registry.getModel('acp/a')!, Date.now() + 3_600_000, 'usage limit', 'answer')
+    const acp = env.engine.registry.providers.get('acp')!
+    acp.rpd = 10
+    env.engine.router.limiter.seedToday('acp', 8)
+    const warnings = (await call(c, 'factory_status')).data.quotaWarnings
+    expect(warnings.map((w: { kind: string; ref: string; books: string[] }) => [w.kind, w.ref, w.books])).toEqual([['usage-limit', 'acp/a', ['live']], ['day-nearly-full', 'acp', ['live']]])
+    expect(warnings[0].detail).toContain('acp/a is set aside for its usage limit until')
+    env.engine.router.limiter.seedToday('acp', 10)
+    expect((await call(c, 'factory_status')).data.quotaWarnings.map((w: { kind: string }) => w.kind)).toEqual(['usage-limit', 'day-full'])
   })
 
   it('add_story humanize:false is stored in the story and shown by get_story; update_story can set it back; the humanizer role takes a book model', async () => {

@@ -144,7 +144,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
+      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `quotaWarnings` ({kind: usage-limit | day-full | day-nearly-full, ref, until, detail, books}: a model set aside for a usage limit, a provider whose daily requests are used up or at 80% of its rpd, each with the in-progress books whose jobs it serves; subscription providers (the ACP proxy, client) report no remaining quota, so there is no early warning for them: a usage-limit entry appears when the limit is reached, or when the proxy reports the provider exhausted), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -172,6 +172,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         blocked: engine.scheduler.blockedJobs(),
         lastResort: engine.registry.lastResort()?.ref ?? null,
         limitedModels: engine.router.limitedModels(),
+        quotaWarnings: await engine.quotaWarnings(),
         providers: [...engine.registry.providers.values()]
           .filter((p) => p.kind !== 'search' && p.kind !== 'client' && p.available)
           .map((p) => {
