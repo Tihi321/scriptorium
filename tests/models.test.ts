@@ -15,7 +15,7 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
-import { readProxyExhausted } from '../src/engine/models/proxyHealth'
+import { proxyRetryDelayMs, readProxyExhausted } from '../src/engine/models/proxyHealth'
 import { ModelRouter, isDailyLimitError, isRefusedRequest, isRetiredModelError, isUsageLimitError, problemKind } from '../src/engine/models/router'
 import { BudgetError, collect, httpError, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
@@ -482,6 +482,10 @@ describe('router', () => {
     registry.getModel('acp/b')!.context = 100
     expect(await run()).toEqual(['too-big:acp/a', 'too-big:acp/b'])
     expect(seen).toEqual(['b', 'g']) // the loud fallback: the list is used up
+  })
+
+  it('an unreachable proxy is asked again after 60 s, 120 s, 240 s, then every 5 min (SCP-63)', () => {
+    expect([1, 2, 3, 4, 5, 20].map(proxyRetryDelayMs)).toEqual([60_000, 120_000, 240_000, 300_000, 300_000, 300_000])
   })
 
   it('the proxy\'s /healthz sets aside every model of an exhausted provider and gives them back; a real answer stays; a non-proxy answer is told apart from no answer (SCP-62)', async () => {
