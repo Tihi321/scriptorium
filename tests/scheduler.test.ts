@@ -853,6 +853,38 @@ describe('book models in the scheduler', () => {
     expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'queued', 'b1--t--u1--r0.md'), 'utf8')).data.attempts).toBe(0)
     expect(seen).not.toContain('g')
   })
+
+  it('no_local_fallback with no allowed model left between requests: the job goes back to the queue instead of reusing a list with a model on this machine (SCP-64)', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'acp', models: ['a'] }, { id: 'loc', local: true, onDevice: true, models: ['g'] }],
+      roles: { writer: ['acp/a', 'loc/g'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+    const e = env.engine
+    await e.books.create('b1', { title: 'b1', stage: 'drafting', format: 'novel', target_words: 5000, role_models: { writer: 'acp/a' } }, '')
+    const seen: string[] = []
+    env.mock.onAny((req) => (seen.push(req.model), 'ok'))
+    let between!: () => void
+    let go!: () => void
+    const mid = new Promise<void>((r) => (between = r))
+    const cont = new Promise<void>((r) => (go = r))
+    e.scheduler.register('t', async (ctx) => {
+      await ctx.chat({ messages: [{ role: 'user', content: 'one' }] })
+      between()
+      await cont
+      return { result: (await ctx.chat({ messages: [{ role: 'user', content: 'two' }] })).text }
+    })
+    await e.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await mid
+    // between two requests the flag goes on and a reload leaves acp unavailable: the job's list [acp/a, loc/g] must not be reused
+    await e.handleCommand({ type: 'setBookLocalFallback', book: 'b1', noLocalFallback: true })
+    e.registry.providers.get('acp')!.available = false
+    go()
+    await waitFor(() => e.scheduler.blockedJobs().some((b) => b.job === 'b1--t--u1--r0'), 5000, 'the job is blocked')
+    expect(e.scheduler.blockedJobs().find((b) => b.job === 'b1--t--u1--r0')!.reason).toMatch(/^no local fallback: /)
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'queued', 'b1--t--u1--r0.md'), 'utf8')).data.attempts).toBe(0)
+    expect(seen).toEqual(['a'])
+  })
 })
 
 describe('blocked providers wait visibly', () => {

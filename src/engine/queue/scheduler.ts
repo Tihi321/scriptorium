@@ -257,14 +257,19 @@ export class Scheduler {
       if (rj.job.data.book !== book) continue
       rj.noLocalFallback = flag
       const m = this.d.router.registry.getModel(rj.model)
-      const own = (rj.bookModels ?? []).map((r) => this.d.router.registry.resolve(r) ?? r)
-      const local = (x: ModelInfo | undefined) => !!x?.provider.onDevice && !own.includes(x.ref)
+      const local = (x: ModelInfo | undefined) => !!x && this.localOutsideBook(rj, x)
       if (flag && (local(m) || (rj.request && (rj.use ?? []).some(local)))) {
         this.abort(rj, 'stop')
         n++
       }
     }
     return n + this.changeModel({ book })
+  }
+
+  /** A model on this machine outside the job's book list (`role_models`): one a `no_local_fallback` job must never use. */
+  private localOutsideBook(rj: RunningJob, m: ModelInfo): boolean {
+    const own = (rj.bookModels ?? []).map((r) => this.d.router.registry.resolve(r) ?? r)
+    return m.provider.onDevice && !own.includes(m.ref)
   }
 
   /** A book's models for a role were set or cleared: its running jobs of that role switch (see `changeModel`). */
@@ -648,6 +653,12 @@ export class Scheduler {
               if (next[0]?.ref !== models[0]?.ref) narrowed = false
               models = next
               use = narrowed ? narrow(next) : next
+            } else if (rj.noLocalFallback && models.some((m) => this.localOutsideBook(rj, m))) {
+              // nothing usable is left (a reload made the providers unavailable) and the old list may fall back to a model this book forbids:
+              // the job goes back to the queue, where the scheduler's `no local fallback: ` blocked reason says why it waits (SCP-64)
+              logAll(`_no model left that this book allows (no_local_fallback): the job goes back to the queue_\n`)
+              this.abort(rj, 'stop')
+              throw Object.assign(new Error('aborted'), { name: 'AbortError' })
             }
           }
           if (o.sameModel && use[0]?.ref !== o.sameModel) {
