@@ -93,6 +93,18 @@ describe('units and group nouns are not names', () => {
   })
 })
 
+describe('ordinary words are not names (SCP-61)', () => {
+  it('"God", "I\'ve" and a capital after an italic sentence end pass; real names are still caught', () => {
+    expect(newNames('He turned back, wishing to God he had not.', 'He turned back, wishing he had not.')).toEqual([])
+    for (const c of ["I've", 'I’ve', "I'm", "I'll", "I'd"]) expect(newNames(`She said ${c} learned it.`, 'She said I have learned it.'), c).toEqual([])
+    expect(newNames('*Request refused.* These were dead words.', 'Request refused. The words were dead.')).toEqual([])
+    expect(newNames('_Request refused._ These were dead words.', 'Request refused. The words were dead.')).toEqual([])
+    expect(newNames('Then Captain Rourke came in.', 'Then he came in.')).toEqual(['Captain', 'Rourke'])
+    expect(newNames('She asked *Rourke* about it.', 'She asked about it.')).toEqual(['Rourke'])
+    expect(newNames('She patted Rourke’s dog.', 'She patted the dog.')).toEqual(['Rourke’s'])
+  })
+})
+
 describe('the seed prompt', () => {
   it('no longer tells the model to write one-word sentences, and asks for whole sentences and English', async () => {
     for (const f of ['humanize_chapter.md', 'humanize_chapter_vn.md', 'humanize_chapter_article.md']) {

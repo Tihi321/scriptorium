@@ -113,6 +113,12 @@ const UNITS = new Set(['Hz', 'MHz', 'GHz', 'THz', 'MW', 'GW', 'TW', 'Wh', 'Ah', 
 
 const nameKey = (w: string) => w.toLowerCase().replace(/['’]s$/, '').replace(/^['’-]+|['’-]+$/g, '')
 
+/** "I'm", "I've", "I'll", "I'd" (straight or curly apostrophe): the pronoun, not a name. */
+const I_CONTRACTION = /^I['’](?:m|ve|ll|d)$/u
+
+/** Words that are capitalised by convention and are no names. */
+const CAPITALISED_WORDS = new Set(['god', 'gods', 'lord', 'heaven', 'heavens', 'hell', 'christ', 'devil'])
+
 /** Demonyms and group names without a telling ending: "the Greeks" is no new name. */
 const GROUP_NOUNS = new Set(['greeks', 'jews', 'arabs', 'turks', 'celts', 'danes', 'swedes', 'poles', 'scots', 'franks', 'gauls', 'saxons', 'moors', 'kurds', 'thais', 'finns', 'slavs', 'vikings', 'normans', 'britons', 'romans', 'spartans', 'trojans', 'germans', 'persians', 'cubans', 'mayans', 'incans', 'oscans'])
 
@@ -179,22 +185,25 @@ function nameForms(key: string): string[] {
  * a possessive 's, not a word of `known` (the original chapter and the bible), also in its singular or plural form, and not a group noun
  * ("Greeks", "Romans", "Stoics"). A sentence's first word is skipped because every
  * word is capitalised there, so a new name that opens a sentence is only found when it is followed by another capitalised word
- * ("Captain Rourke": Rourke is checked).
+ * ("Captain Rourke": Rourke is checked). Emphasis marks (`*`, `_`) do not hide a sentence start ("*...refused.* These"). The "I"
+ * contractions ("I've", "I’m"), a few words capitalised by convention ("God", "Lord") and any ordinary English word
+ * (`ENGLISH_WORDS`) are not names.
  */
 export function newNames(text: string, known: string): string[] {
   const have = new Set((known.match(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu) ?? []).map(nameKey))
   const out: string[] = []
   for (const m of text.matchAll(NAME_WORD)) {
     const at = m.index ?? 0
-    const before = text.slice(0, at).replace(/[ \t]+$/, '')
+    const before = text.slice(0, at).replace(/[ \t*_]+$/, '')
     const lead = before === '' || /[\n.!?…:;"“”‘'’([—-]$/.test(before)
     if (lead) continue
     const w = m[0]
-    if (w.length < 2) continue // "I"
+    if (w.length < 2 || I_CONTRACTION.test(w)) continue // "I", "I've", "I’m"
     // a unit or an abbreviation next to a number is not a name ("50 Hz", "the hum at 50 Hz")
     if (UNITS.has(w) || /\d[\d.,]*\s*$/.test(before)) continue
     const key = nameKey(w)
     if (!key || out.includes(w) || nameForms(key).some((f) => have.has(f))) continue
+    if (CAPITALISED_WORDS.has(key) || ENGLISH_WORDS.has(key)) continue
     if (GROUP_NOUNS.has(key) || groupNounInContext(before, key)) continue
     out.push(w)
   }
