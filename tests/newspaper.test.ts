@@ -295,7 +295,7 @@ describe('an article on the mock providers', () => {
 
     // the humanizer ran on the article, the fact-checker and the editors reviewed it (and only those)
     expect(env.counters.calls.humanize_chapter).toBe(1)
-    expect(parseMd(await readFile(dirOf('chapters', 'ch-01.md'), 'utf8')).data.humanized).toBe(0)
+    expect(parseMd(await readFile(dirOf('chapters', 'ch-01.md'), 'utf8')).data.humanizer_round).toBe(0)
     expect(existsSync(dirOf('reviews', 'book-fact-checker-r0.md'))).toBe(true)
     for (const role of ['line-editor', 'copy-editor', 'beta-reader']) expect(existsSync(dirOf('reviews', `book-${role}-r0.md`)), role).toBe(true)
     for (const role of ['developmental-editor', 'originality-checker', 'continuity-checker']) expect(existsSync(dirOf('reviews', `book-${role}-r0.md`)), role).toBe(false)

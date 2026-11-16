@@ -340,7 +340,7 @@ export function humanizeProblem(original: string, revised: string, opts: { scrip
 
 /**
  * The humanizer: one job per chapter, after the chapter is drafted (and again after a rewrite round). It rewrites the
- * whole chapter so it reads like a person wrote it, and keeps the story. `humanized` in the chapter file records the round;
+ * whole chapter so it reads like a person wrote it, and keeps the story. `humanizer_round` and `humanizer_result` in the chapter file record the round and what the pass did;
  * `round` stays as it is (like the research fix-up). Article formats get their own `_article` prompt through `variant`.
  */
 export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): void {
@@ -399,7 +399,8 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     let body = problem ? current.body : revised
     // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently), and a place the bible lacks is added to it
     if (!problem && fmt.script) body = await settleScenePlaces(d, slug, n, body, (m) => ctx.log(`humanizer: ${m}`), { cues: !fmt.screenplay })
-    // the round is the chapter's own (it stays), `humanized` says in which book round the pass ran: a pass that was refused counts too, so it is not asked again
+    // the round is the chapter's own (it stays); `humanizer_round` says in which book round the pass ran and `humanizer_result` whether it rewrote the chapter
+    // or was refused (`kept`): a refused pass counts as done too, so it is not asked again
     await d.books.writeChapter(slug, {
       n,
       title: current.title,
@@ -408,7 +409,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
       agent: current.agent, // the writer stays the writer of the chapter; the humanizer's work is in made.md
       model: problem ? undefined : r.model.ref,
       fixes: current.fixes,
-      humanized: ctx.job.round
+      humanizer: { round: ctx.job.round, result: problem ? 'kept' : 'rewritten' }
     })
     await recordMade(d, slug, run)
     return {

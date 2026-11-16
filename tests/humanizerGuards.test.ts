@@ -172,7 +172,7 @@ describe('the humanizer in a pipeline: a leak at the end of the answer', () => {
     const slug = (await waitFor(async () => (await readdir(path.join(e.dir, 'books')))[0] ?? null, 30000, 'a book'))!
     await waitFor(async () => parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8').catch(() => '')).data.stage === 'published', 90000, 'the book to be published')
     const ch = parseMd(await readFile(path.join(e.dir, 'books', slug, 'chapters', 'ch-01.md'), 'utf8'))
-    expect(ch.data.humanized).toBe(0)
+    expect(ch.data.humanizer_round).toBe(0)
     expect(ch.body).not.toContain('Write the whole chapter again')
     const job = parseMd(await readFile(path.join(e.dir, 'jobs', 'done', `${slug}--humanize--ch01--r0.md`), 'utf8'))
     expect(job.body).toMatch(/chapter 1 humanized/)
