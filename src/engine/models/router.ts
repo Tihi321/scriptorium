@@ -10,8 +10,8 @@ import type { ProblemKind } from '../../shared/protocol'
 export interface CandidateOptions {
   /** The agent's own `provider/model` override. Goes first. */
   agentModel?: string | null
-  /** The book's own model for this role (`role_models` in book.md). Goes before the agent's own model. */
-  bookModel?: string | null
+  /** The book's own models for this role (`role_models` in book.md), in order. They go before the agent's own model. */
+  bookModels?: string[] | null
   /** Reviewers prefer another family than the book's writer. Models of this family go last. */
   avoidFamily?: string | null
 }
@@ -73,6 +73,10 @@ export class ModelRouter {
   onModelRefused?: (m: ModelInfo, message: string) => void
   /** Models that refused a request (`provider/model` ref), with the time they come back. */
   private readonly refused = new Map<string, { until: number; message: string }>()
+  /** Called once when a model reports that its own usage limit is used up: jobs use the next model of their list until `until` (ms since epoch). */
+  onModelLimited?: (m: ModelInfo, until: number, message: string) => void
+  /** Models whose usage limit is used up (`provider/model` ref), with the time they come back. Only that model is set aside, not its provider. */
+  private readonly limited = new Map<string, { until: number; message: string }>()
   private readonly now: () => number
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
@@ -106,6 +110,36 @@ export class ModelRouter {
     return false
   }
 
+  /** True while the model is set aside for a used-up usage limit; an expired entry is removed. */
+  isLimited(m: ModelInfo): boolean {
+    const r = this.limited.get(m.ref)
+    if (!r) return false
+    if (r.until > this.now()) return true
+    this.limited.delete(m.ref)
+    return false
+  }
+
+  /** The models set aside for a usage limit now, for `factory_status`. */
+  limitedModels(): { model: string; until: string; message: string }[] {
+    const out: { model: string; until: string; message: string }[] = []
+    for (const [model, r] of [...this.limited]) {
+      if (r.until <= this.now()) this.limited.delete(model)
+      else out.push({ model, until: new Date(r.until).toISOString(), message: r.message })
+    }
+    return out
+  }
+
+  /** Why `candidates` leaves this model out or `chat` skips it now (down, used up, retired, refused, usage limit), or null when it is usable. */
+  setAsideReason(m: ModelInfo): string | null {
+    const lim = this.limited.get(m.ref)
+    if (lim && this.isLimited(m)) return `usage limit until ${new Date(lim.until).toISOString()}`
+    const gone = this.retired.get(m.ref)
+    if (gone !== undefined) return `retired (${gone.slice(0, 120)})`
+    if (this.isRefused(m)) return `refused a request (${this.refused.get(m.ref)?.message.slice(0, 120)})`
+    if (!this.usable(m.provider)) return this.blockReason(m.provider) ?? 'not usable'
+    return null
+  }
+
   /** Why a provider takes no request now, in words for the office and `factory_status`, or null when it takes one. */
   blockReason(p: ProviderInfo): string | null {
     if (p.down) return `down (${p.baseUrl ?? p.id} does not answer)`
@@ -119,13 +153,13 @@ export class ModelRouter {
   }
 
   /**
-   * Ordered models for a job: the agent's override, then the role's list. Unavailable providers are dropped,
+   * Ordered models for a job: the book's models in order, the agent's override, then the role's list. Unavailable providers are dropped,
    * and so are servers that are down (Strata not started) and providers whose daily limit is used up, unless nothing else is left.
    */
   candidates(role: string, o: CandidateOptions = {}): ModelInfo[] {
     const own = o.agentModel ? this.registry.resolve(o.agentModel) : undefined
-    const book = o.bookModel ? this.registry.resolve(o.bookModel) : undefined
-    const chosen = [book, own].filter((r): r is string => !!r)
+    const book = (o.bookModels ?? []).map((r) => this.registry.resolve(r))
+    const chosen = [...book, own].filter((r): r is string => !!r)
     const refs = [...chosen, ...this.registry.roleModelRefs(role)]
     const seen = new Set<string>()
     let list: ModelInfo[] = []
@@ -143,6 +177,9 @@ export class ModelRouter {
     // a model that answered a plain request with a 4xx retrying cannot fix is set aside for a while, for the same reason
     const willing = list.filter((m) => !this.isRefused(m))
     if (willing.length > 0) list = willing
+    // a model whose usage limit is used up is set aside until its reset time (only that model: the provider's other models still answer)
+    const within = list.filter((m) => !this.isLimited(m))
+    if (within.length > 0) list = within
     if (o.avoidFamily) {
       // the book's and the agent's own model were picked on purpose: they stay first even in the writer's family
       let lead = 0
@@ -174,6 +211,8 @@ export class ModelRouter {
       if (this.retired.has(model.ref) && models.slice(i + 1).some((m) => !this.retired.has(m.ref))) continue
       // so does a model set aside for refusing a request
       if (this.isRefused(model) && models.slice(i + 1).some((m) => !this.isRefused(m) && !this.retired.has(m.ref))) continue
+      // and a model whose usage limit is used up
+      if (this.isLimited(model) && models.slice(i + 1).some((m) => !this.isLimited(m) && !this.isRefused(m) && !this.retired.has(m.ref))) continue
       // the prompt does not fit the model's context: skip it without a request, also when it is the last one (a silent cut is worse than an error)
       if (model.context !== undefined && promptTokens > model.context) {
         const message = `prompt is too long for ${model.ref}: about ${promptTokens} tokens, its context is ${model.context}`
@@ -254,6 +293,17 @@ export class ModelRouter {
             failures.push(`${model.ref}: ${err.message}`)
             break
           }
+          // this model's own usage limit is used up (the proxy's 429 `usage_limit_exceeded`, Codex's "try again at ..."): no retry, and only this model is set aside
+          if (isUsageLimitError(err)) {
+            const text = err instanceof Error ? err.message : String(err)
+            const until = usageLimitUntil(err, this.now())
+            if (!this.isLimited(model)) {
+              this.limited.set(model.ref, { until, message: text })
+              this.onModelLimited?.(model, until, text)
+            }
+            failures.push(`${model.ref}: usage limit until ${new Date(until).toISOString()}`)
+            break
+          }
           // the provider's daily limit is used up (OpenRouter's free-models-per-day): retrying is no use until midnight UTC
           if (isDailyLimitError(err)) {
             if (this.limiter.markDayFull(provider)) this.onProviderDayFull?.(provider)
@@ -318,6 +368,7 @@ export function isRefusedRequest(err: unknown, hadSchema: boolean): boolean {
 
 /** What kind of failure an error is, so the office can say why an agent isn't getting answers. */
 export function problemKind(err: unknown): ProblemKind {
+  if (isUsageLimitError(err)) return 'usage-limit'
   if (isDailyLimitError(err)) return 'day-limit'
   if (err instanceof ProviderError && err.unreachable) return 'down'
   if (isContextError(err)) return 'too-big'
@@ -329,6 +380,47 @@ export function problemKind(err: unknown): ProblemKind {
   if (status !== undefined && status >= 400 && status < 500) return 'bad-request'
   if (status !== undefined && status >= 500) return 'server'
   return 'other'
+}
+
+/** How long a model with a usage limit and no readable reset time is set aside. */
+export const USAGE_LIMIT_FALLBACK_MS = 60 * 60_000
+const USAGE_LIMIT_MAX_MS = 31 * 24 * 3_600_000
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+/**
+ * The model's own usage limit is used up: the proxy's 429 with `error.code` `usage_limit_exceeded` (AAP-31), or Codex's raw text
+ * ("You've hit your usage limit ... try again at Nov 29th, 2026 11:07 AM"), with any status or none. `provider_queue_full` (also a 429)
+ * is not one.
+ */
+export function isUsageLimitError(err: unknown): boolean {
+  if (!(err instanceof ProviderError)) return false
+  if (err.code === 'usage_limit_exceeded') return true
+  if (err.code === 'provider_queue_full') return false
+  return /usage_limit_exceeded|usage limit|try again at/i.test(err.message)
+}
+
+/**
+ * When the model can answer again (ms since epoch): the error's `exhausted_until`, else its Retry-After, else the "try again at
+ * Nov 29th, 2026 11:07 AM" text (local time). A time in the past, unreadable or more than 31 days ahead gives `now` plus an hour.
+ */
+export function usageLimitUntil(err: unknown, now: number): number {
+  const ok = (t: number) => Number.isFinite(t) && t > now && t <= now + USAGE_LIMIT_MAX_MS
+  if (err instanceof ProviderError) {
+    if (err.until !== undefined && ok(err.until)) return err.until
+    if (err.retryAfterMs !== undefined && ok(now + err.retryAfterMs)) return now + err.retryAfterMs
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  const m = /try again at\s+([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/.exec(msg)
+  if (m) {
+    const month = MONTHS.indexOf(m[1]!.slice(0, 3).toLowerCase())
+    let hour = Number(m[4])
+    if (m[6]) hour = (hour % 12) + (m[6].toLowerCase() === 'pm' ? 12 : 0)
+    if (month >= 0) {
+      const t = new Date(Number(m[3]), month, Number(m[2]), hour, Number(m[5])).getTime()
+      if (ok(t)) return t
+    }
+  }
+  return now + USAGE_LIMIT_FALLBACK_MS
 }
 
 /** A 429 that says a daily request limit is used up (OpenRouter: `free-models-per-day`), not a per-minute one. */

@@ -93,6 +93,18 @@ describe('units and group nouns are not names', () => {
   })
 })
 
+describe('ordinary words are not names (SCP-61)', () => {
+  it('"God", "I\'ve" and a capital after an italic sentence end pass; real names are still caught', () => {
+    expect(newNames('He turned back, wishing to God he had not.', 'He turned back, wishing he had not.')).toEqual([])
+    for (const c of ["I've", 'I’ve', "I'm", "I'll", "I'd"]) expect(newNames(`She said ${c} learned it.`, 'She said I have learned it.'), c).toEqual([])
+    expect(newNames('*Request refused.* These were dead words.', 'Request refused. The words were dead.')).toEqual([])
+    expect(newNames('_Request refused._ These were dead words.', 'Request refused. The words were dead.')).toEqual([])
+    expect(newNames('Then Captain Rourke came in.', 'Then he came in.')).toEqual(['Captain', 'Rourke'])
+    expect(newNames('She asked *Rourke* about it.', 'She asked about it.')).toEqual(['Rourke'])
+    expect(newNames('She patted Rourke’s dog.', 'She patted the dog.')).toEqual(['Rourke’s'])
+  })
+})
+
 describe('the seed prompt', () => {
   it('no longer tells the model to write one-word sentences, and asks for whole sentences and English', async () => {
     for (const f of ['humanize_chapter.md', 'humanize_chapter_vn.md', 'humanize_chapter_article.md']) {
@@ -160,7 +172,7 @@ describe('the humanizer in a pipeline: a leak at the end of the answer', () => {
     const slug = (await waitFor(async () => (await readdir(path.join(e.dir, 'books')))[0] ?? null, 30000, 'a book'))!
     await waitFor(async () => parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8').catch(() => '')).data.stage === 'published', 90000, 'the book to be published')
     const ch = parseMd(await readFile(path.join(e.dir, 'books', slug, 'chapters', 'ch-01.md'), 'utf8'))
-    expect(ch.data.humanized).toBe(0)
+    expect(ch.data.humanizer_round).toBe(0)
     expect(ch.body).not.toContain('Write the whole chapter again')
     const job = parseMd(await readFile(path.join(e.dir, 'jobs', 'done', `${slug}--humanize--ch01--r0.md`), 'utf8'))
     expect(job.body).toMatch(/chapter 1 humanized/)

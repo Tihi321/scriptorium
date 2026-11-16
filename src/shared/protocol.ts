@@ -11,9 +11,10 @@ export type AgentState = 'working' | 'reviewing' | 'waiting-provider' | 'waiting
  * Why a model didn't answer an agent: `day-limit` (the provider's requests for today are used up), `rate-limit` (too many
  * requests now, HTTP 429), `down` (the server isn't running), `too-big` (the request doesn't fit the model's context or answer
  * budget), `no-access` (401/403: key missing or wrong), `no-credit` (402), `not-found` (404: no such model), `bad-request`
- * (another 4xx), `server` (5xx), `budget` (a paid model over a spending cap), `other`.
+ * (another 4xx), `server` (5xx), `budget` (a paid model over a spending cap), `usage-limit` (one model's own quota is used up until a
+ * reset time), `other`.
  */
-export type ProblemKind = 'day-limit' | 'rate-limit' | 'down' | 'too-big' | 'no-access' | 'no-credit' | 'not-found' | 'bad-request' | 'server' | 'budget' | 'other'
+export type ProblemKind = 'usage-limit' | 'day-limit' | 'rate-limit' | 'down' | 'too-big' | 'no-access' | 'no-credit' | 'not-found' | 'bad-request' | 'server' | 'budget' | 'other'
 
 /** The last failed request of an agent, kept until one of its requests is answered again. */
 export interface AgentProblem {
@@ -139,6 +140,19 @@ export interface AgentSummary {
   problem?: AgentProblem
 }
 
+/** A job a shared fallback answered instead of the book's own models for the role (`model_deviations` in book.md, SCP-61). */
+export interface ModelDeviation {
+  at: string
+  job: string
+  role: string
+  /** The model that answered (`provider/model`). */
+  model: string
+  /** The book's list for the role. */
+  wanted: string[]
+  /** Why each model of the list did not answer, shortened. */
+  reason: string
+}
+
 export interface BookSummary {
   slug: string
   title: string
@@ -167,6 +181,8 @@ export interface BookSummary {
   round: number
   /** Why it failed or was rejected. */
   reasons: string[]
+  /** Jobs a shared fallback answered instead of the book's own models for a role, newest last (at most 20); empty when none. */
+  modelDeviations: ModelDeviation[]
   /** Who worked on it (from made.md): per agent, its role, finished jobs, the models it used and what it cost. */
   team: { agent: string; role: string; jobs: number; models: string[]; costUsd: number }[]
   /** The last finished jobs, newest first. */
@@ -415,8 +431,8 @@ export type Command =
   /** Puts a failed book's failed jobs back in the queue and continues the book from the stage it failed in. */
   | { type: 'retryBook'; book: string }
   /** Gives a rejected book one more round: `rewrite` (the given chapters, or the ones the reviews name, then reviewed again) or `review` (reviewed again, no rewrite). Then the publisher decides again. */
-  /** Sets (or with `model: null` removes) the model one book uses for a role (`role_models` in book.md). Its jobs of that role try it first. */
-  | { type: 'setBookModel'; book: string; role: string; model: string | null }
+  /** Sets (or with `model: null` removes) the model, or the ordered list of models, one book uses for a role (`role_models` in book.md). Its jobs of that role try them first, in order. */
+  | { type: 'setBookModel'; book: string; role: string; model: string | string[] | null }
   | { type: 'setBookByline'; book: string; byline: string }
   | { type: 'reopenBook'; book: string; mode: 'rewrite' | 'review'; chapters?: number[] }
   /** Draws a published book's cover again from templates/cover.html and book.md, then rebuilds the EPUB. Answers with `book.updated`. */

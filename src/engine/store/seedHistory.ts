@@ -31,7 +31,7 @@ export const SEED_HISTORY: Record<string, string[]> = {
   "prompts/developmental-editor/act_review.md": ['30823c3664fb83a0', '56c1bead620e2336'],
   "prompts/developmental-editor/review.md": ['d97bce26d437848a', 'e7431ee2f2198d1e'],
   "prompts/developmental-editor/review_nf.md": ['4b016776d4f7c3c4', 'e7e526d7e717db65'],
-  "prompts/developmental-editor/review_outline.md": ['41d9480e8957bfe9', '8fd6864fcaa2a06b'],
+  "prompts/developmental-editor/review_outline.md": ['19322c046d9d5a98', '41d9480e8957bfe9', '8fd6864fcaa2a06b'],
   "prompts/editor-in-chief/start_book.md": ['910132558b002364'],
   "prompts/editor-in-chief/start_book_article.md": ['82dd82fcfc2dd4ba'],
   "prompts/fact-checker/fact_check.md": ['b2d89bdfdea57258', 'bf1fa91cbd76a1d1'],

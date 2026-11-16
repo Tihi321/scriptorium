@@ -245,7 +245,7 @@ export function registerNonfictionHandlers(sched: Scheduler, d: PipelineDeps): v
       // what the model checks: each specific claim against the notes
       const digest = await d.factbase.digest(slug)
       const bookText = await d.books.fullText(slug)
-      const window = d.contextTokens(role)
+      const window = d.contextTokens(role, slug)
       const roomChars = window ? Math.max(6000, Math.floor(window * 0.6 * 4) - bookText.length - digest.length) : 24000
       const notesOnly = factCheckNotes(notes, sources, bookText, Math.min(30000, roomChars))
       const noteText = factCheckNotes(notes, sources, bookText, Math.min(30000, roomChars), Math.min(24000, Math.max(0, roomChars - notesOnly.length)))

@@ -11,9 +11,9 @@ import { pad2 } from './books'
 import { chatJson, cleanProse } from './llm'
 import { calendarFor, storyYearOf, weekdayMismatches } from './calendar'
 import { ensureProblemsRule, normalizeReviewJson, reviewBody, withUsableNotes } from './reviewNotes'
-import { appendToPrompt, buildMessages } from './prompts'
+import { appendToPrompt, buildMessages, loadPrompt } from './prompts'
 import { seriesSection } from './series'
-import { askFromReview, clamp, formatVars, memoryContext, recordMade, Run, storyBriefSection, unitNumber } from './handlers'
+import { askFromReview, clamp, formatVars, memoryContext, ownerNotesSection, recordMade, Run, storyBriefSection, unitNumber } from './handlers'
 import type { PipelineDeps } from './handlers'
 
 const reviewSchema = (dims: string[]) =>
@@ -25,6 +25,12 @@ const reviewSchema = (dims: string[]) =>
     problems: z.array(z.string()).default([]),
     research_questions: z.array(z.string()).default([])
   })
+
+/**
+ * SCP-61: what the outline review checks besides the structure. It is in the seed prompt; a data folder whose prompt was edited (its text has
+ * no "owner's brief") gets the rule from code, as `ensureProblemsRule` does.
+ */
+export const BRIEF_RULE = `Then check the outline against the owner's brief, the series notes and the owner's notes below: every named character, plot point and setting the brief or a note asks for must appear in some chapter. Name each missing item as a problem with the chapter where it should go. A missing required item is a "revise" whatever the structure score.`
 
 /** Handlers for the long-book machinery: outline review, chapter checks, memory updates, act jobs, thread check, repetition report. */
 export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
@@ -57,6 +63,8 @@ export function registerLongHandlers(sched: Scheduler, d: PipelineDeps): void {
     run.version = version
     appendToPrompt(messages, await storyBriefSection(d, slug))
     appendToPrompt(messages, await seriesSection(d, slug))
+    appendToPrompt(messages, await ownerNotesSection(d, slug))
+    if (!(await loadPrompt(d.dataDir, 'developmental-editor', 'review_outline')).raw.includes("owner's brief")) appendToPrompt(messages, BRIEF_RULE)
     await ensureProblemsRule(d.dataDir, messages, 'developmental-editor', 'review_outline')
     const q = d.getQuality()
     const outlineSchema = reviewSchema(['structure'])

@@ -3,10 +3,10 @@ import path from 'node:path'
 import { emptyBrief } from '../shared/brief'
 import { displayAuthor } from '../shared/byline'
 import type { StoryBrief } from '../shared/brief'
-import type { Command, EngineEvent, IdeaSummary, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
+import type { Command, EngineEvent, IdeaSummary, ModelDeviation, SeriesSummary, SettingsSummary, SnapshotEvent } from '../shared/protocol'
 import { parseMdWith } from '../shared/md'
-import { factorySchema, formatsSchema, qualitySchema, ROLES, settingsSchema } from '../shared/schemas'
-import type { FactoryConfig, FormatEntry, QualityConfig, SettingsConfig } from '../shared/schemas'
+import { factorySchema, formatsSchema, qualitySchema, roleModelList, roleModelValueOf, ROLES, settingsSchema } from '../shared/schemas'
+import type { FactoryConfig, FormatEntry, QualityConfig, RoleModels, SettingsConfig } from '../shared/schemas'
 import { AgentStore } from './agents/agents'
 import { Budget } from './budget/spend'
 import { LogWriter } from './logs/logs'
@@ -151,6 +151,13 @@ export class Engine {
       this.emit({ type: 'engine.warning', message: `${m.ref} refused a request: jobs use their next model for 10 minutes.` })
       this.scheduler.kick()
     }
+    // a model whose usage limit is used up (the proxy's 429 `usage_limit_exceeded`, Codex's "try again at ..."): only that model is set aside until its reset
+    this.router.onModelLimited = (m, until, message) => {
+      const at = new Date(until).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+      this.log(`models: ${m.ref} hit its usage limit until ${at}: jobs use the next model of their list until then. Provider said: ${message.slice(0, 300)}`)
+      this.emit({ type: 'engine.warning', message: `${m.ref} hit its usage limit until ${at}: jobs use their next model until then.` })
+      this.scheduler.kick()
+    }
     this.jobs = new JobStore(dir)
     this.agents = new AgentStore(dir)
     this.logs = new LogWriter(dir)
@@ -168,7 +175,8 @@ export class Engine {
       isBookPaused: (book) => this.pipeline.pausedBooks.has(book),
       inScope: (job) => this.jobInScope(job),
       getBookModel: (book, role) => this.bookModel(book, role),
-      getIdeaModel: (idea, role) => this.ideaModel(idea, role)
+      getIdeaModel: (idea, role) => this.ideaModel(idea, role),
+      onDeviation: (book, d) => this.recordDeviation(book, d)
     })
     this.books = new BookStore(dir)
     this.topics = new TopicsFile(dir, () => void this.emitTopics())
@@ -199,7 +207,7 @@ export class Engine {
       jobs: this.jobs,
       scheduler: this.scheduler,
       getQuality: () => this.quality,
-      contextTokens: (role) => this.router.candidates(role)[0]?.context,
+      contextTokens: (role, book, pick) => this.contextTokens(role, book, pick),
       getFormats: () => this.formats,
       getFactory: () => this.factory,
       getByline: () => this.settings.byline,
@@ -669,28 +677,56 @@ export class Engine {
     this.scheduler.kick()
   }
 
-  /** Book slug -> its `role_models`, read from book.md and kept for a few seconds (the scheduler asks for every queued job on every tick). */
-  private bookModels = new Map<string, { at: number; models: Record<string, string> }>()
+  /** Book slug -> its `role_models` (each role as an ordered list), read from book.md and kept for a few seconds (the scheduler asks for every queued job on every tick). */
+  private bookModels = new Map<string, { at: number; models: Record<string, string[]> }>()
 
   /** Story slug -> its `role_models`, for the `start_book` job that makes the story's book (the book does not exist yet). */
-  private ideaModels = new Map<string, { at: number; models: Record<string, string> }>()
+  private ideaModels = new Map<string, { at: number; models: Record<string, string[]> }>()
 
-  private async ideaModel(idea: string, role: string): Promise<string | undefined> {
-    let hit = this.ideaModels.get(idea)
-    if (!hit || Date.now() - hit.at > 3000) {
-      hit = { at: Date.now(), models: (await this.ideas.list()).find((i) => i.slug === idea)?.data.role_models ?? {} }
-      this.ideaModels.set(idea, hit)
-    }
-    return hit.models[role] || undefined
+  private static listsOf(raw: RoleModels | undefined): Record<string, string[]> {
+    return Object.fromEntries(Object.entries(raw ?? {}).map(([role, v]) => [role, roleModelList(v)] as const))
   }
 
-  private async bookModel(book: string, role: string): Promise<string | undefined> {
+  private async ideaModel(idea: string, role: string): Promise<string[] | undefined> {
+    let hit = this.ideaModels.get(idea)
+    if (!hit || Date.now() - hit.at > 3000) {
+      hit = { at: Date.now(), models: Engine.listsOf((await this.ideas.list()).find((i) => i.slug === idea)?.data.role_models) }
+      this.ideaModels.set(idea, hit)
+    }
+    return hit.models[role]?.length ? hit.models[role] : undefined
+  }
+
+  private async bookModel(book: string, role: string): Promise<string[] | undefined> {
     let hit = this.bookModels.get(book)
     if (!hit || Date.now() - hit.at > 3000) {
-      hit = { at: Date.now(), models: (await this.books.read(book))?.data.role_models ?? {} }
+      hit = { at: Date.now(), models: Engine.listsOf((await this.books.read(book))?.data.role_models) }
       this.bookModels.set(book, hit)
     }
-    return hit.models[role] || undefined
+    return hit.models[role]?.length ? hit.models[role] : undefined
+  }
+
+  /**
+   * The context window a prompt of `role` is sized to. Without a book: the first candidate's. With a book, the book's own models count
+   * (read from the cache the scheduler fills before it launches a job of the book): `first` is the first candidate's window, `largest` the
+   * largest window among the models of the book's list (among all candidates when the book has no list; an unknown window means no cut),
+   * so a whole-book prompt is only cut down when no model of the list can take it (SCP-61).
+   */
+  private contextTokens(role: string, book?: string | null, pick: 'first' | 'largest' = 'first'): number | undefined {
+    const own = book ? this.bookModels.get(book)?.models[role] : undefined
+    const list = this.router.candidates(role, { bookModels: own?.length ? own : undefined })
+    if (pick === 'largest' && list.length > 0) {
+      // the models the job may use: the book's list when it has one, else every candidate. A model with no known window can take any prompt.
+      const wanted = new Set((own ?? []).map((r) => this.registry.resolve(r) ?? r))
+      const usable = own?.length ? list.filter((m) => wanted.has(m.ref)) : list
+      if (usable.length > 0) return usable.some((m) => m.context === undefined) ? undefined : Math.max(...usable.map((m) => m.context!))
+    }
+    return list[0]?.context
+  }
+
+  /** SCP-61: a job of the book was answered by a model outside its list: kept in book.md (newest last, at most 20), shown in the book's status and `get_book`. */
+  private async recordDeviation(book: string, d: ModelDeviation): Promise<void> {
+    await this.books.update(book, (data) => ({ model_deviations: [...((data.model_deviations as ModelDeviation[] | undefined) ?? []), d].slice(-20) }))
+    await this.emitBookUpdated(book)
   }
 
   /** Gives a rejected or published book one more round (see `Pipeline.reopenBook`). Returns the reason when it can't be reopened, else null. */
@@ -709,17 +745,20 @@ export class Engine {
     return this.pipeline.refreshFactbase(slug)
   }
 
-  /** Sets or removes the model a book uses for a role. Its running jobs of that role switch at once. */
-  private async setBookModel(book: string, role: string, model: string | null): Promise<void> {
+  /** Sets or removes the model, or the ordered list of models, a book uses for a role. Its running jobs of that role switch at once. */
+  private async setBookModel(book: string, role: string, model: string | string[] | null): Promise<void> {
     const b = await this.books.read(book)
     if (!b) return this.log(`setBookModel: no book "${book}"`)
+    const list = roleModelList(model)
     const next = { ...b.data.role_models }
-    if (model) next[role] = model
+    const value = roleModelValueOf(list)
+    if (value !== undefined) next[role] = value
     else delete next[role]
     await this.books.update(book, () => ({ role_models: next }))
-    this.bookModels.delete(book)
-    this.log(`book ${book}: ${role} ${model ? `uses ${model}` : 'back to its role list'}`)
-    this.scheduler.bookModelChanged(book, role, model ?? undefined)
+    // refill the cache with the new map (the prompt window of a running job reads it at once)
+    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(next) })
+    this.log(`book ${book}: ${role} ${list.length ? `uses ${list.join(', ')}` : 'back to its role list'}`)
+    this.scheduler.bookModelChanged(book, role, list.length ? list : undefined)
     await this.emitBookUpdated(book)
     this.scheduler.kick()
   }
@@ -998,7 +1037,7 @@ export class Engine {
    * The story waits until the source is published (it is, here) and a book starts from it like from any story. The title defaults to the source's.
    * Throws when the book does not exist or is not published, the format is not an enabled script format (or is a picture-book format: a picture book is written from a story that fixes it, not adapted), or the same adaptation is already waiting.
    */
-  async adaptBook(input: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }): Promise<IdeaFile> {
+  async adaptBook(input: { book: string; format: string; title?: string; notes?: string; models?: RoleModels }): Promise<IdeaFile> {
     const src = await this.books.read(input.book)
     if (!src) throw new Error(`no book "${input.book}" (list_books shows the slugs)`)
     if (src.data.article === true) throw new Error(`"${src.data.title}" is a newspaper article: only a book can be adapted into a script`)

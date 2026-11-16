@@ -66,8 +66,13 @@ export interface ChapterFile {
   agent?: string
   /** Fixes already applied to this chapter: `len` (length rewrite). */
   fixes: string[]
-  /** The round the humanizer last rewrote this chapter in (`humanized` in the chapter file). Missing: not humanized since it was last written. */
+  /**
+   * The book round the humanizer pass last ran in (`humanizer_round` in the chapter file; older files: `humanized`). The pass counts as done
+   * whether it rewrote the chapter or was refused (see `humanizerResult`). Missing: no pass since the chapter was last written.
+   */
   humanized?: number
+  /** What the last pass did (`humanizer_result`): `rewritten`, or `kept` (a guard refused the pass and the original stayed). Missing in files made before SCP-61. */
+  humanizerResult?: 'rewritten' | 'kept'
 }
 
 export interface OutlineChapter {
@@ -329,27 +334,32 @@ export class BookStore {
         body: doc.body.trim(),
         agent: doc.data.agent ? String(doc.data.agent) : undefined,
         fixes: Array.isArray(doc.data.fixes) ? (doc.data.fixes as unknown[]).map(String) : [],
-        ...(Number.isInteger(doc.data.humanized) ? { humanized: Number(doc.data.humanized) } : {})
+        ...(Number.isInteger(doc.data.humanizer_round) || Number.isInteger(doc.data.humanized)
+          ? { humanized: Number(Number.isInteger(doc.data.humanizer_round) ? doc.data.humanizer_round : doc.data.humanized) }
+          : {}),
+        ...(doc.data.humanizer_result === 'rewritten' || doc.data.humanizer_result === 'kept' ? { humanizerResult: doc.data.humanizer_result } : {})
       })
     }
     return out.sort((a, b) => a.n - b.n)
   }
 
   /** Writes a chapter. The version it replaces is kept in chapters/history/. */
-  async writeChapter(slug: string, ch: { n: number; title: string; round: number; body: string; agent?: string; model?: string; fixes?: string[]; humanized?: number }): Promise<void> {
+  async writeChapter(slug: string, ch: { n: number; title: string; round: number; body: string; agent?: string; model?: string; fixes?: string[]; humanizer?: { round: number; result: 'rewritten' | 'kept' } }): Promise<void> {
     const file = this.chapterFile(slug, ch.n)
     try {
       const old = await fs.readFile(file, 'utf8')
       const oldDoc = parseMd(old)
       const oldRound = Number(oldDoc.data.round ?? 0)
-      // a humanized version is kept beside the version it was made from (the same round), not over it
-      await atomicWrite(this.file(slug, 'chapters', 'history', `ch-${pad2(ch.n)}-r${oldRound}${Number.isInteger(oldDoc.data.humanized) ? '-humanized' : ''}.md`), old)
+      // a version the humanizer rewrote is kept beside the version it was made from (the same round), not over it; a refused pass left the text as it was
+      // (SCP-61; a file from before it has no result: an integer `humanized` counts as a rewrite there)
+      const rewritten = oldDoc.data.humanizer_result === 'rewritten' || (oldDoc.data.humanizer_result === undefined && Number.isInteger(oldDoc.data.humanized))
+      await atomicWrite(this.file(slug, 'chapters', 'history', `ch-${pad2(ch.n)}-r${oldRound}${rewritten ? '-humanized' : ''}.md`), old)
     } catch {
       /* first version */
     }
     await writeMd(
       file,
-      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined, humanized: ch.humanized },
+      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined, humanizer_round: ch.humanizer?.round, humanizer_result: ch.humanizer?.result },
       '\n' + ch.body.trim() + '\n'
     )
   }

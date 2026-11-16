@@ -14,7 +14,7 @@ import type { BookStore } from './books'
 export interface NfDeps extends ResearchContextDeps {
   books: BookStore
   factbase: FactBase
-  contextTokens(role: string): number | undefined
+  contextTokens(role: string, book?: string | null): number | undefined
 }
 
 const NF_TITLES: Record<number, string> = {
@@ -117,7 +117,7 @@ export interface NfContextOptions {
  * (numbered, so the writer can cite them), the other chapters' facts and the chapters themselves. Most important parts first.
  */
 export async function nonfictionContext(d: NfDeps, slug: string, n: number, o: NfContextOptions): Promise<PackedContext & { notes: NoteFile[] }> {
-  const window = d.contextTokens(o.role)
+  const window = d.contextTokens(o.role, slug)
   const budget = window ? Math.max(2500, Math.min(o.budgetTokens, Math.floor(window * 0.45))) : o.budgetTokens
   const outline = (await d.books.outline(slug))!
   const entry = outline.chapters.find((c) => c.n === n)

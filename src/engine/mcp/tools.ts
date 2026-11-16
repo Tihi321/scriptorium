@@ -6,7 +6,8 @@ import { briefOf, briefPromptText, emptyBrief, renderBrief } from '../../shared/
 import { displayAuthor } from '../../shared/byline'
 import type { BriefCharacter, StoryBrief } from '../../shared/brief'
 import type { BookSummary } from '../../shared/protocol'
-import { ROLES } from '../../shared/schemas'
+import { roleModelList, roleModelValue, roleModelValueOf, ROLES } from '../../shared/schemas'
+import type { RoleModels } from '../../shared/schemas'
 import { DEFAULT_CLIENT, DEFAULT_LEASE_MS } from '../models/client'
 import type { Engine } from '../engine'
 import { TERMINAL_BOOK_STAGES } from '../pipeline/books'
@@ -53,7 +54,16 @@ const characterSchema = z.object({
   description: z.string().optional().describe('Looks, voice, history: free text')
 })
 const sectionSchema = z.object({ heading: z.string(), text: z.string() })
-const modelsSchema = z.record(z.string(), z.string())
+/** SCP-61: a model, or an ordered list of models, per role. */
+const modelsSchema = z.record(z.string(), roleModelValue)
+const modelRefSchema = roleModelValue
+
+/** Models as `role_models` stores them: one model a string, two or more a list, none left out. */
+const normModels = (models: RoleModels): RoleModels =>
+  Object.fromEntries(Object.entries(models).flatMap(([role, v]) => {
+    const value = roleModelValueOf(roleModelList(v))
+    return value === undefined ? [] : [[role, value] as const]
+  }))
 
 const toCharacter = (c: z.infer<typeof characterSchema>): BriefCharacter => ({ name: c.name.trim(), role: c.role?.trim() ?? '', description: c.description?.trim() ?? '' })
 
@@ -96,10 +106,12 @@ export function registerTools(server: McpServer, engine: Engine): void {
     const m = engine.registry.getModel(ref) ?? fail(`unknown model "${ref}" (list_models shows the refs)`)
     if (!m.provider.available) fail(`the provider of "${ref}" is not available (${m.provider.unavailableReason ?? 'switched off'}): jobs would skip it`)
   }
-  const checkRoleModels = (models?: Record<string, string>) => {
-    for (const [role, ref] of Object.entries(models ?? {})) {
+  const checkRoleModels = (models?: RoleModels) => {
+    for (const [role, value] of Object.entries(models ?? {})) {
       needRole(role)
-      needModel(ref)
+      const refs = roleModelList(value)
+      if (refs.length === 0) fail(`no model given for role "${role}"`)
+      for (const ref of refs) needModel(ref)
     }
   }
   const book = async (slug: string) => {
@@ -132,7 +144,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
+      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -159,6 +171,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         // queued jobs that no model can take now (a server down, a day used up, a rate limit, every slot busy), and the providers behind it
         blocked: engine.scheduler.blockedJobs(),
         lastResort: engine.registry.lastResort()?.ref ?? null,
+        limitedModels: engine.router.limitedModels(),
         providers: [...engine.registry.providers.values()]
           .filter((p) => p.kind !== 'search' && p.kind !== 'client' && p.available)
           .map((p) => {
@@ -568,11 +581,11 @@ export function registerTools(server: McpServer, engine: Engine): void {
           .optional()
           .describe('A mystery with puzzles (format "mystery-puzzle-visual-novel"): the puzzles, each as VN Studio makes them (vno_puzzle_generate): {key, kind: "murdle", title?, core (the whole core), names (item id -> name in the story), text (clue id and "murder" -> the canonical sentence)}; for a testimony also {testimony: {witness, breaks: [{statement, evidence}], evidence: [{key, description}]}}. Scriptorium keeps them as bible/puzzles.md, the outline places each in a chapter and the writers plant the clues (docs/visual-novel.md "Puzzles")'),
         byline: z.string().optional().describe('The name the book shows as its author on the cover, in the EPUB and on its title page (e.g. the owner). Left out: the byline default of config/settings.md, else the pen name of the writer agent. The agent stays named in the credits line'),
-        models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}. Its jobs of that role use it first; any agent of the role takes them')
+        models: modelsSchema.optional().describe('Models for this book only, role -> a provider/model or an ordered list of them, e.g. {"writer": "client/claude-code", "publisher": ["acp/antigravity/gemini-4-argon", "acp/claude/claude-sonnet-5"]}. Its jobs of that role try them in order first; any agent of the role takes them. A job a shared fallback answers instead writes a DEVIATION line to the book log and `modelDeviations` in get_book')
       }
     },
     run(
-      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; byline?: string; puzzles?: PuzzleEntry[]; models?: Record<string, string> }) => {
+      async (a: { title?: string; premise?: string; plot?: string; characters?: z.infer<typeof characterSchema>[]; setting?: string; style?: string; sections?: z.infer<typeof sectionSchema>[]; format?: string; topic?: string; genre?: string; series?: string; humanize?: boolean; byline?: string; puzzles?: PuzzleEntry[]; models?: RoleModels }) => {
         checkFormat(a.format)
         await checkTopic(a.topic)
         await checkSeries(a.series)
@@ -593,7 +606,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
           ...(a.humanize === false ? { humanize: false } : {}),
           ...(a.byline?.trim() ? { byline: a.byline.trim() } : {}),
           ...(a.puzzles?.length ? { puzzles: a.puzzles } : {}),
-          ...(a.models && Object.keys(a.models).length ? { models: a.models } : {})
+          ...(a.models && Object.keys(normModels(a.models)).length ? { models: normModels(a.models) } : {})
         }
         const idea = await engine.addStory(brief).catch((err: Error) => fail(err.message))
         return { slug: idea.slug, file: `ideas/${idea.slug}.md`, story: ideaSummary(idea) }
@@ -611,10 +624,10 @@ export function registerTools(server: McpServer, engine: Engine): void {
         format: z.string().describe('A script format id: "visual-novel" (linear) or "choice-visual-novel" (choices; the source ending stays one canon path) for VN Studio, or a screenplay format: "short-film", "cartoon" or "kids-cartoon" (the source is compressed into its runtime)'),
         title: z.string().optional().describe('Title of the script. Default: the title of the source book'),
         notes: z.string().optional().describe('Notes for the adapter: what to keep, cut or change'),
-        models: modelsSchema.optional().describe('Models for this book only, role -> provider/model, e.g. {"writer": "client/claude-code"}')
+        models: modelsSchema.optional().describe('Models for this book only, role -> a provider/model or an ordered list of them, e.g. {"writer": "client/claude-code"}')
       }
     },
-    run(async (a: { book: string; format: string; title?: string; notes?: string; models?: Record<string, string> }) => {
+    run(async (a: { book: string; format: string; title?: string; notes?: string; models?: RoleModels }) => {
       await needBook(a.book)
       checkRoleModels(a.models)
       const idea = await engine.adaptBook(a).catch((err: Error) => fail(err.message))
@@ -643,7 +656,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
         humanize: z.boolean().optional().describe('false: the humanizer skips this book; true: back to the default'),
         byline: z.string().optional().describe('The name the book shows as its author; an empty string goes back to the default of config/settings.md (else the pen name of the writer)'),
-        models: modelsSchema.optional().describe('Replaces the models of this story (role -> provider/model); {} clears them')
+        models: modelsSchema.optional().describe('Replaces the models of this story (role -> a provider/model or an ordered list of them); {} clears them')
       }
     },
     run(
@@ -663,7 +676,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         series?: string
         humanize?: boolean
         byline?: string
-        models?: Record<string, string>
+        models?: RoleModels
       }) => {
         const idea = await needStory(a.story)
         if (idea.data.status !== 'open') fail(`the story "${a.story}" was already used by a book (${idea.data.book ?? 'unknown'}): add a note to that book instead (add_book_note)`)
@@ -673,7 +686,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         checkRoleModels(a.models)
         const brief = briefOf(idea.data, idea.body)
         if (a.models !== undefined) {
-          if (Object.keys(a.models).length) brief.models = a.models
+          if (Object.keys(normModels(a.models)).length) brief.models = normModels(a.models)
           else delete brief.models
         }
         if (a.humanize === false) brief.humanize = false
@@ -882,15 +895,15 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'set_book_model',
     {
       description:
-        'Set the model ONE book uses for a role (model null removes it). Its jobs of that role try this model first, before any model set on the agent, and any agent of the role may take them; the role list stays the fallback. Use it to put one book on client/claude-code without touching the others. Running jobs of the book switch at once. Works at any stage, so a model can be set on a failed or published book before retry_book or reopen_book; null always works.',
-      inputSchema: { book: z.string(), role: z.string(), model: z.string().nullable().describe('A provider/model ref from list_models, or null to remove') },
+        'Set the model, or an ordered list of models, ONE book uses for a role (model null removes it). Its jobs of that role try the book\'s list in order first, before any model set on the agent, and any agent of the role may take them; only when the list is used up (or no model of it fits the prompt) do the agent\'s model and the role\'s models answer, and a job a shared fallback answers writes a DEVIATION line to the book log and `modelDeviations` in get_book. Use it to put one book on client/claude-code, or on two acp models, without touching the others. Running jobs of the book switch at once. Works at any stage, so a model can be set on a failed or published book before retry_book or reopen_book; null always works.',
+      inputSchema: { book: z.string(), role: z.string(), model: modelRefSchema.nullable().describe('A provider/model ref from list_models, an ordered list of refs, or null to remove') },
       annotations: WRITE
     },
-    run(async ({ book: slug, role, model }: { book: string; role: string; model: string | null }) => {
+    run(async ({ book: slug, role, model }: { book: string; role: string; model: string | string[] | null }) => {
       await needBook(slug)
       needRole(role)
-      if (model !== null) needModel(model)
-      await engine.handleCommand({ type: 'setBookModel', book: slug, role, model })
+      if (model !== null) checkRoleModels({ [role]: model })
+      await engine.handleCommand({ type: 'setBookModel', book: slug, role, model: model === null ? null : roleModelList(model) })
       return book(slug)
     })
   )

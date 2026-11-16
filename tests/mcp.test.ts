@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { loadMcpConfig, startMcpServer } from '../src/engine/mcp/server'
 import type { McpHandle } from '../src/engine/mcp/server'
 import { writeMd } from '../src/engine/store/atomic'
+import { ProviderError } from '../src/engine/models/types'
 import { acquireEngineLock } from '../src/engine/store/dataFolder'
 import { parseMd } from '../src/shared/md'
 import { makeEnv, waitFor } from './helpers'
@@ -513,6 +514,43 @@ describe('MCP book models', () => {
     expect((await call(c, 'set_book_model', { book: 'running-book', role: 'nobody', model: 'loc/m1' })).raw).toMatch(/unknown role/)
     expect((await call(c, 'set_book_model', { book: 'nobody', role: 'writer', model: null })).isError).toBe(true)
     expect((await call(c, 'set_book_model', { book: 'running-book', role: 'writer', model: null })).data.roleModels).toEqual({})
+  })
+
+  it('set_book_model takes an ordered list, and a job a shared fallback answers writes a DEVIATION line and modelDeviations (SCP-61)', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'acp', models: ['a', 'b'] }, { id: 'loc', local: true, models: ['g'] }],
+      roles: { writer: ['loc/g'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+    mcp = await startMcpServer({ engine: env.engine, config: { enabled: true, host: '127.0.0.1', port: 0, tokenEnv: 'SCRIPTORIUM_TEST_MCP_TOKEN_UNSET' }, log: () => undefined })
+    const c = await connect(mcp!.url)
+    await env.engine.handleCommand({ type: 'saveSettings', kindleAddress: '', fromAddress: '', smtpHost: '', smtpPort: 587, smtpUser: '', smtpSecure: false, fallbacks: ['loc/g'], fallbackShared: true })
+    env.mock.onAny((req) => {
+      if (req.model === 'a' || req.model === 'b') throw new ProviderError('bad request', 400, false)
+      return 'from g'
+    })
+    env.engine.scheduler.register('t', async (ctx) => ({ result: (await ctx.chat({ messages: [{ role: 'user', content: 'hi' }] })).text }))
+    await makeBook(env, 'listed', 'rejected')
+    await makeBook(env, 'plain', 'rejected')
+    const set = await call(c, 'set_book_model', { book: 'listed', role: 'writer', model: ['acp/a', 'acp/b', 'acp/a'] })
+    expect(set.isError).toBe(false)
+    expect(set.data.roleModels).toEqual({ writer: ['acp/a', 'acp/b'] })
+    expect((await env.engine.books.read('listed'))!.data.role_models).toEqual({ writer: ['acp/a', 'acp/b'] })
+    expect((await call(c, 'set_book_model', { book: 'listed', role: 'writer', model: ['acp/a', 'nope/x'] })).raw).toMatch(/unknown model/)
+    for (const book of ['listed', 'plain']) await env.engine.jobs.enqueue({ id: `${book}--t--u1--r0`, task: 't', role: 'writer', book, unit: 'u1', requested_by: 'engine' })
+    await waitFor(async () => (await readdir(path.join(env!.dir, 'jobs', 'done'))).length === 2, 8000, 'both jobs done')
+    await env.engine.logs.flush()
+    const log = await readFile(path.join(env.dir, 'books', 'listed', 'log.md'), 'utf8')
+    expect(log.match(/^DEVIATION: .*$/gm)).toEqual([expect.stringMatching(/^DEVIATION: writer job listed--t--u1--r0 was answered by loc\/g, a shared fallback outside the book's list \(acp\/a, acp\/b\)\. Why: acp\/a: .*bad request.*; acp\/b: .*bad request/)])
+    expect(await readFile(path.join(env.dir, 'books', 'plain', 'log.md'), 'utf8')).not.toContain('DEVIATION')
+    const got = await waitFor(async () => {
+      const g = (await call(c, 'get_book', { book: 'listed' })).data
+      return g.modelDeviations?.length ? g : null
+    }, 5000, 'modelDeviations in get_book')
+    expect(got.modelDeviations).toHaveLength(1)
+    expect(got.modelDeviations[0]).toMatchObject({ job: 'listed--t--u1--r0', role: 'writer', model: 'loc/g', wanted: ['acp/a', 'acp/b'] })
+    expect((await call(c, 'get_book', { book: 'plain' })).data.modelDeviations).toEqual([])
+    expect((await call(c, 'factory_status')).data.limitedModels).toEqual([])
   })
 
   it('add_story humanize:false is stored in the story and shown by get_story; update_story can set it back; the humanizer role takes a book model', async () => {

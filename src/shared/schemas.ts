@@ -332,6 +332,28 @@ export const agentSchema = z.looseObject({
 
 // ---- jobs ----
 
+/** One model (`provider/model`) or an ordered list of them: what a role maps to in `role_models` (SCP-61). One model is written as a string, two or more as a list. */
+export const roleModelValue = z.union([z.string(), z.array(z.string()).min(1)])
+export type RoleModelValue = z.infer<typeof roleModelValue>
+export type RoleModels = Record<string, RoleModelValue>
+
+/** The models of a `role_models` value in order: trimmed, empty entries and duplicates dropped. A missing value is an empty list. */
+export function roleModelList(v: string | string[] | undefined | null): string[] {
+  const list = typeof v === 'string' ? [v] : Array.isArray(v) ? v : []
+  const out: string[] = []
+  for (const x of list) {
+    const t = typeof x === 'string' ? x.trim() : ''
+    if (t && !out.includes(t)) out.push(t)
+  }
+  return out
+}
+
+/** A list as `role_models` stores it: one model as a string, two or more as a list, none as undefined. */
+export function roleModelValueOf(list: string[]): RoleModelValue | undefined {
+  const l = roleModelList(list)
+  return l.length === 0 ? undefined : l.length === 1 ? l[0]! : l
+}
+
 export const ideaSchema = z.looseObject({
   kind: z.literal('idea').default('idea'),
   title: z.string().optional(),
@@ -345,8 +367,8 @@ export const ideaSchema = z.looseObject({
   source: z.enum(['user', 'generated']).default('user'),
   /** Format id from config/formats.md. Empty means "the editor-in-chief picks". */
   format: z.string().nullable().default(null),
-  /** Role -> `provider/model` for the book made from this story (copied to the book's `role_models`). */
-  role_models: z.record(z.string(), z.string()).optional(),
+  /** Role -> `provider/model` (or an ordered list of them) for the book made from this story (copied to the book's `role_models`). */
+  role_models: z.record(z.string(), roleModelValue).optional(),
   book: z.string().nullable().default(null),
   /** Series slug (a file in series/). The book made from this story is a book of that series. */
   series: z.string().optional(),
@@ -409,11 +431,16 @@ export const bookSchema = z.looseObject({
   /** Rounds added to the format's `max_rounds` by `reopen_book`, one per reopening. */
   extra_rounds: z.number().int().nonnegative().default(0),
   /**
-   * Role -> `provider/model` for this book only (`add_story {models}`, `set_book_model`): a job of the book in that role tries this model first,
-   * before the agent's own model, and any agent of the role may take it. The role's list stays the fallback. (`models` in book.md is the
-   * count of jobs per model, written by the engine.)
+   * Role -> `provider/model`, or an ordered list of them, for this book only (`add_story {models}`, `set_book_model`): a job of the book in
+   * that role tries these models in order first, before the agent's own model, and any agent of the role may take them. The agent's model and
+   * the role's list stay the fallback; a job answered by a model outside the book's list writes a DEVIATION line and a `model_deviations` entry.
+   * (`models` in book.md is the count of jobs per model, written by the engine.)
    */
-  role_models: z.record(z.string(), z.string()).default({}),
+  role_models: z.record(z.string(), roleModelValue).default({}),
+  /** SCP-61: the jobs a shared fallback answered instead of the book's own models (newest last, at most 20): shown in `get_book` as `modelDeviations`. */
+  model_deviations: z
+    .array(z.object({ at: z.string(), job: z.string(), role: z.string(), model: z.string(), wanted: z.array(z.string()).default([]), reason: z.string().default('') }))
+    .default([]),
   uuid: z.string().optional(),
   cover_png: z.string().nullable().default(null),
   cost_usd: z.number().default(0),

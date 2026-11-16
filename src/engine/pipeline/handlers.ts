@@ -13,6 +13,7 @@ import { writeVnPack } from '../publish/vnPack'
 import type { ModelInfo } from '../models/registry'
 import type { JobStore } from '../queue/jobs'
 import type { ChatOptions, ChatResult, JobContext, Scheduler } from '../queue/scheduler'
+import { estimateTokens } from '../models/types'
 import type { ChatMessage } from '../models/types'
 import { writeMd } from '../store/atomic'
 import type { IdeaFile, IdeaStore } from '../store/ideas'
@@ -104,8 +105,12 @@ export interface PipelineDeps {
   /** Search providers and page fetching for the researcher. */
   search: SearchService
   getQuality(): QualityConfig
-  /** The context window (tokens) of the model a role would use next, when known. */
-  contextTokens(role: string): number | undefined
+  /**
+   * The context window (tokens) of the model a role would use next, when known. With a book, the book's own models count (SCP-61):
+   * `first` is the window of the first model, `largest` the largest window among the models the job may use, so a whole-book prompt is
+   * only cut down when no model can take it.
+   */
+  contextTokens(role: string, book?: string | null, pick?: 'first' | 'largest'): number | undefined
   getFormats(): FormatEntry[]
   getFactory(): FactoryConfig
   /** The default byline of settings.md (SCP-60); empty: none. */
@@ -276,10 +281,41 @@ export function splitActs(chapters: number): { n: number; title: string; chapter
   })).filter((a) => a.chapters.length > 0)
 }
 
+/** The share of a model's window the whole book may take before only summaries of the middle chapters are sent. */
+const WHOLE_BOOK_SHARE = 0.6
+
+/**
+ * The whole book as one text for a publisher or a short-book reviewer (SCP-61). It goes out in full when it takes at most 60% of the
+ * largest window the job may use (or the window is unknown), so a model of the book's list that fits answers and the router skips the
+ * ones that do not. Otherwise the first and the last chapter go in full and every other chapter as its summary (`summaries/ch-NN.md`, else
+ * the outline entry's summary), under a heading that says so.
+ */
+export async function fitBookText(d: Pick<PipelineDeps, 'books'>, slug: string, windowTokens: number | undefined, log: (text: string) => void = () => {}, label = 'publish'): Promise<string> {
+  const full = await d.books.fullText(slug)
+  const tokens = estimateTokens(full)
+  if (!windowTokens || tokens <= windowTokens * WHOLE_BOOK_SHARE) return full
+  const chapters = await d.books.chapters(slug)
+  if (chapters.length <= 2) return full
+  const outline = await d.books.outline(slug)
+  const first = chapters[0]!
+  const last = chapters[chapters.length - 1]!
+  const parts: string[] = [`## Chapter ${first.n}: ${first.title}\n\n${first.body}`]
+  const middle: string[] = []
+  for (const c of chapters.slice(1, -1)) {
+    const file = await d.books.readText(slug, 'summaries', `ch-${String(c.n).padStart(2, '0')}.md`)
+    const summary = (file ? parseMd(file).body.trim() : '') || outline?.chapters.find((o) => o.n === c.n)?.summary?.trim() || ''
+    middle.push(`### Chapter ${c.n}: ${c.title}\n${summary || '(no summary)'}`)
+  }
+  parts.push(`## Chapters ${chapters[1]!.n}-${chapters[chapters.length - 2]!.n} are given as summaries\n\n${middle.join('\n\n')}`)
+  parts.push(`## Chapter ${last.n}: ${last.title}\n\n${last.body}`)
+  log(`${label}: the book (about ${tokens} tokens) does not fit the window of its models (${windowTokens}): sent summaries of chapters ${chapters[1]!.n}-${chapters[chapters.length - 2]!.n}`)
+  return parts.join('\n\n')
+}
+
 /** The context for writing or checking chapter `n` of a long book, from the book memory. */
 export async function memoryContext(d: Pick<PipelineDeps, 'books' | 'bible' | 'series' | 'memory' | 'research' | 'log' | 'contextTokens'>, slug: string, n: number, budgetTokens: number, role: string): Promise<PackedContext> {
   // leave room for the answer: use at most 45% of the model's window
-  const window = d.contextTokens(role)
+  const window = d.contextTokens(role, slug)
   if (window) budgetTokens = Math.max(2500, Math.min(budgetTokens, Math.floor(window * 0.45)))
   let index = null
   if (!d.memory.ready() && d.memory.available()) {
@@ -986,7 +1022,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
           if (rep) extra = `A script counted repeated phrases, openers and tics over the whole book. Use this report (it needs no model):\n${parseMd(rep).body.trim()}\n`
         }
       } else {
-        bookText = await d.books.fullText(slug)
+        bookText = await fitBookText(d, slug, d.contextTokens(role, slug, 'largest'), ctx.log, role)
         bible = await bibleFor(d, slug, fmt.nonfiction)
       }
       const { messages, version } = await buildMessages(d.dataDir, ctx, role, variant(fmt, 'review'), {
@@ -1147,7 +1183,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       const file = fmt.long ? await d.books.readText(slug, 'summaries', `ch-${String(c.n).padStart(2, '0')}.md`) : null
       summaries.set(c.n, (file ? parseMd(file).body.trim() : '') || outline?.chapters.find((o) => o.n === c.n)?.summary || '')
     }
-    const around = otherChapters({ chapters, n, branches, summaryOf: (k) => summaries.get(k) ?? '', windowTokens: d.contextTokens('writer') })
+    const around = otherChapters({ chapters, n, branches, summaryOf: (k) => summaries.get(k) ?? '', windowTokens: d.contextTokens('writer', slug) })
     ctx.context([
       { name: `${around.full.length} neighbouring chapter(s) in full`, tokens: Math.round(chapters.filter((c) => around.full.includes(c.n)).reduce((s, c) => s + c.body.length, 0) / 4) },
       { name: `${around.summaries} chapter summaries`, tokens: Math.round([...summaries.entries()].filter(([k]) => !around.full.includes(k)).reduce((s, [, t]) => s + t.length, 0) / 4) },
@@ -1253,7 +1289,7 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       title: book.title,
       author: displayAuthor(book) ?? '',
       pitch: (await d.books.pitch(slug)) ?? '',
-      book_text: await d.books.fullText(slug),
+      book_text: await fitBookText(d, slug, d.contextTokens('publisher', slug, 'largest'), ctx.log, 'publish'),
       score: decision.score,
       juvenile: fmt.juvenile ? 'yes' : 'no',
       chapter_count: (await d.books.chapters(slug)).length,

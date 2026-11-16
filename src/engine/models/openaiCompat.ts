@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { parseSse } from './sse'
-import { httpError, ProviderError } from './types'
+import { errorExtra, httpError, ProviderError } from './types'
 import type { ChatEvent, ChatRequest, ProviderClient, Usage } from './types'
 
 export interface OpenAiCompatOptions {
@@ -101,7 +101,7 @@ export class OpenAiCompatClient implements ProviderClient {
         } catch {
           continue
         }
-        if (json.error) throw new ProviderError(`provider error: ${JSON.stringify(json.error).slice(0, 300)}`, undefined, true)
+        if (json.error) throw new ProviderError(`provider error: ${JSON.stringify(json.error).slice(0, 300)}`, undefined, true, undefined, false, errorExtra(json.error))
         const text = json.choices?.[0]?.delta?.content
         if (json.choices?.[0]?.finish_reason) finish = json.choices[0].finish_reason
         if (text) {

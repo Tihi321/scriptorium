@@ -5,6 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { advance } from '../src/engine/pipeline/advance'
 import type { BookState } from '../src/engine/pipeline/advance'
+import { BookStore } from '../src/engine/pipeline/books'
 import { aiTells, humanizeProblem, scriptStructure, ticReport } from '../src/engine/pipeline/humanizerHandlers'
 import { migrateHumanizer } from '../src/engine/store/migrations'
 import { initDataFolder } from '../src/engine/store/dataFolder'
@@ -231,13 +232,43 @@ describe('humanizer: the guards and the report', () => {
   })
 })
 
+describe('humanizer: the chapter front matter (SCP-61)', () => {
+  it('writes humanizer_round and humanizer_result, reads the old humanized key, and saves a refused pass\'s predecessor without -humanized', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'scrip-hum-'))
+    tmp.push(dir)
+    const books = new BookStore(dir)
+    await books.create('b', { title: 'B', stage: 'drafting', format: 'novel', target_words: 100 }, '')
+    const ch = { n: 1, title: 'One', round: 0, body: 'Some words here.' }
+    // an old file: only `humanized: 0`, no result. It still counts as humanized (round 0), and its successor is saved as -humanized
+    await writeMd(books.chapterFile('b', 1), { kind: 'chapter', n: 1, title: 'One', round: 0, humanized: 0 }, '\nSome words here.\n')
+    expect((await books.chapters('b'))[0]).toMatchObject({ humanized: 0 })
+    expect((await books.chapters('b'))[0]!.humanizerResult).toBeUndefined()
+    await books.writeChapter('b', { ...ch, humanizer: { round: 1, result: 'kept' } })
+    expect((await readdir(path.join(dir, 'books', 'b', 'chapters', 'history'))).sort()).toEqual(['ch-01-r0-humanized.md'])
+    // a refused pass: round and result are written, the old `humanized` key is not
+    const refused = await readDoc(books.chapterFile('b', 1))
+    expect(refused.data).toMatchObject({ humanizer_round: 1, humanizer_result: 'kept' })
+    expect(refused.data.humanized).toBeUndefined()
+    expect((await books.chapters('b'))[0]).toMatchObject({ humanized: 1, humanizerResult: 'kept' })
+    // the next write replaces a refused pass: its predecessor is the plain draft, not "-humanized"
+    await books.writeChapter('b', { ...ch, round: 1, humanizer: { round: 2, result: 'rewritten' } })
+    expect((await readdir(path.join(dir, 'books', 'b', 'chapters', 'history'))).sort()).toEqual(['ch-01-r0-humanized.md', 'ch-01-r0.md'])
+    expect((await books.chapters('b'))[0]).toMatchObject({ humanized: 2, humanizerResult: 'rewritten' })
+    // and a rewritten pass's predecessor is "-humanized"
+    await books.writeChapter('b', { ...ch, round: 1 })
+    expect((await readdir(path.join(dir, 'books', 'b', 'chapters', 'history'))).sort()).toEqual(['ch-01-r0-humanized.md', 'ch-01-r0.md', 'ch-01-r1-humanized.md'])
+    expect((await books.chapters('b'))[0]!.humanized).toBeUndefined()
+  })
+})
+
 describe('humanizer: the pipeline on the mock provider', () => {
   it('a short book: every chapter is humanized after drafting, before the reviews, and the draft is kept in history', async () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler', humanizer: true })
     const slug = await published(env)
     expect(env.counters.calls.humanize_chapter).toBe(1)
     const ch = await readDoc(bookDir(env, slug, 'chapters', 'ch-01.md'))
-    expect(ch.data).toMatchObject({ round: 0, humanized: 0 })
+    expect(ch.data).toMatchObject({ round: 0, humanizer_round: 0, humanizer_result: 'rewritten' })
+    expect(ch.data.humanized).toBeUndefined()
     expect(ch.body).toContain('gave a huge yawn')
     // the draft before the pass is kept
     const history = await readdir(bookDir(env, slug, 'chapters', 'history'))
@@ -263,8 +294,8 @@ describe('humanizer: the pipeline on the mock provider', () => {
     expect(env.counters.calls.rewrite_chapter).toBe(1)
     expect(env.counters.calls.humanize_chapter).toBe(2)
     const ch = await readDoc(bookDir(env, slug, 'chapters', 'ch-01.md'))
-    // the chapter's round is the rewrite's; `humanized` says the pass of round 1 ran
-    expect(ch.data).toMatchObject({ round: 1, humanized: 1 })
+    // the chapter's round is the rewrite's; `humanizer_round` says the pass of round 1 ran
+    expect(ch.data).toMatchObject({ round: 1, humanizer_round: 1, humanizer_result: 'rewritten' })
     const rewritten = Date.parse(String((await doneJob(env, `${slug}--rewrite--ch01--r1`)).data.finished))
     expect(await createdMs(env, `${slug}--humanize--ch01--r1`)).toBeGreaterThanOrEqual(rewritten - 5000)
     const humanized = Date.parse(String((await doneJob(env, `${slug}--humanize--ch01--r1`)).data.finished))
@@ -280,7 +311,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     const chapters = (await readdir(bookDir(env, slug, 'chapters'))).filter((f) => /^ch-\d+\.md$/.test(f))
     expect(chapters.length).toBeGreaterThan(1)
     expect(env.counters.calls.humanize_chapter).toBe(chapters.length)
-    for (const f of chapters) expect((await readDoc(bookDir(env, slug, 'chapters', f))).data.humanized).toBe(0)
+    for (const f of chapters) expect((await readDoc(bookDir(env, slug, 'chapters', f))).data.humanizer_round).toBe(0)
   }, 120000)
 
   it('a long book: each chapter is humanized after its continuity fix and before its memory update', async () => {
@@ -292,7 +323,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
       const h = await doneJob(env, `${slug}--humanize--${unit}--r0`)
       const finished = Date.parse(String(h.data.finished))
       expect(await createdMs(env, `${slug}--memory--${unit}--r0`), `memory of ${unit}`).toBeGreaterThanOrEqual(finished - 5000)
-      expect((await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))).data.humanized, unit).toBe(0)
+      expect((await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))).data.humanizer_round, unit).toBe(0)
     }
     // chapter 2: the continuity fix, then the humanizer (the fix came first, so the 'chk' mark is kept)
     const fix = Date.parse(String((await doneJob(env, `${slug}--rewrite--ch02--chk`)).data.finished))
@@ -304,7 +335,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     env = await makePipelineEnv({ activate: ['jfic-bedtime-and-dreams'], format: 'bedtime-toddler' })
     const slug = await published(env)
     expect(env.counters.calls.humanize_chapter).toBeUndefined()
-    expect((await readDoc(bookDir(env, slug, 'chapters', 'ch-01.md'))).data.humanized).toBeUndefined()
+    expect((await readDoc(bookDir(env, slug, 'chapters', 'ch-01.md'))).data.humanizer_round).toBeUndefined()
     expect(existsSync(path.join(env.dir, 'jobs', 'done', `${slug}--humanize--ch01--r0.md`))).toBe(false)
     expect(env.logs.filter((l) => l.includes('no humanizer is hired'))).toHaveLength(1)
   }, 120000)
@@ -345,7 +376,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     const slug = await published(env)
     expect(env.counters.calls.humanize_chapter).toBe(1)
     const ch = await readDoc(bookDir(env, slug, 'chapters', 'ch-01.md'))
-    expect(ch.data.humanized).toBe(0)
+    expect(ch.data.humanizer_round).toBe(0)
     const kept = await readFile(bookDir(env, slug, 'chapters', 'history', 'ch-01-r0.md'), 'utf8')
     expect(parseMd(kept).body.trim()).toBe(ch.body.trim())
     expect((await doneJob(env, `${slug}--humanize--ch01--r0`)).body).toMatch(/kept as it was/)
@@ -372,7 +403,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     for (let n = 1; n <= 4; n++) {
       const ch = await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))
       expect(ch.body).not.toContain('SCENE: A barn at night')
-      expect(ch.data.humanized).toBe(0)
+      expect(ch.data.humanizer_round).toBe(0)
     }
     for (let n = 1; n <= 4; n++) expect((await doneJob(env, `${slug}--humanize--ch0${n}--r0`)).body).toMatch(/kept as it was \(the script lines changed/)
   }, 180000)
@@ -401,7 +432,7 @@ describe('humanizer: the pipeline on the mock provider', () => {
     for (let n = 1; n <= 4; n++) {
       const ch = await readDoc(bookDir(env, slug, 'chapters', `ch-0${n}.md`))
       expect(ch.body, `chapter ${n}`).toContain('SCENE: The cellar, night')
-      expect(ch.data.humanized, `chapter ${n}`).toBe(0)
+      expect(ch.data.humanizer_round, `chapter ${n}`).toBe(0)
     }
     const bible = (await readDoc(bookDir(env, slug, 'bible', 'bible.md'))).body
     expect(bible).toMatch(/## Places[\s\S]*- \*\*The cellar\*\*: .*\(first seen in chapter 1\)/)

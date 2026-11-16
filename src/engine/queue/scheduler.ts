@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { EngineEvent, AgentProblem, AgentState } from '../../shared/protocol'
+import type { EngineEvent, AgentProblem, AgentState, ModelDeviation } from '../../shared/protocol'
 import type { FactoryConfig, JobFrontmatter } from '../../shared/schemas'
 import type { AgentDef, AgentStore } from '../agents/agents'
 import type { Budget } from '../budget/spend'
@@ -80,8 +80,8 @@ interface RunningJob {
   first?: string
   /** The agent's or role's model changed: the job's next request builds its model list again. */
   modelChanged?: boolean
-  /** The book's own model for the job's role (`role_models` in book.md), first in its model list. */
-  bookModel?: string
+  /** The book's own models for the job's role (`role_models` in book.md), in order at the front of its model list. */
+  bookModels?: string[]
 }
 
 interface AgentRuntime {
@@ -118,10 +118,12 @@ export interface SchedulerDeps {
   isBookPaused?: (book: string) => boolean
   /** False for a job outside the single-idea run (`only` in factory.md): it stays queued. Unset: every job is in scope. */
   inScope?: (job: JobFrontmatter) => Promise<boolean>
-  /** The model a book sets for a role (`role_models` in book.md), if any. */
-  getBookModel?: (book: string, role: string) => Promise<string | undefined>
-  /** The model a story sets for a role (`role_models` in ideas/<story>.md): for a job of no book yet, such as `start_book`. */
-  getIdeaModel?: (idea: string, role: string) => Promise<string | undefined>
+  /** The models a book sets for a role (`role_models` in book.md, in order), if any. */
+  getBookModel?: (book: string, role: string) => Promise<string[] | undefined>
+  /** The models a story sets for a role (`role_models` in ideas/<story>.md): for a job of no book yet, such as `start_book`. */
+  getIdeaModel?: (idea: string, role: string) => Promise<string[] | undefined>
+  /** A job of a book was answered by a model outside the book's list for its role (once per job and model): the engine records it in book.md. */
+  onDeviation?: (book: string, d: ModelDeviation) => void | Promise<void>
 }
 
 /** A queued job that no model can take now, and why (`factory_status` shows them). */
@@ -234,13 +236,13 @@ export class Scheduler {
   /** The models a running job may use now: the agent's own model (as its file says now), then its role's list. */
   private modelsFor(rj: RunningJob): ModelInfo[] {
     const def = this.d.agents.get(rj.agentId)
-    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family, bookModel: rj.bookModel })
+    return this.d.router.candidates(rj.job.data.role, { agentModel: def?.data.model, avoidFamily: rj.job.data.avoid_family, bookModels: rj.bookModels })
   }
 
-  /** A book's model for a role was set or cleared: its running jobs of that role switch (see `changeModel`). */
-  bookModelChanged(book: string, role: string, model: string | undefined): number {
+  /** A book's models for a role were set or cleared: its running jobs of that role switch (see `changeModel`). */
+  bookModelChanged(book: string, role: string, models: string[] | undefined): number {
     for (const rj of this.running.values()) {
-      if (rj.job.data.book === book && rj.job.data.role === role) rj.bookModel = model
+      if (rj.job.data.book === book && rj.job.data.role === role) rj.bookModels = models
     }
     return this.changeModel({ book, role })
   }
@@ -341,8 +343,8 @@ export class Scheduler {
         const agent = this.pickAgent(j, defs)
         if (!agent) continue
         const rt = this.runtimeFor(agent.id)
-        const bookModel = j.book ? await this.d.getBookModel?.(j.book, j.role) : j.idea ? await this.d.getIdeaModel?.(j.idea, j.role) : undefined
-        const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family, bookModel })
+        const bookModels = j.book ? await this.d.getBookModel?.(j.book, j.role) : j.idea ? await this.d.getIdeaModel?.(j.idea, j.role) : undefined
+        const models = router.candidates(j.role, { agentModel: agent.data.model, avoidFamily: j.avoid_family, bookModels })
         if (models.length === 0) {
           rt.errorUntil = t + 3000
           this.setState(rt, agent, 'error', 'no model available for this role')
@@ -408,7 +410,7 @@ export class Scheduler {
           continue
         }
         for (const l of j.locks) this.locks.add(l)
-        this.launch(claimed, agent, launchWith.slice(launchWith.indexOf(chosen)), chosen, bookModel)
+        this.launch(claimed, agent, launchWith.slice(launchWith.indexOf(chosen)), chosen, bookModels)
       }
     }
     this.blocked = blockedJobs
@@ -474,10 +476,10 @@ export class Scheduler {
 
   // ---- running a job ----
 
-  private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo, bookModel?: string): void {
+  private launch(job: JobFile, agent: AgentDef, models: ModelInfo[], leased: ModelInfo, bookModels?: string[]): void {
     const rt = this.runtimeFor(agent.id)
     const controller = new AbortController()
-    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref, bookModel }
+    const rj: RunningJob = { job, agentId: agent.id, controller, done: Promise.resolve(), held: new Set([leased.provider.id]), model: leased.ref, bookModels }
     this.running.set(job.id, rj)
     rt.running.set(job.id, rj)
     rj.done = this.run(rj, agent, models, leased).catch((err) => { console.error('[engine] job runner failed:', err) }).finally(() => {
@@ -488,6 +490,38 @@ export class Scheduler {
       for (const l of job.data.locks) this.locks.delete(l)
       void this.afterJob(rt, agent).finally(() => this.kick())
     })
+  }
+
+  /**
+   * SCP-61: a job whose book (or story) lists models for the role was answered by a model outside the list: a shared fallback. Written once per
+   * job and model as a `DEVIATION:` line to the job's logs (agent and book) and the engine log, and recorded in book.md by the engine.
+   */
+  private noteDeviation(
+    rj: RunningJob,
+    answered: ModelInfo,
+    problems: Map<string, { kind: string; message: string }>,
+    deviated: Set<string>,
+    logAll: (text: string) => void
+  ): void {
+    const registry = this.d.router.registry
+    const wanted = (rj.bookModels ?? []).map((r) => registry.resolve(r) ?? r).filter((r, i, a) => a.indexOf(r) === i)
+    if (wanted.length === 0 || wanted.includes(answered.ref) || deviated.has(answered.ref)) return
+    deviated.add(answered.ref)
+    const j = rj.job.data
+    const why = wanted.map((ref) => {
+      const m = registry.getModel(ref)
+      const p = problems.get(ref)
+      const reason = (p && p.kind !== 'usage-limit' ? p.message : (m && this.d.router.setAsideReason(m)) ?? p?.message ?? (m ? 'not used' : 'not available')).replace(/\s+/g, ' ').slice(0, 200)
+      return `${ref}: ${reason}`
+    })
+    const line = `DEVIATION: ${j.role} job ${j.id} was answered by ${answered.ref}, a shared fallback outside the book's list (${wanted.join(', ')}). Why: ${why.join('; ')}`
+    logAll(`\n${line}\n`)
+    this.d.log?.(`DEVIATION: ${j.book ?? j.idea ?? 'no book'}: ${j.role} job ${j.id} was answered by ${answered.ref}, a shared fallback outside the book's list (${wanted.join(', ')})`)
+    if (j.book) {
+      void Promise.resolve(this.d.onDeviation?.(j.book, { at: new Date().toISOString(), job: j.id, role: j.role, model: answered.ref, wanted, reason: why.join('; ') })).catch((err) =>
+        this.d.log?.(`deviation of ${j.id} not saved: ${err instanceof Error ? err.message : String(err)}`)
+      )
+    }
   }
 
   private async afterJob(rt: AgentRuntime, agent: AgentDef): Promise<void> {
@@ -518,6 +552,9 @@ export class Scheduler {
     const taskLabel = j.label?.trim() || `${j.task}${j.unit ? ' ' + j.unit : ''}`
     const requests: string[] = []
     const usedModels: string[] = []
+    /** The failed requests of this job by model, the latest of each: why a model of the book's list did not answer (for a DEVIATION line). */
+    const lastProblem = new Map<string, { kind: string; message: string }>()
+    const deviated = new Set<string>()
     const totals = { calls: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, costUsd: 0 }
     const session = logs.session(agent.id, j.book)
     rj.log = session
@@ -614,6 +651,7 @@ export class Scheduler {
                 rj.model = ev.model.ref
                 logAll(`\n_model ${ev.model.ref}${ev.attempt > 1 ? ' (fallback or retry)' : ''}_\n\n`)
               } else if (ev.type === 'problem') {
+                lastProblem.set(ev.model.ref, { kind: ev.kind, message: ev.message })
                 if (ev.kind === 'too-big') logAll(`\n_${ev.model.ref} too big: ${ev.message.slice(0, 300)}_\n`)
                 this.setProblem(rt, { kind: ev.kind, model: ev.model.ref, message: ev.message.slice(0, 300), at: this.now() })
               } else if (ev.type === 'delta') {
@@ -622,6 +660,7 @@ export class Scheduler {
                 logAll(ev.text)
               } else {
                 this.setProblem(rt, undefined)
+                this.noteDeviation(rj, ev.model, lastProblem, deviated, logAll)
                 totals.calls++
                 totals.tokensIn += ev.usage.inputTokens
                 totals.tokensCached += ev.usage.cachedInputTokens

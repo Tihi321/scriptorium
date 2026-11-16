@@ -51,17 +51,37 @@ export interface ProviderClient {
 }
 
 export class ProviderError extends Error {
+  /** The provider's error code (`error.code` of an OpenAI-style body), e.g. `usage_limit_exceeded`. */
+  readonly code?: string
+  /** When the model can answer again (ms since epoch), from the provider's `exhausted_until`. */
+  readonly until?: number
   constructor(
     message: string,
     readonly status?: number,
     readonly retryable = false,
     readonly retryAfterMs?: number,
     /** The server could not be reached at all (connection refused): it is not running. */
-    readonly unreachable = false
+    readonly unreachable = false,
+    extra: { code?: string; until?: number } = {}
   ) {
     super(message)
     this.name = 'ProviderError'
+    this.code = extra.code
+    this.until = extra.until
   }
+}
+
+/** `code` and `exhausted_until` of an OpenAI-style error object (`{ code, exhausted_until, ... }`), read before its text is cut short. */
+export function errorExtra(err: unknown): { code?: string; until?: number } {
+  if (!err || typeof err !== 'object') return {}
+  const e = err as { code?: unknown; exhausted_until?: unknown }
+  const out: { code?: string; until?: number } = {}
+  if (typeof e.code === 'string') out.code = e.code
+  if (typeof e.exhausted_until === 'string') {
+    const t = Date.parse(e.exhausted_until)
+    if (Number.isFinite(t)) out.until = t
+  }
+  return out
 }
 
 /** A request that had to stay on one model (a JSON repair round) would go to another one. `model` is the ref it would go to. */
@@ -130,5 +150,11 @@ export function httpError(status: number, bodyText: string, retryAfter?: string 
     const secs = Number(retryAfter)
     if (Number.isFinite(secs)) retryAfterMs = secs * 1000
   }
-  return new ProviderError(`HTTP ${status}: ${bodyText.slice(0, 300)}`, status, retryable, retryAfterMs)
+  let extra: { code?: string; until?: number } = {}
+  try {
+    extra = errorExtra((JSON.parse(bodyText) as { error?: unknown }).error)
+  } catch {
+    // not JSON: the text alone is kept
+  }
+  return new ProviderError(`HTTP ${status}: ${bodyText.slice(0, 300)}`, status, retryable, retryAfterMs, false, extra)
 }
