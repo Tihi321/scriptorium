@@ -5,6 +5,7 @@ import {
   bookColor,
   budgetLevel,
   budgetPct,
+  deviationTooltip,
   handoverAlpha,
   providerOf,
   stageColumn
@@ -454,5 +455,18 @@ describe('library and protocol events', () => {
     expect(groupTopics(topics, { query: 'juvenile' }).map((g) => g.section)).toEqual(['Children'])
     expect(groupTopics(topics, { activeOnly: true }).flatMap((g) => g.topics.map((t) => t.id)).sort()).toEqual(['c1', 'f2'])
     expect(groupTopics(topics, { query: 'zzz' })).toEqual([])
+  })
+})
+
+describe('book info', () => {
+  it('lists every deviation in the Fallback tooltip, newest first, with time, role, job, model and reason', () => {
+    const dev = (n: number, model: string, reason: string) => ({ at: `2026-11-1${n}T10:00:00Z`, job: `job-${n}`, role: 'line-editor', model, wanted: ['acp/a'], reason })
+    const tip = deviationTooltip([dev(1, 'lmstudio/old', 'reason one'), dev(2, 'strata/mid', 'reason two'), dev(3, 'lmstudio/new', 'reason three')])
+    const lines = tip.split('\n')
+    expect(lines).toHaveLength(4)
+    expect(lines[0]).toBe('3 fallbacks, newest first:')
+    expect(lines[1]).toContain('lmstudio/new')
+    expect(lines[1]).toContain('line editor (job-3)')
+    for (const r of ['reason one', 'reason two', 'reason three']) expect(tip).toContain(r)
   })
 })

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { STAGE_COLUMNS, stageColumn, type BookView } from '../store/model'
+import { STAGE_COLUMNS, deviationTooltip, stageColumn, type BookView } from '../store/model'
 import { useAgentList, useOffice } from '../store/hooks'
 import { agentsPerBook, officeStore } from '../store/store'
 import { typeBadge } from '../store/bookTypes'
@@ -154,7 +154,7 @@ function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
       {b.modelDeviations.length > 0 && (
         <>
           <span>Fallback</span>
-          <span className="err" data-testid="book-deviation" title={b.modelDeviations[b.modelDeviations.length - 1]!.reason}>
+          <span className="err" data-testid="book-deviation" title={deviationTooltip(b.modelDeviations)}>
             {(() => {
               const last = b.modelDeviations[b.modelDeviations.length - 1]!
               const n = b.modelDeviations.filter((d) => d.role === last.role && d.model === last.model).length
