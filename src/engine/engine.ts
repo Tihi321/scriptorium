@@ -177,6 +177,7 @@ export class Engine {
       inScope: (job) => this.jobInScope(job),
       getBookModel: (book, role) => this.bookModel(book, role),
       getIdeaModel: (idea, role) => this.ideaModel(idea, role),
+      getNoLocalFallback: (book, idea) => this.noLocalFallback(book, idea),
       onDeviation: (book, d) => this.recordDeviation(book, d)
     })
     this.books = new BookStore(dir)
@@ -679,10 +680,10 @@ export class Engine {
   }
 
   /** Book slug -> its `role_models` (each role as an ordered list), read from book.md and kept for a few seconds (the scheduler asks for every queued job on every tick). */
-  private bookModels = new Map<string, { at: number; models: Record<string, string[]> }>()
+  private bookModels = new Map<string, { at: number; models: Record<string, string[]>; noLocalFallback: boolean }>()
 
   /** Story slug -> its `role_models`, for the `start_book` job that makes the story's book (the book does not exist yet). */
-  private ideaModels = new Map<string, { at: number; models: Record<string, string[]> }>()
+  private ideaModels = new Map<string, { at: number; models: Record<string, string[]>; noLocalFallback: boolean }>()
 
   private static listsOf(raw: RoleModels | undefined): Record<string, string[]> {
     return Object.fromEntries(Object.entries(raw ?? {}).map(([role, v]) => [role, roleModelList(v)] as const))
@@ -691,7 +692,8 @@ export class Engine {
   private async ideaModel(idea: string, role: string): Promise<string[] | undefined> {
     let hit = this.ideaModels.get(idea)
     if (!hit || Date.now() - hit.at > 3000) {
-      hit = { at: Date.now(), models: Engine.listsOf((await this.ideas.list()).find((i) => i.slug === idea)?.data.role_models) }
+      const data = (await this.ideas.list()).find((i) => i.slug === idea)?.data
+      hit = { at: Date.now(), models: Engine.listsOf(data?.role_models), noLocalFallback: data?.no_local_fallback === true }
       this.ideaModels.set(idea, hit)
     }
     return hit.models[role]?.length ? hit.models[role] : undefined
@@ -700,10 +702,24 @@ export class Engine {
   private async bookModel(book: string, role: string): Promise<string[] | undefined> {
     let hit = this.bookModels.get(book)
     if (!hit || Date.now() - hit.at > 3000) {
-      hit = { at: Date.now(), models: Engine.listsOf((await this.books.read(book))?.data.role_models) }
+      const data = (await this.books.read(book))?.data
+      hit = { at: Date.now(), models: Engine.listsOf(data?.role_models), noLocalFallback: data?.no_local_fallback === true }
       this.bookModels.set(book, hit)
     }
     return hit.models[role]?.length ? hit.models[role] : undefined
+  }
+
+  /** SCP-62: `no_local_fallback` of the book, else of the story the job comes from (from the same caches as the book's models). */
+  private async noLocalFallback(book: string | null | undefined, idea: string | null | undefined): Promise<boolean> {
+    if (book) {
+      await this.bookModel(book, '')
+      return this.bookModels.get(book)?.noLocalFallback === true
+    }
+    if (idea) {
+      await this.ideaModel(idea, '')
+      return this.ideaModels.get(idea)?.noLocalFallback === true
+    }
+    return false
   }
 
   /**
@@ -714,7 +730,7 @@ export class Engine {
    */
   private contextTokens(role: string, book?: string | null, pick: 'first' | 'largest' = 'first'): number | undefined {
     const own = book ? this.bookModels.get(book)?.models[role] : undefined
-    const list = this.router.candidates(role, { bookModels: own?.length ? own : undefined })
+    const list = this.router.candidates(role, { bookModels: own?.length ? own : undefined, noLocalFallback: book ? this.bookModels.get(book)?.noLocalFallback === true : false })
     if (pick === 'largest' && list.length > 0) {
       // the models the job may use: the book's list when it has one, else every candidate. A model with no known window can take any prompt.
       const wanted = new Set((own ?? []).map((r) => this.registry.resolve(r) ?? r))
@@ -757,9 +773,27 @@ export class Engine {
     else delete next[role]
     await this.books.update(book, () => ({ role_models: next }))
     // refill the cache with the new map (the prompt window of a running job reads it at once)
-    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(next) })
+    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(next), noLocalFallback: this.bookModels.get(book)?.noLocalFallback ?? b.data.no_local_fallback === true })
     this.log(`book ${book}: ${role} ${list.length ? `uses ${list.join(', ')}` : 'back to its role list'}`)
     this.scheduler.bookModelChanged(book, role, list.length ? list : undefined)
+    await this.emitBookUpdated(book)
+    this.scheduler.kick()
+  }
+
+  /**
+   * SCP-62: allows or forbids models on this machine outside the book's own list for its jobs (`no_local_fallback` in book.md). A running job on such a
+   * model goes back to the queue; the others rebuild their model list.
+   */
+  private async setBookLocalFallback(book: string, flag: boolean): Promise<void> {
+    const b = await this.books.read(book)
+    if (!b) return this.log(`setBookLocalFallback: no book "${book}"`)
+    await this.books.update(book, (data) => {
+      if (flag) data.no_local_fallback = true
+      else delete data.no_local_fallback
+    })
+    this.bookModels.set(book, { at: Date.now(), models: Engine.listsOf(b.data.role_models), noLocalFallback: flag })
+    this.log(`book ${book}: local fallback ${flag ? 'off' : 'on'}`)
+    this.scheduler.bookFallbackChanged(book, flag)
     await this.emitBookUpdated(book)
     this.scheduler.kick()
   }
@@ -1272,6 +1306,8 @@ export class Engine {
         return
       case 'setBookModel':
         return this.setBookModel(cmd.book, cmd.role, cmd.model)
+      case 'setBookLocalFallback':
+        return this.setBookLocalFallback(cmd.book, cmd.noLocalFallback)
       case 'setBookByline':
         return this.setBookByline(cmd.book, cmd.byline)
       case 'reopenBook':

@@ -163,6 +163,12 @@ function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
           </span>
         </>
       )}
+      {b.noLocalFallback && (
+        <>
+          <span>Local fallback</span>
+          <span data-testid="book-no-local">off: own models and cloud fallbacks only</span>
+        </>
+      )}
       {b.team.length > 0 && (
         <>
           <span>Team</span>

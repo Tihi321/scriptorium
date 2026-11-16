@@ -768,6 +768,50 @@ describe('book models in the scheduler', () => {
     await waitFor(() => q.counts().waiting === 0, 5000, 'the client task dropped')
     await waitFor(async () => (await jobsIn(env!, 'done')).length === 1, 8000, 'job done on the mock')
   })
+  it('no_local_fallback: a book whose list model is used up never runs on a model or last resort on this machine, waits with a reason and spends no attempt; an unflagged book falls back (SCP-62)', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'acp', models: ['a'] }, { id: 'loc', local: true, onDevice: true, models: ['g'] }],
+      roles: { writer: ['acp/a', 'loc/g'] },
+      agents: [{ role: 'writer', name: 'Ann' }, { role: 'writer', name: 'Bob' }]
+    })
+    const e = env.engine
+    const settings = path.join(env.dir, 'config', 'settings.md')
+    const doc = parseMd(await readFile(settings, 'utf8'))
+    await writeMd(settings, { ...doc.data, last_resort_model: 'loc/g' }, doc.body)
+    await e.loadSettings()
+    for (const [slug, flag] of [['b1', true], ['b2', false]] as const) {
+      await e.books.create(slug, { title: slug, stage: 'drafting', format: 'novel', target_words: 5000, role_models: { writer: 'acp/a' }, ...(flag ? { no_local_fallback: true } : {}) }, '')
+    }
+    const seen: string[] = []
+    env.mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'a') throw new ProviderError('You have hit your usage limit. Try again at Nov 29th, 2099 11:07 AM.', undefined, true)
+      return 'ok'
+    })
+    registerChat(env)
+    const queued = async (id: string) => parseMd(await readFile(path.join(env!.dir, 'jobs', 'queued', `${id}.md`), 'utf8')).data
+    const add = (book: string) => e.jobs.enqueue({ id: `${book}--t--u1--r0`, task: 't', role: 'writer', book, unit: 'u1', requested_by: 'engine' })
+
+    // the limit is found by the flagged book's first job: it goes back to the queue until the reset (at most an hour), no attempt counted
+    await add('b1')
+    await waitFor(() => e.router.limitedModels().length === 1, 5000, 'acp/a is set aside')
+    await waitFor(async () => (await jobsIn(env!, 'queued')).includes('b1--t--u1--r0.md'), 5000, 'the job is back in the queue')
+    const back = await queued('b1--t--u1--r0')
+    expect(back.attempts).toBe(0)
+    expect(Date.parse(back.not_before as string)).toBeGreaterThan(Date.now() + 30 * 60_000)
+
+    // a new job of the flagged book waits; the unflagged book falls back to the model on this machine
+    await e.books.create('b4', { title: 'b4', stage: 'drafting', format: 'novel', target_words: 5000, role_models: { writer: 'acp/a' }, no_local_fallback: true }, '')
+    await add('b4')
+    await add('b2')
+    await waitFor(async () => (await jobsIn(env!, 'done')).includes('b2--t--u1--r0.md'), 5000, 'b2 done on the model on this machine')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b2--t--u1--r0.md'), 'utf8')).data.model).toBe('loc/g')
+    await waitFor(() => e.scheduler.blockedJobs().some((b) => b.job === 'b4--t--u1--r0'), 5000, 'b4 is blocked')
+    const blocked = e.scheduler.blockedJobs().find((b) => b.job === 'b4--t--u1--r0')!
+    expect(blocked.reason).toMatch(/^no local fallback: b4 uses no model on this machine outside its list; acp\/a: usage limit until .*loc\/g \(last resort\): runs on this machine/)
+    expect(seen.filter((m) => m === 'g')).toHaveLength(1) // only b2 ever ran on loc/g
+    expect((await queued('b4--t--u1--r0')).attempts).toBe(0)
+  })
 })
 
 describe('blocked providers wait visibly', () => {

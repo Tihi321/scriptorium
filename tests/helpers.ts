@@ -23,6 +23,8 @@ export interface TestProvider {
   models?: string[]
   /** Default `mock`. `client`: requests wait in the engine's client task queue. */
   kind?: 'mock' | 'client'
+  /** SCP-62: written as `on_device` (the test providers are `mock`, so the default rule gives false). */
+  onDevice?: boolean
 }
 
 export interface EnvOptions {
@@ -45,6 +47,7 @@ export async function writeTestConfig(dir: string, o: EnvOptions): Promise<void>
         id: p.id,
         kind: p.kind ?? 'mock',
         local: p.local ?? false,
+        ...(p.onDevice !== undefined ? { on_device: p.onDevice } : {}),
         concurrency: p.concurrency ?? 4,
         models: (p.models ?? ['m1']).map((m) => ({
           id: m,

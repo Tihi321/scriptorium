@@ -611,6 +611,7 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
         ...(fmt.screenplay ? { screenplay: true } : {}),
         ...(fmt.puzzles ? { puzzles: true } : {}),
         ...(idea?.data.humanize === false ? { humanize: false } : {}),
+        ...(idea?.data.no_local_fallback === true ? { no_local_fallback: true } : {}),
         ...(idea?.data.source_book ? { source_book: idea.data.source_book } : {}),
         ...(byline ? { byline } : {}),
         target_words: target,

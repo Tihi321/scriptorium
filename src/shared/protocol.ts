@@ -72,6 +72,8 @@ export interface ProviderSummary {
   /** Send the JSON schema as `response_format`. */
   jsonSchema: boolean
   local: boolean
+  /** Runs on this machine (`on_device`, SCP-62): what `no_local_fallback` keeps out of a book's jobs. */
+  onDevice: boolean
   /** Switched on and usable (has a key, or is local). */
   available: boolean
   /** Why it isn't available: switched off, or no key. */
@@ -183,6 +185,8 @@ export interface BookSummary {
   reasons: string[]
   /** Jobs a shared fallback answered instead of the book's own models for a role, newest last (at most 20); empty when none. */
   modelDeviations: ModelDeviation[]
+  /** `no_local_fallback` in book.md: models on this machine outside the book's own list are never used for its jobs (SCP-62). */
+  noLocalFallback: boolean
   /** Who worked on it (from made.md): per agent, its role, finished jobs, the models it used and what it cost. */
   team: { agent: string; role: string; jobs: number; models: string[]; costUsd: number }[]
   /** The last finished jobs, newest first. */
@@ -444,6 +448,7 @@ export type Command =
   /** Gives a rejected book one more round: `rewrite` (the given chapters, or the ones the reviews name, then reviewed again) or `review` (reviewed again, no rewrite). Then the publisher decides again. */
   /** Sets (or with `model: null` removes) the model, or the ordered list of models, one book uses for a role (`role_models` in book.md). Its jobs of that role try them first, in order. */
   | { type: 'setBookModel'; book: string; role: string; model: string | string[] | null }
+  | { type: 'setBookLocalFallback'; book: string; noLocalFallback: boolean }
   | { type: 'setBookByline'; book: string; byline: string }
   | { type: 'reopenBook'; book: string; mode: 'rewrite' | 'review'; chapters?: number[] }
   /** Draws a published book's cover again from templates/cover.html and book.md, then rebuilds the EPUB. Answers with `book.updated`. */
@@ -557,6 +562,7 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   retryBook: true,
   reopenBook: true,
   setBookModel: true,
+  setBookLocalFallback: true,
   setBookByline: true,
   regenerateCover: true,
   renameBook: true

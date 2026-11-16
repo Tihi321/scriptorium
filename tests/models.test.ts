@@ -40,6 +40,15 @@ async function registryWith(o: Parameters<typeof writeTestConfig>[1], mock = new
 }
 
 describe('seed configs', () => {
+  it('on this machine (SCP-62): a local openai-compat provider except acp, unless on_device says otherwise', async () => {
+    const seed = new ModelRegistry(dir, { keys: () => undefined })
+    await seed.load()
+    const on = (r: ModelRegistry) => Object.fromEntries([...r.providers.values()].map((p) => [p.id, p.onDevice]))
+    expect(on(seed)).toMatchObject({ lmstudio: true, strata: true, ollama: true, acp: false, client: false, deepseek: false })
+    const { registry } = await registryWith({ providers: [{ id: 'x', local: true, onDevice: true, models: ['m'] }, { id: 'y', local: true, onDevice: false, models: ['m'] }, { id: 'z', local: true, models: ['m'] }] })
+    expect(on(registry)).toEqual({ x: true, y: false, z: false })
+  })
+
   it('providers.md and roles.md load, and every role model exists', async () => {
     const registry = new ModelRegistry(dir, { keys: () => undefined })
     await registry.load()

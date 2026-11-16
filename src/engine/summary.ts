@@ -108,6 +108,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     round: d.round,
     reasons: d.reasons,
     modelDeviations: d.model_deviations,
+    noLocalFallback: d.no_local_fallback === true,
     ...teamOf(await books.readMade(slug)),
     words: chapters.reduce((s, c) => s + c.words, 0),
     year: typeof d.year === 'number' ? d.year : null,
@@ -188,6 +189,7 @@ export function providerSummaries(registry: ModelRegistry, limiter: ProviderLimi
       jsonSchema: p.jsonSchema,
       // a client provider (Claude Code over MCP) is local and free, never paid or down
       local: p.local || p.kind === 'client',
+      onDevice: p.onDevice,
       available: p.available,
       reason: p.available ? undefined : p.unavailableReason,
       canList: p.kind === 'openai-compat',
