@@ -708,8 +708,8 @@ export class Engine {
   /**
    * The context window a prompt of `role` is sized to. Without a book: the first candidate's. With a book, the book's own models count
    * (read from the cache the scheduler fills before it launches a job of the book): `first` is the first candidate's window, `largest` the
-   * largest window among the models of the book's list (the first candidate's when the book has no list), so a whole-book prompt is
-   * only cut down when no model of the list can take it (SCP-61).
+   * largest window among the models of the book's list (among all candidates when the book has no list; an unknown window means no cut),
+   * so a whole-book prompt is only cut down when no model of the list can take it (SCP-61).
    */
   private contextTokens(role: string, book?: string | null, pick: 'first' | 'largest' = 'first'): number | undefined {
     const own = book ? this.bookModels.get(book)?.models[role] : undefined
