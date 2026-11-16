@@ -820,6 +820,39 @@ describe('book models in the scheduler', () => {
     await waitFor(() => /cl\/r \(last resort\): usage limit until /.test(e.scheduler.blockedJobs().find((b) => b.job === 'b4--t--u1--r0')?.reason ?? ''), 5000, 'b4 names the used-up last resort')
     expect(seen).not.toContain('r')
   })
+
+  it('no_local_fallback turned on mid-request: a job whose request may still fall back to a model on this machine goes back to the queue (SCP-62)', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'acp', models: ['a'] }, { id: 'loc', local: true, onDevice: true, models: ['g'] }],
+      roles: { writer: ['acp/a', 'loc/g'] },
+      agents: [{ role: 'writer', name: 'Ann' }]
+    })
+    const e = env.engine
+    await e.books.create('b1', { title: 'b1', stage: 'drafting', format: 'novel', target_words: 5000, role_models: { writer: 'acp/a' } }, '')
+    const seen: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    env.mock.onAny(async (req) => {
+      seen.push(req.model)
+      if (req.model !== 'a') return 'ok'
+      await gate
+      throw new ProviderError('You have hit your usage limit. Try again at Nov 29th, 2099 11:07 AM.', undefined, true)
+    })
+    registerChat(env)
+    await e.jobs.enqueue({ id: 'b1--t--u1--r0', task: 't', role: 'writer', book: 'b1', unit: 'u1', requested_by: 'engine' })
+    await waitFor(() => seen.length === 1, 5000, 'the request on acp/a is in flight')
+
+    // acp/a is set aside (another job's 429, or the proxy), then the flag goes on: the request was sent with loc/g after acp/a
+    e.router.setLimited(e.registry.getModel('acp/a')!, Date.now() + 3_600_000, 'usage limit', 'answer')
+    await e.handleCommand({ type: 'setBookLocalFallback', book: 'b1', noLocalFallback: true })
+    release()
+    const settled = async () => [...(await jobsIn(env!, 'queued')), ...(await jobsIn(env!, 'done'))].includes('b1--t--u1--r0.md')
+    await waitFor(settled, 5000, 'the job settles')
+    await sleep(200)
+    expect(await jobsIn(env, 'queued')).toContain('b1--t--u1--r0.md')
+    expect(parseMd(await readFile(path.join(env.dir, 'jobs', 'queued', 'b1--t--u1--r0.md'), 'utf8')).data.attempts).toBe(0)
+    expect(seen).not.toContain('g')
+  })
 })
 
 describe('blocked providers wait visibly', () => {

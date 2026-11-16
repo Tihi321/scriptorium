@@ -293,9 +293,9 @@ export class Engine {
     }
   }
 
-  /** Loopback providers whose `/healthz` answered, but not in the proxy's shape, this many times in a row: at 2 not asked again in this engine run. */
+  /** Loopback providers whose `/healthz` answered, but not in the proxy's shape, this many times in a row (only such answers count; a proxy answer resets it): at 2 not asked again in this engine run. */
   private readonly proxyMisses = new Map<string, number>()
-  /** Loopback providers whose `/healthz` did not answer (refused, timed out): not asked again before this time (ms), then asked again; never given up. */
+  /** Loopback providers whose `/healthz` did not answer (refused, timed out) or answered with a 5xx: not asked again before this time (ms), then asked again; never given up. */
   private readonly proxyRetryAt = new Map<string, number>()
   /** Provider id -> the models its proxy's `/healthz` set aside (SCP-62). */
   private readonly proxySet = new Map<string, Set<string>>()

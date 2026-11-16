@@ -78,6 +78,8 @@ interface RunningJob {
   request?: AbortController
   /** The first model of the list the request in flight was sent with. */
   first?: string
+  /** The model list the request in flight was sent with (the router may fall back to any of them). */
+  use?: ModelInfo[]
   /** The agent's or role's model changed: the job's next request builds its model list again. */
   modelChanged?: boolean
   /** The book's own models for the job's role (`role_models` in book.md), in order at the front of its model list. */
@@ -246,19 +248,18 @@ export class Scheduler {
   /**
    * A book's `no_local_fallback` was set or cleared (SCP-62). Its running jobs take the flag; when it is on, a job whose current model is on this
    * machine and not in the book's list goes back to the queue (no attempt counted), else the jobs just rebuild their model list.
-   * A job whose in-flight request was given a model list that the flag now shortens goes back to the queue too: that request could still fall
-   * back to a model on this machine if its current model fails.
+   * A job whose in-flight request was sent with a model on this machine outside the book's list goes back to the queue too: that request could
+   * still fall back to it if its current model fails.
    */
   bookFallbackChanged(book: string, flag: boolean): number {
     let n = 0
     for (const rj of this.running.values()) {
       if (rj.job.data.book !== book) continue
-      const turnedOn = flag && rj.noLocalFallback !== true
-      const before = turnedOn ? this.modelsFor(rj).length : 0
       rj.noLocalFallback = flag
       const m = this.d.router.registry.getModel(rj.model)
       const own = (rj.bookModels ?? []).map((r) => this.d.router.registry.resolve(r) ?? r)
-      if ((flag && m?.provider.onDevice && !own.includes(m.ref)) || (turnedOn && this.modelsFor(rj).length < before)) {
+      const local = (x: ModelInfo | undefined) => !!x?.provider.onDevice && !own.includes(x.ref)
+      if (flag && (local(m) || (rj.request && (rj.use ?? []).some(local)))) {
         this.abort(rj, 'stop')
         n++
       }
@@ -660,6 +661,7 @@ export class Scheduler {
           if (rj.controller.signal.aborted) request.abort()
           rj.request = request
           rj.first = models[0]?.ref
+          rj.use = use
           try {
             for await (const ev of this.d.router.chat(
               use,
@@ -729,6 +731,7 @@ export class Scheduler {
           } finally {
             rj.controller.signal.removeEventListener('abort', onStop)
             rj.request = undefined
+            rj.use = undefined
           }
         }
         logAll('\n')
