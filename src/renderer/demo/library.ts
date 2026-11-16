@@ -109,6 +109,7 @@ export function bookSummary(b: FakeBook, topics: FakeTopic[]): BookSummary {
     targetWords: 1500,
     round: 0,
     reasons: [],
+    modelDeviations: [],
     team: [{ agent: 'writer-mara-quill', role: 'writer', jobs: 3, models: ['deepseek/deepseek-flash'], costUsd: 0.003 }],
     steps: [{ task: 'draft_chapter', unit: 'ch01', agent: 'writer-mara-quill', model: 'deepseek/deepseek-flash' }],
     words: 450 + b.slug.length * 120,

@@ -223,6 +223,7 @@ export function formatUsd(n: number): string {
 
 /** How each kind of failed request reads on screen: a headline, a short word for the desk badge, and what to do about it. */
 const PROBLEMS: Record<ProblemKind, { title: string; short: string; hint: string; serious: boolean }> = {
+  'usage-limit': { title: 'Usage limit reached', short: 'limit', hint: 'This model takes no request until its limit resets; the next model of the list answers.', serious: true },
   'day-limit': { title: 'Requests for today used up', short: 'used up', hint: 'The provider takes no more requests until midnight UTC. Pick another model below.', serious: true },
   'rate-limit': { title: 'Rate limited', short: 'rate limit', hint: 'Too many requests right now. It retries; pick another model if it keeps happening.', serious: false },
   down: { title: 'Server not running', short: 'server off', hint: 'Start the server, or pick another model below.', serious: true },

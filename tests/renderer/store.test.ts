@@ -34,6 +34,7 @@ export function bookSummary(slug: string, o: Partial<BookSummary> = {}): BookSum
     articlePage: null,
     stage: 'drafting',
     paused: false,
+    modelDeviations: [],
     chaptersWritten: 1,
     chaptersPlanned: 1,
     targetWords: 500,

@@ -135,7 +135,7 @@ export const uncovered = (mapped: number[][], sourceCount: number): number[] => 
 
 /** The full text of the source chapters script chapter `n` is made from, cut to fit the writer's window when needed. Empty when nothing is mapped. */
 export async function sourceExcerpt(
-  d: { books: BookStore; contextTokens: (role: string) => number | undefined },
+  d: { books: BookStore; contextTokens: (role: string, book?: string | null) => number | undefined },
   slug: string,
   n: number,
   role = 'writer',
@@ -148,7 +148,7 @@ export async function sourceExcerpt(
   if (!nums.length) return ''
   const chapters = (await d.books.chapters(src.slug)).filter((c) => nums.includes(c.n))
   if (!chapters.length) return ''
-  const window = d.contextTokens(role)
+  const window = d.contextTokens(role, slug)
   const budget = Math.floor((window ? window * EXCERPT_SHARE : DEFAULT_EXCERPT_TOKENS) * 4)
   const total = chapters.reduce((s, c) => s + c.body.length, 0)
   const each = Math.floor(budget / chapters.length)

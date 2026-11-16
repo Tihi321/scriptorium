@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -7,6 +7,7 @@ import { ProviderError, ServerDownError } from '../src/engine/models/types'
 import { emptyBrief } from '../src/shared/brief'
 import { parseMd } from '../src/shared/md'
 import type { EngineEvent } from '../src/shared/protocol'
+import { fitBookText } from '../src/engine/pipeline/handlers'
 import { chatJson } from '../src/engine/pipeline/llm'
 import { writeMd } from '../src/engine/store/atomic'
 import { watchDataFolder } from '../src/engine/store/watcher'
@@ -710,6 +711,41 @@ describe('book models in the scheduler', () => {
     await waitFor(async () => (await jobsIn(env!, 'done')).length === 2, 5000, 'b1 done')
     const b1 = parseMd(await readFile(path.join(env.dir, 'jobs', 'done', 'b1--t--u1--r0.md'), 'utf8'))
     expect(b1.data.model).toBe('client/claude-code')
+  })
+
+  it('the window of a whole-book prompt follows the book list: the whole book goes out when a model of the list fits it, summaries when none does (SCP-61)', async () => {
+    env = await makeEnv({
+      providers: [{ id: 'acp', models: ['small', 'big'] }, { id: 'loc', local: true, models: ['g'] }],
+      roles: { publisher: ['loc/g'] },
+      agents: []
+    })
+    const e = env.engine
+    e.registry.getModel('acp/small')!.context = 1000
+    e.registry.getModel('acp/big')!.context = 100000
+    e.registry.getModel('loc/g')!.context = 4000
+    await e.books.create('b1', { title: 'One', stage: 'publishing', format: 'novel', target_words: 5000 }, '')
+    for (let n = 1; n <= 6; n++) await e.books.writeChapter('b1', { n, title: `Ch ${n}`, round: 0, body: `chapter ${n} `.repeat(70).trim() })
+    await mkdir(e.books.file('b1', 'summaries'), { recursive: true })
+    for (let n = 2; n <= 5; n++) await writeFile(e.books.file('b1', 'summaries', `ch-0${n}.md`), `---\nkind: summary\n---\nSummary of chapter ${n}.\n`)
+    const windowOf = (pick: 'first' | 'largest') => (e as unknown as { contextTokens(role: string, book: string, pick: string): number | undefined }).contextTokens('publisher', 'b1', pick)
+
+    await e.handleCommand({ type: 'setBookModel', book: 'b1', role: 'publisher', model: ['acp/small', 'acp/big'] })
+    expect(windowOf('first')).toBe(1000)
+    expect(windowOf('largest')).toBe(100000)
+    const whole = await fitBookText({ books: e.books }, 'b1', windowOf('largest'))
+    expect(whole).toBe(await e.books.fullText('b1'))
+
+    await e.handleCommand({ type: 'setBookModel', book: 'b1', role: 'publisher', model: 'acp/small' })
+    expect(windowOf('largest')).toBe(1000)
+    const logs: string[] = []
+    const cut = await fitBookText({ books: e.books }, 'b1', windowOf('largest'), (m) => logs.push(m))
+    expect(cut).toContain('## Chapters 2-5 are given as summaries')
+    expect(cut).toContain('Summary of chapter 3.')
+    expect(cut).toContain('chapter 1 chapter 1')
+    expect(cut).toContain('chapter 6 chapter 6')
+    expect(cut).not.toContain('chapter 3 chapter 3')
+    expect(cut.length / 4).toBeLessThan(1000)
+    expect(logs[0]).toMatch(/does not fit the window/)
   })
 
   it('setBookModel changes the model of a running job at once, and removing it sends later requests back to the role list', async () => {

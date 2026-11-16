@@ -151,6 +151,18 @@ function BookInfo({ book, onIt }: { book: BookView; onIt: number }) {
           <span className={b.stage === 'failed' ? 'err' : ''}>{b.reasons.join('; ')}</span>
         </>
       )}
+      {b.modelDeviations.length > 0 && (
+        <>
+          <span>Fallback</span>
+          <span className="err" data-testid="book-deviation" title={b.modelDeviations[b.modelDeviations.length - 1]!.reason}>
+            {(() => {
+              const last = b.modelDeviations[b.modelDeviations.length - 1]!
+              const n = b.modelDeviations.filter((d) => d.role === last.role && d.model === last.model).length
+              return `${last.role.replace(/-/g, ' ')} ran on ${last.model} (${n} time${n === 1 ? '' : 's'})`
+            })()}
+          </span>
+        </>
+      )}
       {b.team.length > 0 && (
         <>
           <span>Team</span>

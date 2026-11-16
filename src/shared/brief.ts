@@ -1,5 +1,7 @@
 import { parsePuzzleEntries } from './puzzles'
 import type { PuzzleEntry } from './puzzles'
+import { roleModelList, roleModelValueOf } from './schemas'
+import type { RoleModels } from './schemas'
 /**
  * The owner's story brief. A story is a file in ideas/ (and, once a book is started, books/<slug>/brief.md). Its body is
  * markdown sections, so it can be edited by hand. The engine, the UI and MCP all read and write it through this module.
@@ -37,8 +39,8 @@ export interface StoryBrief {
   series?: string
   /** Position in the series (frontmatter `series_index`). Empty: the next free number. */
   seriesIndex?: number
-  /** Role -> `provider/model` for the book made from this story (frontmatter `role_models`). */
-  models?: Record<string, string>
+  /** Role -> `provider/model`, or an ordered list of them, for the book made from this story (frontmatter `role_models`). */
+  models?: RoleModels
   /** Slug of a published book this story adapts (frontmatter `source_book`): the script writer's story. */
   sourceBook?: string
   /** `false`: the book gets no humanizer pass (frontmatter `humanize: false`). Unset: the format decides. */
@@ -172,7 +174,11 @@ export function briefOf(data: Record<string, unknown>, body: string): StoryBrief
   if (puzzles.length) brief.puzzles = puzzles
   const rm = data.role_models
   if (rm && typeof rm === 'object' && !Array.isArray(rm)) {
-    const models = Object.fromEntries(Object.entries(rm).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k, (v as string).trim()]))
+    const models = Object.fromEntries(
+      Object.entries(rm)
+        .map(([k, v]) => [k, roleModelValueOf(roleModelList(v as string | string[]))] as const)
+        .filter((e): e is readonly [string, NonNullable<ReturnType<typeof roleModelValueOf>>] => e[1] !== undefined)
+    )
     if (Object.keys(models).length) brief.models = models
   }
   return brief

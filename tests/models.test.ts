@@ -15,8 +15,8 @@ import { OpenAiCompatClient } from '../src/engine/models/openaiCompat'
 import { ProviderLimiter } from '../src/engine/models/limiter'
 import { ModelRegistry, computeCost, isPaidModel } from '../src/engine/models/registry'
 import type { ProviderInfo } from '../src/engine/models/registry'
-import { ModelRouter, isDailyLimitError, isRefusedRequest, isRetiredModelError, problemKind } from '../src/engine/models/router'
-import { BudgetError, collect, isAbortError, ProviderError } from '../src/engine/models/types'
+import { ModelRouter, isDailyLimitError, isRefusedRequest, isRetiredModelError, isUsageLimitError, problemKind } from '../src/engine/models/router'
+import { BudgetError, collect, httpError, isAbortError, ProviderError } from '../src/engine/models/types'
 import type { ChatEvent } from '../src/engine/models/types'
 import { initDataFolder } from '../src/engine/store/dataFolder'
 import { parseMd } from '../src/shared/md'
@@ -443,6 +443,69 @@ describe('router', () => {
     }
     await expect(drain()).rejects.toThrow(/all models failed\. a\/x: prompt is too long.* \| b\/y: prompt is too long/)
     expect(seen).toEqual(['y']) // no new call
+  })
+
+  it('a book list: a too-long prompt goes to the next model of the list, and only when the list is used up to a shared fallback', async () => {
+    const { registry, mock } = await registryWith({
+      providers: [{ id: 'acp', models: ['a', 'b'] }, { id: 'lm', local: true, models: ['g'] }],
+      roles: { publisher: ['lm/g'] }
+    })
+    registry.setDefaults({ fallbacks: ['lm/g'], shared: true, lastResort: '', lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    await registry.load()
+    const seen: string[] = []
+    mock.onAny((req) => {
+      seen.push(req.model)
+      return 'ok'
+    })
+    registry.getModel('acp/a')!.context = 100
+    registry.getModel('acp/b')!.context = 100000
+    const r = new ModelRouter(registry, undefined)
+    const req = { messages: [{ role: 'user' as const, content: 'w'.repeat(1000) }], meta: { role: 'publisher' } }
+    const run = async () => {
+      const kinds: string[] = []
+      for await (const ev of r.chat(r.candidates('publisher', { bookModels: ['acp/a', 'acp/b'] }), req)) if (ev.type === 'problem') kinds.push(`${ev.kind}:${ev.model.ref}`)
+      return kinds
+    }
+    expect(r.candidates('publisher', { bookModels: ['acp/a', 'acp/b'] }).map((m) => m.ref)).toEqual(['acp/a', 'acp/b', 'lm/g'])
+    expect(await run()).toEqual(['too-big:acp/a'])
+    expect(seen).toEqual(['b']) // never gemma while the list has a model that fits
+    registry.getModel('acp/b')!.context = 100
+    expect(await run()).toEqual(['too-big:acp/a', 'too-big:acp/b'])
+    expect(seen).toEqual(['b', 'g']) // the loud fallback: the list is used up
+  })
+
+  it('a usage limit (the proxy 429 or Codex text) costs one request, sets only that model aside until the reset, and then it is back', async () => {
+    let clock = new Date(2026, 10, 20, 9, 0).getTime()
+    const { registry, mock } = await registryWith({
+      providers: [{ id: 'acp', models: ['x', 'z', 'y'] }],
+      roles: { writer: ['acp/x', 'acp/z', 'acp/y'] }
+    })
+    const seen: string[] = []
+    const proxy = JSON.stringify({ error: { message: 'Codex has hit its usage limit', code: 'usage_limit_exceeded', exhausted_until: '2026-11-29T10:07:00.000Z', retry_after: 1203420 } })
+    mock.onAny((req) => {
+      seen.push(req.model)
+      if (req.model === 'x') throw httpError(429, proxy, '1203420')
+      if (req.model === 'z') throw new ProviderError('provider error: {"message":"You\u2019ve hit your usage limit. Upgrade to Pro, or try again at Nov 29th, 2026 11:07 AM."}', undefined, true)
+      return 'from y'
+    })
+    const r = new ModelRouter(registry, undefined, { retries: 2, backoffMs: 1, now: () => clock })
+    const limited: string[] = []
+    r.onModelLimited = (m) => limited.push(m.ref)
+    expect(isUsageLimitError(httpError(429, JSON.stringify({ error: { code: 'provider_queue_full', message: 'queue full' } })))).toBe(false)
+    let text = ''
+    const kinds: string[] = []
+    for await (const ev of r.chat(r.candidates('writer'), { messages: [{ role: 'user', content: 'hi' }], meta: { role: 'writer' } })) {
+      if (ev.type === 'delta') text += ev.text
+      if (ev.type === 'problem') kinds.push(ev.kind)
+    }
+    expect(seen).toEqual(['x', 'z', 'y']) // one request each, no retries
+    expect(kinds).toEqual(['usage-limit', 'usage-limit'])
+    expect(text).toBe('from y')
+    expect(limited).toEqual(['acp/x', 'acp/z'])
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['acp/y']) // the provider stays usable: only the two models are set aside
+    expect(r.limitedModels().map((l) => [l.model, l.until])).toEqual([['acp/x', '2026-11-29T10:07:00.000Z'], ['acp/z', new Date(2026, 10, 29, 11, 7).toISOString()]])
+    clock = new Date(2026, 10, 30, 9, 0).getTime()
+    expect(r.candidates('writer').map((m) => m.ref)).toEqual(['acp/x', 'acp/z', 'acp/y'])
   })
 
   it('refuses paid models over the cap and falls to a local one; throws BudgetError when nothing is left', async () => {
@@ -1137,9 +1200,9 @@ describe('client provider and book models', () => {
       roles: { 'line-editor': ['loc/m1', 'loc/m2'] }
     })
     const router = new ModelRouter(registry, undefined)
-    expect(router.candidates('line-editor', { agentModel: 'loc/m2', bookModel: 'client/claude-code' }).map((m) => m.ref)).toEqual(['client/claude-code', 'loc/m2', 'loc/m1'])
+    expect(router.candidates('line-editor', { agentModel: 'loc/m2', bookModels: ['client/claude-code'] }).map((m) => m.ref)).toEqual(['client/claude-code', 'loc/m2', 'loc/m1'])
     // avoid_family qwen: the chosen client model stays first, qwen models go last
-    expect(router.candidates('line-editor', { bookModel: 'client/claude-code', avoidFamily: 'qwen' }).map((m) => m.ref)).toEqual(['client/claude-code', 'loc/m1', 'loc/m2'])
+    expect(router.candidates('line-editor', { bookModels: ['client/claude-code'], avoidFamily: 'qwen' }).map((m) => m.ref)).toEqual(['client/claude-code', 'loc/m1', 'loc/m2'])
     expect(router.candidates('line-editor', { avoidFamily: 'claude' }).map((m) => m.ref)).toEqual(['loc/m1', 'loc/m2'])
   })
 })

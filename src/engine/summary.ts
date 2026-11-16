@@ -107,6 +107,7 @@ export async function bookSummary(books: BookStore, slug: string, topics: TopicR
     targetWords: d.target_words,
     round: d.round,
     reasons: d.reasons,
+    modelDeviations: d.model_deviations,
     ...teamOf(await books.readMade(slug)),
     words: chapters.reduce((s, c) => s + c.words, 0),
     year: typeof d.year === 'number' ? d.year : null,
