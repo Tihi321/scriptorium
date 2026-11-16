@@ -342,7 +342,12 @@ describe('a series in the pipeline', () => {
     const prompts: Record<string, string[]> = {}
     const grab = (task: string, req: { messages: { content: string }[] }) => (prompts[task] ??= []).push(req.messages.map((m) => m.content).join('\n\n----\n\n'))
     e.mock.on({ task: 'start_book' }, (req) => (grab('start_book', req), JSON.stringify({ format: 'novel', title: 'Case Two', genre: 'Comic mystery', target_words: 3000, notes: '' })))
-    e.mock.on({ task: 'pitch' }, (req) => (grab('pitch', req), 'A locksmith and a restorer meet a bell again. The ending is a quiet hour. '.repeat(3)))
+    e.mock.on({ task: 'pitch' }, (req) => {
+      grab('pitch', req)
+      // SCP-61: the owner leaves a note on the new book before its outline is reviewed
+      if (req.meta?.book) void e.engine.books.addOwnerNote(req.meta.book, 'NOTE-ABSALOM must appear in the outline.')
+      return 'A locksmith and a restorer meet a bell again. The ending is a quiet hour. '.repeat(3)
+    })
     e.mock.on({ task: 'outline' }, (req) => {
       grab('outline', req)
       return JSON.stringify({
@@ -386,6 +391,9 @@ describe('a series in the pipeline', () => {
       for (const s of ['book 2 of the series "The Ninth Hour"', 'A fraternity of clock worshippers', 'Clockmaker Street', 'Book 1: Case One', 'BLURB-ONE', 'ACT-ONE-SUMMARY', 'END-STATE-DEC', 'Who leads the inner circle?']) expect(p, `${task}: ${s}`).toContain(s)
       expect(p, task).not.toContain('Brother Ambrose')
     }
+    // the outline review (SCP-61) also gets the owner's notes and is asked to check the outline against the brief and the notes
+    expect(prompts.review_outline![0]).toContain('NOTE-ABSALOM must appear in the outline.')
+    expect(prompts.review_outline![0]).toContain("owner's brief")
     // the bible of book 2 starts with Dec as book 1 left him, and with the street
     const dec = await readFile(path.join(e.dir, 'books', slug, 'bible', 'characters', 'declan-dec-hartley.md'), 'utf8')
     expect(dec).toContain('END-STATE-DEC')
