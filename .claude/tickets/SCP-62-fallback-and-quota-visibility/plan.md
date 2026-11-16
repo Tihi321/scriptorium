@@ -1,5 +1,5 @@
 ---
-status: approved
+status: done
 request: REQ-0026
 repos: [scriptorium]
 branch: SCP-62_fallback-and-quota-visibility
