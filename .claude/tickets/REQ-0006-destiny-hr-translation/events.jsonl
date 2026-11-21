@@ -1,0 +1,3 @@
+{"ts":"2026-11-09T22:15:00Z","actor":"director-scribe","type":"plan.created","request":"REQ-0006","ticket":"REQ-0006-destiny-hr-translation","detail":"planner returned the plan"}
+{"ts":"2026-11-09T22:23:00Z","actor":"director-scribe","type":"plan.approved","request":"REQ-0006","ticket":"REQ-0006-destiny-hr-translation","detail":"user approved the plan"}
+{"ts":"2026-11-10T11:40:38Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0006","ticket":"REQ-0006-destiny-hr-translation","detail":"both books translated; BTT-27, BTT-28, SCP-57, SCP-58 merged"}
