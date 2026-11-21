@@ -449,7 +449,7 @@ export function ModelsDialog() {
             ))}
           </div>
         )}
-        <div className="dim">Fallback models: each row is a kind (API, Strata, LM Studio ...) and its model. roles.md names a kind for its first row (paid, strata, lmstudio ...) and kind-2, kind-3 for the next ones.</div>
+        <div className="dim">Fallback models: each row is a kind (API, ACP proxy, client ...) and its model. roles.md names a kind for its first row (paid, acp, client ...) and kind-2, kind-3 for the next ones.</div>
         <label className="inline">
           <input type="checkbox" checked={shared} onChange={(e) => settings && saveModelSettings(settings, { fallbackShared: e.target.checked })} data-testid="order-shared" />
           One fallback order for every role

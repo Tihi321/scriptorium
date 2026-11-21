@@ -269,7 +269,7 @@ export class Scheduler {
   /** A model on this machine outside the job's book list (`role_models`): one a `no_local_fallback` job must never use. */
   private localOutsideBook(rj: RunningJob, m: ModelInfo): boolean {
     const own = (rj.bookModels ?? []).map((r) => this.d.router.registry.resolve(r) ?? r)
-    return m.provider.onDevice && !own.includes(m.ref)
+    return m.onDevice && !own.includes(m.ref)
   }
 
   /** A book's models for a role were set or cleared: its running jobs of that role switch (see `changeModel`). */
@@ -420,7 +420,7 @@ export class Scheduler {
         const lastResort = !chosen && !otherSkips && unusable === models.length ? router.registry.lastResort() : undefined
         if (lastResort && !models.some((m) => m.ref === lastResort.ref)) {
           const p = lastResort.provider
-          if (noLocal && p.onDevice && !(bookModels ?? []).some((r) => (router.registry.resolve(r) ?? r) === lastResort.ref)) reasons.push(`${lastResort.ref} (last resort): runs on this machine`)
+          if (noLocal && lastResort.onDevice && !(bookModels ?? []).some((r) => (router.registry.resolve(r) ?? r) === lastResort.ref)) reasons.push(`${lastResort.ref} (last resort): runs on this machine`)
           else if (router.isLimited(lastResort)) reasons.push(`${lastResort.ref} (last resort): ${router.setAsideReason(lastResort)}`)
           else if (!router.usable(p)) reasons.push(`${lastResort.ref} (last resort): ${router.blockReason(p)}`)
           else if (isPaidModel(lastResort) && !budget.isExhausted(j.book).ok) reasons.push(`${lastResort.ref} (last resort): over budget`)

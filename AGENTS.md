@@ -11,5 +11,5 @@
 
 - Node is only available through fnm (v24.14.0 is the default) and is not on PATH in non-interactive shells. Run `fnm env --use-on-cd | Out-String | Invoke-Expression` (PowerShell) first, or call the fnm Node directly.
 - Git 2.55 with `core.autocrlf=true`. `gh` is not installed. Python 3.13 (`py`) is available.
-- LM Studio is installed (CLI `~\.lmstudio\bin\lms.exe`, server is OpenAI-compatible). `lms ls` lists its models. The model table is in the design doc under "Model layer". Ollama is not installed.
+- LM Studio is installed (CLI `~\.lmstudio\bin\lms.exe`, server is OpenAI-compatible). `lms ls` lists its models. The model table is in the design doc under "Model layer". Ollama is not installed. Since HUB-38 (SCP-65) chat models are reached through the ACP proxy (provider `acp`, `http://127.0.0.1:8787/v1`: Gufo, Strata and Llama.cpp local models plus Codex, Antigravity and Claude); LM Studio only serves embeddings until the proxy has `/v1/embeddings` (AAP-43).
 - 128 GB unified memory; Windows sees 32 GB, so about 96 GB is left for models.

@@ -438,7 +438,7 @@ export async function migrateAcpProvider(dataDir: string, seedDir: string | unde
   const orderAt = lines.findIndex((l, i) => i > 0 && i < end && /^search_order:/.test(l))
   lines.splice(client ? client.from : search ? search.from : orderAt >= 0 ? orderAt : end, 0, ...block)
   await atomicWrite(file, lines.join(eol))
-  changes.push(`config/providers.md: added the acp provider (the ACP proxy at ${ACP_URL}, switched off)`)
+  changes.push(`config/providers.md: added the acp provider (the ACP proxy at ${ACP_URL}${block.some((l) => /^ {4}enabled:\s*false\s*$/.test(l)) ? ', switched off' : ''})`)
   return { changes }
 }
 

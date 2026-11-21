@@ -14,7 +14,7 @@ export interface CandidateOptions {
   bookModels?: string[] | null
   /** Reviewers prefer another family than the book's writer. Models of this family go last. */
   avoidFamily?: string | null
-  /** SCP-62: leave out every model on this machine (`provider.onDevice`) that is not in `bookModels`. Hard: the list may end up empty. */
+  /** SCP-62: leave out every model on this machine (`model.onDevice`) that is not in `bookModels`. Hard: the list may end up empty. */
   noLocalFallback?: boolean
 }
 
@@ -191,7 +191,7 @@ export class ModelRouter {
       if (m && m.provider.available && m.provider.client && !m.embedding) list.push(m)
     }
     // a book that forbids local fallback never gets a model on this machine outside its own list, even when nothing else is left
-    if (o.noLocalFallback) list = list.filter((m) => !m.provider.onDevice || book.includes(m.ref))
+    if (o.noLocalFallback) list = list.filter((m) => !m.onDevice || book.includes(m.ref))
     const up = list.filter((m) => this.usable(m.provider))
     if (up.length > 0) list = up
     // a model the provider retired answers 404 every time: leave it out while another model is left (the chain's last entry stays so the error shows)
