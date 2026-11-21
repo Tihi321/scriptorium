@@ -9,8 +9,7 @@ smtp_secure: false
 byline: ""
 fallbacks:
   - deepseek/deepseek-flash
-  - strata/default
-  - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic
+  - acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs
 fallback_shared: false
 last_resort_model: ""
 lmstudio_parallel: 4
@@ -32,24 +31,24 @@ Sending books to your Kindle by email.
 
 ## Default models
 
-`fallbacks` is the list of models the factory falls back through, first row first. It can have any length, and a kind may repeat: for example API, API, LM Studio, API. Each row is one `provider/model`. Its **kind** comes from the model's provider, so a row can't disagree with its model: an API provider (free or paid) is `paid`, any other provider is named by its id (`strata`, `lmstudio`, `client` ...). Edit the list here or in the app's Models panel (a kind, then its model, with add, remove, up and down). A change applies at once, to running jobs too.
+`fallbacks` is the list of models the factory falls back through, first row first. It can have any length, and a kind may repeat: for example API, API, ACP proxy, API. Each row is one `provider/model`. Its **kind** comes from the model's provider, so a row can't disagree with its model: an API provider (free or paid) is `paid`, any other provider is named by its id (`acp`, `lmstudio`, `client` ...). Edit the list here or in the app's Models panel (a kind, then its model, with add, remove, up and down). A change applies at once, to running jobs too.
 
-The role lists in `roles.md`, an agent's `model` and a book's `role_models` can name a kind instead of a model: `paid` is the first API row, `paid-2` the second, `strata` the first Strata row, `lmstudio-2` the second LM Studio row, `client` the first client row. A name with no matching row is skipped (the engine logs it once). An agent's own model, picked in the app, still goes first.
+The role lists in `roles.md`, an agent's `model` and a book's `role_models` can name a kind instead of a model: `paid` is the first API row, `paid-2` the second, `acp` the first ACP proxy row, `acp-2` the second, `client` the first client row. A name with no matching row is skipped (the engine logs it once). An agent's own model, picked in the app, still goes first.
 
-- `fallbacks`: the rows, for example the three below. At least one.
-- `fallback_shared`: `true` gives every role the rows top to bottom (the Models panel's "One fallback order for every role"). A role's own concrete model of the same kind takes the place of the first row of that kind not taken yet (the checks name Strata's `-low` model, so it takes the Strata row's place). A model with no row of its kind, such as that one without a Strata row, comes after the rows. A role gets every row, even for a kind its own list leaves out. `false` keeps each role's own order from `roles.md`, and the rows only say what `paid`, `strata`, `lmstudio` ... stand for.
+- `fallbacks`: the rows, for example the four below. At least one.
+- `fallback_shared`: `true` gives every role the rows top to bottom (the Models panel's "One fallback order for every role"). A role's own concrete model of the same kind takes the place of the first row of that kind not taken yet (the checks name the local Strata model, so it takes the `acp` row's place). A model with no row of its kind, such as that one without an `acp` row, comes after the rows. A role gets every row, even for a kind its own list leaves out. `false` keeps each role's own order from `roles.md`, and the rows only say what `paid`, `acp`, `client` ... stand for.
 
 ```yaml
 fallbacks:
   - deepseek/deepseek-flash                 # paid
   - openrouter/google/gemma-4-31b-it:free   # paid-2
-  - lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic   # lmstudio
+  - acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs   # acp
   - deepseek/deepseek-v4-pro                # paid-3
 ```
 
 ## Last resort
 
-- `last_resort_model`: a `provider/model` (or a kind name such as `paid`), empty by default. It is used only when **every** model of a job's role is down or used up for the day (a Strata that is not running and an OpenRouter day that is full, for example). It is not used while a model is only busy or rate-limited (the job waits for it), or when the budget keeps a paid model out. The job runs on this model alone, and the engine logs `every model of <role> is unusable (...): using the last resort <ref>`. If the last resort is busy, down or over budget itself, the job waits, and `factory_status` shows why. A paid model here still goes through the budget caps. A `client` model here means those jobs wait for a Claude Code session to take them (nothing else runs them). Set it here: it has no control in the app.
+- `last_resort_model`: a `provider/model` (or a kind name such as `paid`), empty by default. It is used only when **every** model of a job's role is down or used up for the day (a proxy that is not running and an OpenRouter day that is full, for example). It is not used while a model is only busy or rate-limited (the job waits for it), or when the budget keeps a paid model out. The job runs on this model alone, and the engine logs `every model of <role> is unusable (...): using the last resort <ref>`. If the last resort is busy, down or over budget itself, the job waits, and `factory_status` shows why. A paid model here still goes through the budget caps. A `client` model here means those jobs wait for a Claude Code session to take them (nothing else runs them). Set it here: it has no control in the app.
 
 ## LM Studio loading
 

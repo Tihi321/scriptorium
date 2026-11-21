@@ -75,6 +75,8 @@ export interface ModelInfo {
   priceOut: number
   priceCachedIn: number
   embedding: boolean
+  /** SCP-65: runs on this machine, for `no_local_fallback`: the row's `on_device`, else a `gufo/`, `strata/` or `llama/` model of an openai-compat provider (local models behind the ACP proxy), else the provider's `onDevice`. */
+  onDevice: boolean
   extraBody: Record<string, unknown> | null
   discovered: boolean
   /** Added from `picked` in config/models.md (the Models dialog), not from providers.md. */
@@ -116,6 +118,11 @@ export interface RegistryOptions {
 function defaultLmsPath(): string | undefined {
   const p = path.join(os.homedir(), '.lmstudio', 'bin', process.platform === 'win32' ? 'lms.exe' : 'lms')
   return existsSync(p) ? p : undefined
+}
+
+/** SCP-65: a model runs on this machine when its row says so, else when it is a local model behind the ACP proxy (`gufo/`, `strata/`, `llama/`), else as its provider. */
+export function modelOnDevice(p: Pick<ProviderInfo, 'kind' | 'onDevice'>, id: string, own?: boolean): boolean {
+  return own ?? ((p.kind === 'openai-compat' && /^(gufo|strata|llama)\//.test(id)) || p.onDevice)
 }
 
 /** A model that costs money: not local and with a price. */
@@ -245,6 +252,7 @@ export class ModelRegistry {
           priceCachedIn: m.price_cached_in ?? m.price_in,
           embedding: m.embedding,
           extraBody: m.extra_body ?? null,
+          onDevice: modelOnDevice(info, m.id, m.on_device),
           jsonSchema: m.json_schema,
           discovered: false
         })
@@ -279,6 +287,7 @@ export class ModelRegistry {
         priceIn: m.price_in,
         priceOut: m.price_out,
         priceCachedIn: m.price_cached_in ?? m.price_in,
+        onDevice: modelOnDevice(p, m.id),
         embedding: m.embedding,
         extraBody: m.extra_body ?? null,
         jsonSchema: m.json_schema,
@@ -429,6 +438,7 @@ export class ModelRegistry {
             priceCachedIn: p.local ? 0 : (m.price?.cachedIn ?? m.price?.in ?? 0),
             embedding: /embed/i.test(m.id),
             extraBody: null,
+            onDevice: modelOnDevice(p, m.id),
             discovered: true
           })
         }

@@ -48,7 +48,9 @@ export const providerModelSchema = z.looseObject({
   /** Older ids of this row: `provider/<alias>` resolves to it. Not listed as models. */
   aliases: z.array(z.string()).default([]),
   /** Overrides the provider's `json_schema` for this model. */
-  json_schema: z.boolean().optional()
+  json_schema: z.boolean().optional(),
+  /** SCP-65: this model runs on this machine (for `no_local_fallback`), over the default rule: a `gufo/`, `strata/` or `llama/` model of an openai-compat provider is on this machine, else the provider's `on_device`. */
+  on_device: z.boolean().optional()
 })
 
 /** Settings for a model a provider with `loaded` rows may run, matched by id (the whole id, else the longest prefix). Not a ref, not in the pickers. */
@@ -284,7 +286,7 @@ export const settingsSchema = configBase('settings').extend({
    * provider, otherwise the provider's id). A kind name in roles.md (`paid`, `strata`, `lmstudio`, `client` ...) stands for the first row of
    * that kind, `<kind>-<n>` for the n-th.
    */
-  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/default', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']),
+  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs']),
   /** One fallback order for every role: the rows top to bottom. False: each role keeps the order of its list in roles.md. */
   fallback_shared: z.boolean().default(false),
   /**

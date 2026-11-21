@@ -260,11 +260,11 @@ describe('migrateFallbacks (SCP-19)', () => {
 })
 
 describe('migrateAcpProvider (SCP-44)', () => {
-  it('adds the acp provider once, before the client provider, keeps comments and CRLF, and the registry loads it switched off', async () => {
+  it('adds the acp provider once, before the client provider, keeps comments and CRLF, and the registry loads it as the seed has it (on, with the local rows)', async () => {
     const withClient = [...OLD_PROVIDERS.slice(0, 8), '  # my client note', '  - id: client', '    kind: client', '    models: []', ...OLD_PROVIDERS.slice(8)]
     const dir = await providersFolder(withClient, '\r\n')
     const res = await migrateAcpProvider(dir, seedDir)
-    expect(res.changes).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:8787/v1, switched off)'])
+    expect(res.changes).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:8787/v1)'])
     const file = path.join(dir, 'config', 'providers.md')
     const text = await readFile(file, 'utf8')
     expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/)
@@ -277,7 +277,7 @@ describe('migrateAcpProvider (SCP-44)', () => {
     await writeFile(path.join(dir, 'config', 'roles.md'), ['---', 'kind: roles', 'roles: {}', '---', ''].join('\n'))
     const registry = new ModelRegistry(dir, { keys: () => undefined })
     await registry.load()
-    expect(registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, baseUrl: 'http://127.0.0.1:8787/v1', concurrency: 2, jsonSchema: false, discover: true, custom: false, name: 'ACP proxy', available: false })
+    expect(registry.providers.get('acp')).toMatchObject({ enabled: true, local: true, baseUrl: 'http://127.0.0.1:8787/v1', concurrency: 4, jsonSchema: false, discover: true, custom: false, name: 'ACP proxy', available: true })
     expect(registry.kindOf('acp/any')).toBe('acp')
   })
 
@@ -319,7 +319,7 @@ describe('migrateAcpProvider (SCP-44)', () => {
     expect(from).toBeGreaterThan(0)
     await writeFile(file, seedText.slice(0, from) + seedText.slice(to))
     const again = await initDataFolder(fresh, seedDir)
-    expect(again.migrated).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:8787/v1, switched off)'])
+    expect(again.migrated).toEqual(['config/providers.md: added the acp provider (the ACP proxy at http://127.0.0.1:8787/v1)'])
     expect((await initDataFolder(fresh, seedDir)).migrated).toEqual([])
   })
 })

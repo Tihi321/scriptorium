@@ -9,7 +9,7 @@ Status: MVP built on branch `SCP-02_mvp-text-only` (not committed yet). Phases 0
 
 ## In short
 
-- **Models:** cloud APIs (DeepSeek, OpenAI, Anthropic, Gemini, Mistral, Kimi, Qwen, GLM, OpenRouter) and local ones (LM Studio, Ollama). A default model per agent type, an override per agent.
+- **Models:** cloud APIs (DeepSeek, OpenAI, Anthropic, Gemini, Mistral, Kimi, Qwen, GLM, OpenRouter) and local ones (Gufo, Strata and Llama.cpp models through the ACP proxy; LM Studio only for embeddings, Ollama). A default model per agent type, an override per agent.
 - **Agents:** editor-in-chief, idea generator, architect, writers, an on-demand researcher, continuity checker, fact-checker, editors, child-safety and read-aloud reviewers, publisher. Many work in parallel.
 - **Shared state:** plain markdown files on disk. Agents, jobs, bibles, research, reviews and logs are all files.
 - **Books:** up to 150k words, written scene by scene from a book memory (outline, story bible, summaries, RAG, research notes). Output is EPUB with a template cover.
@@ -28,7 +28,7 @@ npm install
 
 - `npm run dev`: builds the engine, then opens the Electron app. The window shows the engine heartbeat.
 - `npm run engine -- --data <dir>`: runs the engine headless with plain Node, no Electron. It builds `out/engine/index.js` first, creates the data folder from `seed/` (existing files are never overwritten), and keeps running with a heartbeat on stdout. Add `--once` to create the folder and exit. Press Ctrl+C to stop.
-- `npm run engine -- probe [--model provider/model]`: streams one short reply from LM Studio (and DeepSeek when a key is set), embeds one string, and writes a spend row.
+- `npm run engine -- probe [--model provider/model]`: streams one short reply from the local model through the ACP proxy (`acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`, or `--model`), embeds one string with the roles' embeddings model, and writes a spend row.
 - `npm run engine -- reindex --data <dir>`: rebuilds the search index (`index/library.sqlite`, a cache) from the markdown files, using the embedding model. `npm run engine -- rebuild-reader --data <dir>`: writes the in-app reader folder (`books/<slug>/out/reader/`) for books published earlier.
 - `npm run key:set <ENV_NAME>`: stores an API key in the Windows credential store (hidden prompt). The engine looks at the environment variable first, then the store.
 - To make a book: switch a topic on (`active: yes` in `topics.md` in the data folder, or the tick box in the app's Topics panel), add your own topic with "Add a topic" in that panel (it goes into a `## My topics` table in `topics.md`), or drop an idea file into `ideas/`, then run the engine. Formats: bedtime story (toddler and 3-6), short story, chapter book, and the long ones (middle grade, novella, novel) that use the book memory. Finished books are in `books/<slug>/out/<slug>.epub`.

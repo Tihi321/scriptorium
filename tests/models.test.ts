@@ -40,12 +40,41 @@ async function registryWith(o: Parameters<typeof writeTestConfig>[1], mock = new
   return { registry, mock }
 }
 
+/** The way back (HUB-38): the direct `strata` provider on and the pre-proxy role chains, in the temp data folder. Returns the old three fallback rows. */
+async function directStrata(): Promise<string[]> {
+  const pf = path.join(dir, 'config', 'providers.md')
+  const providers = await readFile(pf, 'utf8')
+  const at = providers.indexOf('  - id: strata')
+  await writeFile(pf, providers.slice(0, at) + providers.slice(at).replace(/ {4}enabled: false\r?\n/, ''))
+  const rf = path.join(dir, 'config', 'roles.md')
+  const roles = (await readFile(rf, 'utf8'))
+    .replaceAll('[paid, acp]', '[paid, strata, lmstudio]')
+    .replaceAll('[acp, paid]', '[strata, lmstudio, paid]')
+    .replaceAll(LOCAL + ', paid]', 'strata/default-low, lmstudio, paid]')
+  await writeFile(rf, roles)
+  return ['deepseek/deepseek-flash', 'strata/default', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']
+}
+
+const LOCAL = 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
+
 describe('seed configs', () => {
   it('on this machine (SCP-62): a local openai-compat provider except acp, unless on_device says otherwise', async () => {
     const seed = new ModelRegistry(dir, { keys: () => undefined })
     await seed.load()
     const on = (r: ModelRegistry) => Object.fromEntries([...r.providers.values()].map((p) => [p.id, p.onDevice]))
     expect(on(seed)).toMatchObject({ lmstudio: true, strata: true, ollama: true, acp: false, client: false, deepseek: false })
+    // SCP-65: through the proxy only the local models (gufo/, strata/, llama/) count as on this machine
+    const m = (ref: string) => seed.getModel(ref)!.onDevice
+    expect([m(LOCAL), m('acp/gufo/Qwen3.8-27B'), m('acp/llama/inkling-2-mini'), m('lmstudio/nail-qwen3.6-35b-a3b-mtp'), m('deepseek/deepseek-flash')]).toEqual([true, true, true, true, false])
+    // A1: a no_local_fallback book never gets LOCAL unless its own list names it, while a cloud model of the proxy stays allowed
+    const pf = path.join(dir, 'config', 'providers.md')
+    await writeFile(pf, (await readFile(pf, 'utf8')).replace(/( {6}- id: llama\/inkling-2-mini-dspark\r?\n)/, '      - id: codex/gpt-6-luna\n        family: gpt\n$1'))
+    const cloud = new ModelRegistry(dir, { keys: () => undefined })
+    cloud.setDefaults({ fallbacks: ['acp/codex/gpt-6-luna'], shared: false, lastResort: '', lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    await cloud.load()
+    const refs = (o: { bookModels?: string[] }) => new ModelRouter(cloud, undefined).candidates('writer', { agentModel: LOCAL, noLocalFallback: true, ...o }).map((x) => x.ref)
+    expect(refs({})).toEqual(['acp/codex/gpt-6-luna'])
+    expect(refs({ bookModels: [LOCAL] })).toEqual([LOCAL, 'acp/codex/gpt-6-luna'])
     const { registry } = await registryWith({ providers: [{ id: 'x', local: true, onDevice: true, models: ['m'] }, { id: 'y', local: true, onDevice: false, models: ['m'] }, { id: 'z', local: true, models: ['m'] }] })
     expect(on(registry)).toEqual({ x: true, y: false, z: false })
   })
@@ -57,27 +86,33 @@ describe('seed configs', () => {
     expect(registry.providers.get('deepseek')?.unavailableReason).toMatch(/no key/)
     expect(registry.providers.get('lmstudio')?.available).toBe(true)
     expect(registry.providers.get('ollama')?.available).toBe(false)
-    expect(registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
-    expect(isPaidModel(registry.getModel('strata/default')!)).toBe(false)
-    expect(new ModelRouter(registry, undefined).candidates('line-editor')[0]?.ref).toBe('strata/default')
+    // SCP-65 / HUB-38: the proxy is on with the six local rows, the direct Strata provider is off
+    expect(registry.providers.get('acp')).toMatchObject({ enabled: true, available: true, local: true, baseUrl: 'http://127.0.0.1:8787/v1', jsonSchema: false })
+    expect([...registry.models.keys()].filter((r) => r.startsWith('acp/'))).toHaveLength(6)
+    expect(registry.providers.get('strata')).toMatchObject({ enabled: false, available: false })
+    expect(registry.getModel(LOCAL)).toMatchObject({ context: 131072, extraBody: { reasoning_effort: 'none' } })
+    expect(isPaidModel(registry.getModel(LOCAL)!)).toBe(false)
+    expect(new ModelRouter(registry, undefined).candidates('line-editor')[0]?.ref).toBe(LOCAL)
     const flash = registry.getModel('deepseek/deepseek-flash')!
     expect(flash).toMatchObject({ priceIn: 0.3, priceOut: 1.2, priceCachedIn: 0.006, family: 'deepseek' })
     expect(isPaidModel(flash)).toBe(true)
     expect(isPaidModel(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')!)).toBe(false)
-    for (const role of Object.keys(registry.roles.roles)) for (const ref of registry.roleModelRefs(role)) expect(registry.getModel(ref), ref).toBeTruthy()
-    // the seed roles use the aliases, resolved to the settings defaults
-    expect(registry.roles.roles.writer?.models).toEqual(['paid', 'strata', 'lmstudio'])
-    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', 'strata/default', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic'])
-    expect(registry.roleModelRefs('continuity-checker')).toEqual(['strata/default-low', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic', 'deepseek/deepseek-flash'])
+    // the archivist's Antigravity model is not a seed row: the proxy lists it (Detect models)
+    for (const role of Object.keys(registry.roles.roles)) for (const ref of registry.roleModelRefs(role)) if (!ref.startsWith('acp/antigravity/')) expect(registry.getModel(ref), ref).toBeTruthy()
+    // the seed roles use the aliases, resolved to the settings defaults (the default fallbacks: DeepSeek Flash, then LOCAL)
+    expect(registry.roles.roles.writer?.models).toEqual(['paid', 'acp'])
+    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', LOCAL])
+    expect(registry.roleModelRefs('continuity-checker')).toEqual([LOCAL, 'deepseek/deepseek-flash'])
+    expect(registry.roleModelRefs('archivist')).toEqual(['acp/antigravity/gemini-4-hydrogen', LOCAL, 'deepseek/deepseek-flash'])
     expect(registry.providers.get('lmstudio')?.loadModels).toBe(true)
     expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(131072) // loaded with the settings' window
     // the big Qwen models have their own load settings in providers.md
     expect(registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp')).toEqual({ parallel: 2, context: 65536, ttlMinutes: 60 })
     expect(registry.loadConfigFor('lmstudio', 'gemma-4-e4b-it-ultra-uncensored-heretic')).toEqual({ parallel: 4, context: 131072, ttlMinutes: 60 })
     // another default in the settings: the roles follow, and an agent override may be an alias too
-    registry.setDefaults({ fallbacks: ['deepseek/deepseek-v4-pro', 'strata/default', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'], shared: false, lastResort: '', lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
+    registry.setDefaults({ fallbacks: ['deepseek/deepseek-v4-pro', 'acp/gufo/Qwen3.8-27B', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'], shared: false, lastResort: '', lmLoad: { parallel: 2, context: 16384, ttlMinutes: 30 } })
     await registry.load()
-    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-v4-pro', 'strata/default', 'lmstudio/nail-qwen3.6-35b-a3b-mtp'])
+    expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-v4-pro', 'acp/gufo/Qwen3.8-27B'])
     expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(16384)
     expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(65536) // its own load_context wins
     expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
@@ -94,6 +129,7 @@ describe('seed configs', () => {
       if (!answer) throw new Error('connection refused')
       return answer()
     }) as unknown as typeof fetch
+    await directStrata()
     const registry = new ModelRegistry(dir, { keys: () => undefined, fetchImpl })
     await registry.load()
     const strata = () => registry.providers.get('strata')!
@@ -131,7 +167,9 @@ describe('seed configs', () => {
       if (u.endsWith('/v1/status')) return new Response(JSON.stringify({ error: 'Unexpected endpoint or method. (GET /v1/status)' }))
       return new Response(JSON.stringify({ models: [] })) // LM Studio runs
     }) as unknown as typeof fetch
+    const three = await directStrata()
     const registry = new ModelRegistry(dir, { keys: () => undefined, fetchImpl })
+    registry.setDefaults({ fallbacks: three, shared: false, lastResort: '', lmLoad: { parallel: 4, context: 131072, ttlMinutes: 60 } })
     await registry.load()
     const router = new ModelRouter(registry, undefined)
     const refs = () => router.candidates('line-editor').map((m) => m.ref)
@@ -1308,9 +1346,9 @@ describe('fallbacks as an open list (SCP-19)', () => {
   })
 
   it('with the old three rows the seed roles keep the chains the group sort gave them', async () => {
+    const three = await directStrata()
     const registry = new ModelRegistry(dir, { keys: () => undefined })
     await registry.load()
-    const three = ['deepseek/deepseek-flash', 'strata/default', 'lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic']
     registry.setDefaults({ fallbacks: three, shared: true, lastResort: '', lmLoad: lm })
     expect(registry.roleModelRefs('writer')).toEqual(three)
     expect(registry.roleModelRefs('line-editor')).toEqual(three) // [strata, lmstudio, paid] sorted by the rows

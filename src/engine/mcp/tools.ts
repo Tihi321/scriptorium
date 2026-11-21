@@ -577,7 +577,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('A series slug from list_series: the book continues that series (its premise, cast and earlier books go to the writers) and starts only when the books before it are published. series_index is set to the next free number'),
         humanize: z.boolean().optional().describe('false: the humanizer does not rewrite the chapters of this book (default: it does, when the format allows it and a humanizer is hired)'),
-        noLocalFallback: z.boolean().optional().describe('true: the book made from this story never uses a model on this machine (LM Studio, Strata, Ollama) outside its own `models` list, nor the last resort when that is one; a job with nothing else left waits (see set_book_local_fallback). Default: off'),
+        noLocalFallback: z.boolean().optional().describe('true: the book made from this story never uses a model on this machine (LM Studio, Strata, Ollama, or Gufo, Strata and Llama.cpp models behind the ACP proxy) outside its own `models` list, nor the last resort when that is one; a job with nothing else left waits (see set_book_local_fallback). Default: off'),
         puzzles: z
           .array(puzzleEntrySchema)
           .optional()
@@ -658,7 +658,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
         genre: z.string().optional(),
         series: z.string().optional().describe('Moves the story to this series (it gets the next free series_index there); an empty string takes it out of its series'),
         humanize: z.boolean().optional().describe('false: the humanizer skips this book; true: back to the default'),
-        noLocalFallback: z.boolean().optional().describe('true: the book made from this story never uses a model on this machine outside its own models list; false: removes the flag'),
+        noLocalFallback: z.boolean().optional().describe('true: the book made from this story never uses a model on this machine (LM Studio, Strata, Ollama, or Gufo, Strata and Llama.cpp models behind the ACP proxy) outside its own models list; false: removes the flag'),
         byline: z.string().optional().describe('The name the book shows as its author; an empty string goes back to the default of config/settings.md (else the pen name of the writer)'),
         models: modelsSchema.optional().describe('Replaces the models of this story (role -> a provider/model or an ordered list of them); {} clears them')
       }
@@ -876,7 +876,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
     'set_book_local_fallback',
     {
       description:
-        'Allow or forbid models on this machine (LM Studio, Strata, Ollama: providers with `on_device`, by default the local OpenAI-compatible servers except the ACP proxy) as fallbacks for ONE book. With `noLocalFallback: true` the jobs of the book use its own `role_models` list (set_book_model), the model of the agent and the other rows of the role, but never a model on this machine outside that list, nor the last resort when that is one; a job with nothing else left waits, and `factory_status.blocked` says `no local fallback: ...`. Running jobs on such a model go back to the queue. Works at any stage.',
+        'Allow or forbid models on this machine (LM Studio, Strata, Ollama: providers with `on_device`, by default the local OpenAI-compatible servers except the ACP proxy; or Gufo, Strata and Llama.cpp models behind the ACP proxy) as fallbacks for ONE book. With `noLocalFallback: true` the jobs of the book use its own `role_models` list (set_book_model), the model of the agent and the other rows of the role, but never a model on this machine outside that list, nor the last resort when that is one; a job with nothing else left waits, and `factory_status.blocked` says `no local fallback: ...`. Running jobs on such a model go back to the queue. Works at any stage.',
       inputSchema: { book: z.string(), noLocalFallback: z.boolean() },
       annotations: WRITE
     },

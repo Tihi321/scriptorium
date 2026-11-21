@@ -66,7 +66,7 @@ providers:
         price_in: 0.30
         price_out: 2.50
         price_cached_in: 0.03
-  - id: lmstudio
+  - id: lmstudio                  # embeddings only now (chat goes through the ACP proxy) until the proxy serves /v1/embeddings (AAP-43)
     kind: openai-compat
     local: true
     base_url: http://localhost:1234/v1
@@ -97,8 +97,9 @@ providers:
       - id: text-embedding-nomic-embed-text-v1.5
         family: nomic
         embedding: true
-  - id: strata
+  - id: strata                    # switched off (HUB-38): Strata is reached through the ACP proxy as acp/strata/*; kept as a way back
     kind: openai-compat
+    enabled: false
     local: true
     base_url: http://127.0.0.1:8080/v1
     api_key_env: STRATA_API_KEY   # optional: only sent if set
@@ -131,18 +132,46 @@ providers:
     concurrency: 1
     discover: true
     models: []
-  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-compatible server. Off until you start the proxy.
+  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP, plus the local Gufo, Strata and Llama.cpp models) as an OpenAI-compatible server.
   # See "The ACP proxy" below. Any other OpenAI-compatible server is added in the Models dialog (Add provider).
   - id: acp
     name: ACP proxy
     kind: openai-compat
-    enabled: false
+    enabled: true
     local: true
     base_url: http://127.0.0.1:8787/v1
-    concurrency: 2
+    concurrency: 4                # the hub's live config uses 8 for Scriptorium
     json_schema: false
     discover: true
-    models: []
+    discover_skip: [ qwen-image, nomic-embed ]
+    models:
+      # Local models through the proxy (HUB-38). One local model is loaded at a time across gufo, strata and llama;
+      # a request for another one waits until the proxy has switched (minutes). LOCAL is the strata row.
+      - id: strata/qwen3.8-flash-next-unsloth-ud-iq4_xs
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: none }
+      - id: gufo/Qwen3.8-27B
+        family: qwen
+        context: 32768
+        extra_body: { reasoning_effort: none }
+      - id: gufo/deepseek4
+        family: deepseek
+        context: 16384
+        extra_body: { reasoning_effort: none }
+      - id: gufo/flash-next-q4
+        family: qwen
+        context: 32768
+        vision: true
+        extra_body: { reasoning_effort: none }
+      - id: llama/inkling-2-mini
+        family: inkling
+        context: 32768
+        vision: true
+      - id: llama/inkling-2-mini-dspark
+        family: inkling
+        context: 32768
+        vision: true
   # Claude Code (or any MCP client) does the model work: a request waits in the engine until the client answers it (see docs/mcp.md).
   # Switched off here so a new install never routes to it: set `enabled: true`, then point one agent or role at client/claude-code.
   - id: client
@@ -228,7 +257,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 - `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `client` (no model server: an MCP client such as Claude Code answers, see below), `mock` (scripted answers, only for the tests: the app's own config has none, so the model pickers never offer one) or `search` (web search for the researcher: `engine` names the service, see below).
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing and never count against the caps. Their tokens and time are still recorded.
-- `on_device`: optional. `true` when the provider runs on this machine (LM Studio, Strata, Ollama), `false` when it does not (a proxy to cloud models). Without it, a `local` provider of kind `openai-compat` is on this machine, except `acp`. A book with `no_local_fallback: true` (MCP `set_book_local_fallback`) never uses a model of such a provider outside its own `role_models` list. Set `on_device: false` on a custom provider that points at another proxy.
+- `on_device`: optional. `true` when the provider runs on this machine (LM Studio, Strata, Ollama), `false` when it does not (a proxy to cloud models). Without it, a `local` provider of kind `openai-compat` is on this machine, except `acp`. A model row can carry its own `on_device`; without it, a model of an `openai-compat` provider whose id starts with `gufo/`, `strata/` or `llama/` (the local models behind the ACP proxy) is on this machine, and the others follow their provider. A book with `no_local_fallback: true` (MCP `set_book_local_fallback`) never uses a model of such a provider outside its own `role_models` list. Set `on_device: false` on a custom provider that points at another proxy.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
 - `concurrency`: how many requests may run at once. `auto`: as many as the server says it serves at once, asked at start and every 10 seconds, 1 while the server is down. A server that doesn't answer is skipped: its jobs go straight to the next model in the role (no failed retries first) until it answers again, and the office shows the model that really answers. The first request that can't connect marks it down at once for every agent, and the status bar shows it as off with a **Check now** button for right after you start it. Strata reports it as `concurrency.serving` of `<base_url>/status`, so it follows the script you started: 4 with a `-parallel` script, 1 with a `-solo` one, and nothing in this file changes when you switch. For LM Studio it is the sum of `parallel` over the loaded chat models (from LM Studio's `/api/v1/models`): load a model with `--parallel 4` and four requests go to it at once. Requests in parallel share the GPU, so each one is slower, but the total is higher.
 - `rpm`, `tpm`: optional rate limits (requests and tokens per minute). Only `rpm` is enforced for now.
@@ -240,23 +269,24 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 
 ## Strata
 
-Strata (`D:\Strata`) is a fast local server with an OpenAI-style API. It is the first choice in the roles that used LM Studio. Scriptorium only connects to it, you start it:
+Strata (`D:\Strata`) is a fast local server with an OpenAI-style API. Since HUB-38 Scriptorium does not connect to it directly: the ACP proxy does (see "The ACP proxy"). The `strata` provider above is switched off (`enabled: false`) and kept, with its rows and profiles, as a way back: set `enabled: true` and point the roles at `strata/default` to use it directly again.
 
-- It serves one model per process, on port 8080, chosen by the `run-*.bat` you start in `D:\Strata`: `run-unsloth-ud-iq4_xs-parallel.bat` (Qwen3.8-Flash-Next IQ4_XS, four requests at once), `run-unsloth-ud-iq4_xs.bat` (Qwen IQ4_XS, one at a time), `run-deepseek-v4.1-flash-ist-das-2.00bpw.bat` and `run-deepseek-v4.1-flash-ista-das-coder.bat` (DeepSeek V4.1 Flash). From the creative-hub folder, `scripts\hub.ps1 start strata <variant>` starts one.
-- Loading the model takes 1 to 3 minutes (the DeepSeek config allows up to an hour). Check `curl http://127.0.0.1:8080/health` and wait for `loaded: true`. Until it answers, jobs skip it and use the next model in the role; a few seconds after it answers (the check runs every 10 seconds) they go back to Strata.
-- Scriptorium asks Strata which model it runs (`/v1/status`) and uses the matching entry of `profiles` for that model's settings (family, context, extra body). `strata/default` (no thinking) and `strata/default-low` (thinking on `low`, for the checks) follow it: after you restart Strata with another model, the Models dialog and `check_servers` show the new name within about 10 seconds and `config/roles.md` stays the same. The older ids `qwen3.8-flash-next` and `qwen3.8-flash-next-low` still work as aliases. When you install a new model, add a profile for it (its `id` is matched as a prefix of the id Strata reports).
-- The family follows the model too: with DeepSeek on Strata, a Strata reviewer is the same family as a DeepSeek writer, so the "different family" choice of the reviewers does not hold then.
+- Under the proxy, an `acp/strata/*` request makes the proxy start `D:\Strata\terminal\run-unsloth-ud-iq4_xs-parallel.bat` (Qwen3.8-Flash-Next IQ4_XS, four requests at once). The other scripts are `D:\Strata\terminal\run-unsloth-ud-iq4_xs.bat` (one at a time), `run-deepseek-v4.1-flash-ist-das-2.00bpw.bat` and `run-deepseek-v4.1-flash-ista-das-coder.bat` (DeepSeek V4.1 Flash), all in `D:\Strata\terminal`. From the creative-hub folder, `scripts\hub.ps1 start strata <variant>` starts one by hand.
+- Only one local model is on the GPU at a time across Gufo, Strata and Llama.cpp: a request for another local model waits until the proxy has switched, which takes minutes (loading Strata takes 1 to 3 minutes, the DeepSeek config allows up to an hour).
+- Direct use (the way back): Scriptorium asks Strata which model it runs (`/v1/status`) and uses the matching entry of `profiles` for that model's settings (family, context, extra body). `strata/default` (no thinking) and `strata/default-low` (thinking on `low`) follow it, and the older ids `qwen3.8-flash-next` and `qwen3.8-flash-next-low` still work as aliases. A new model needs a profile (its `id` is matched as a prefix of the id Strata reports).
 - Strata takes most of the GPU memory with any of these models: keep only the nomic embedding model loaded in LM Studio, and no ComfyUI, while it runs.
-- `context` in a profile must match `--max-context` in the run config (131072 for all four now).
-- `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. That would be retried and then sent to a paid model, while the engine's own parse-and-repair step already copes with a loose JSON answer.
+- `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. The engine's own parse-and-repair step copes with a loose JSON answer. The proxy does not enforce `response_format` either.
 - No key is needed. `STRATA_API_KEY` is only sent if you set it.
 
 ## The ACP proxy
 
-`acp` points at the api-acp-proxy (`http://127.0.0.1:8787/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API. It is off until you start the proxy and set `enabled: true` (or switch it on in the Models panel). It is local (free, its own kind `acp` in the fallback list); press **Detect models** to list what the proxy offers and tick the ones you want.
+`acp` points at the api-acp-proxy (`http://127.0.0.1:8787/v1`), which serves Antigravity, Codex and Claude through ACP, and the local Gufo, Strata and Llama.cpp models, as an OpenAI-compatible API. It is on in the seed (`enabled: true`); start the proxy first. It is local (free, its own kind `acp` in the fallback list); press **Detect models** to list what the proxy offers and tick the ones you want.
 
+- The local rows are `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs` (the default local model, written LOCAL in the plans), `gufo/Qwen3.8-27B`, `gufo/deepseek4`, `gufo/flash-next-q4`, `llama/inkling-2-mini` and `llama/inkling-2-mini-dspark`. Defaults name only the Strata one. The proxy answers a request with `tools` to a local model with 400, and does not enforce `response_format`.
+- Only one local model is loaded at a time; a request for another one waits until the proxy has switched (minutes).
+- A model of the proxy that runs on this machine (`gufo/*`, `strata/*`, `llama/*`, or a row with `on_device: true`) counts as on this machine for `no_local_fallback`; the Codex, Antigravity and Claude ones do not.
 - Start the proxy with `PROXY_IGNORE_SAMPLING=1`: Scriptorium sends `temperature`, `max_tokens` and `stream_options`, which the proxy has to ignore.
-- It is text only: no vision.
+- It is text only: no vision (Scriptorium sends none).
 - `PROXY_TIMEOUT_MS` (5 minutes by default) must cover your longest request: a chapter can take a while.
 - The Antigravity agent keeps only about the first 192,000 characters of a prompt and drops the rest without an error. After Detect models, give each `antigravity/*` model `context: 45000` (estimated tokens, characters / 4): the engine then sends a longer prompt to the next model. The proxy (AAP-30) also refuses such prompts with HTTP 400 "prompt is too long".
 - Terms risk: driving Antigravity this way may break its terms of use. Read the section "Antigravity models and the ACP proxy" of the creative-hub ROADMAP before you rely on it.

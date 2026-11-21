@@ -26,7 +26,7 @@ Usage:
   --no-mcp          Do not start the MCP server
   --only <idea>     Work on one idea (story slug) only: no other idea starts, no other book's jobs run (overrides "only" in config/factory.md)
   --mcp-port <n>    MCP port (0: any free one). Default: port in config/mcp.md
-  probe             Stream one short reply from LM Studio (and DeepSeek if a key is set) and embed one string
+  probe             Stream one short reply from the local model through the ACP proxy (or --model) and embed one string with the roles' embeddings model
   reindex           Rebuild index/library.sqlite (search index) from the markdown files
   rebuild-reader    Write the in-app reader folder (books/<slug>/out/reader/) for every published book
   key-set <NAME>    Store an API key in the Windows credential store (hidden prompt)
