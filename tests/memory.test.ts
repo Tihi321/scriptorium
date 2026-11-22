@@ -81,6 +81,8 @@ describe('memory index', () => {
       const r = await reindex(dir, index)
       expect(r.removed).toBeGreaterThanOrEqual(1)
       expect(r.indexed).toBe(1)
+      expect(r.indexedFiles).toEqual(['books/silver-inn/chapters/ch-02.md'])
+      expect(r.removedFiles.length).toBe(r.removed)
       expect((await index.search('brass key loaf'))[0]!.text).toContain('brass key')
       expect((await index.search('dragon tea herbs', { book: 'dragon-tea' })).length).toBe(0)
     } finally {

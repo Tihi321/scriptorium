@@ -312,24 +312,32 @@ export async function collectIndexable(dataDir: string): Promise<IndexedFile[]> 
   return out
 }
 
-/** Rebuilds the index from the markdown files: new and changed files are embedded again, removed files are dropped. */
-export async function reindex(dataDir: string, index: MemoryIndex): Promise<{ indexed: number; unchanged: number; removed: number }> {
+/** Rebuilds the index from the markdown files: new and changed files are embedded again, removed files are dropped. Returns the counts and the files embedded again and dropped (data-folder relative paths). */
+export async function reindex(
+  dataDir: string,
+  index: MemoryIndex,
+): Promise<{ indexed: number; unchanged: number; removed: number; indexedFiles: string[]; removedFiles: string[] }> {
   const files = await collectIndexable(dataDir)
   const present = new Set(files.map((f) => f.file))
   let indexed = 0
   let unchanged = 0
+  const indexedFiles: string[] = []
+  const removedFiles: string[] = []
   for (const f of files) {
-    if (await index.upsert(f)) indexed++
-    else unchanged++
+    if (await index.upsert(f)) {
+      indexed++
+      indexedFiles.push(f.file)
+    } else unchanged++
   }
   let removed = 0
   for (const known of index.files()) {
     if (!present.has(known)) {
       index.remove(known)
       removed++
+      removedFiles.push(known)
     }
   }
-  return { indexed, unchanged, removed }
+  return { indexed, unchanged, removed, indexedFiles, removedFiles }
 }
 
 export const indexExists = (dataDir: string) => existsSync(path.join(dataDir, 'index', 'library.sqlite'))

@@ -86,6 +86,8 @@ export async function reindexLibrary(argv: string[]): Promise<number> {
   }
   const r = await memory.reindexAll()
   out(`index/library.sqlite: ${r.indexed} file(s) indexed, ${r.unchanged} unchanged, ${r.removed} removed. ${JSON.stringify(memory.getIndex().stats())}`)
+  for (const file of r.indexedFiles) out(`  embedded: ${file}`)
+  for (const file of r.removedFiles) out(`  removed: ${file}`)
   memory.close()
   return 0
 }
