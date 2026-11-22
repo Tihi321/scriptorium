@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: creative-hub/REQ-0031
 repos: [scriptorium]
 branch: SCP-69_small-leftovers
