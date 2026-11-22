@@ -3,3 +3,5 @@
 {"ts":"2026-11-22T15:32:18Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0030","ticket":"SCP-68-reindex-files","detail":"branch SCP-68_reindex-files"}
 {"ts":"2026-11-22T15:32:18Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0030","ticket":"SCP-68-reindex-files","detail":"761 tests, typecheck, lint, recovery ok"}
 {"ts":"2026-11-22T15:32:18Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0030","ticket":"SCP-68-reindex-files","detail":"changelog.md"}
+{"ts":"2026-11-22T16:48:00Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0030","ticket":"SCP-68-reindex-files","detail":"standard check PASS; notes only","data":{"check":"standard","verdict":"PASS"}}
+{"ts":"2026-11-22T16:48:00Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0030","ticket":"SCP-68-reindex-files","detail":"PASS; notes only; branch not merged or pushed"}
