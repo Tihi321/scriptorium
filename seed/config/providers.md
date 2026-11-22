@@ -66,34 +66,16 @@ providers:
         price_in: 0.30
         price_out: 2.50
         price_cached_in: 0.03
-  - id: lmstudio                  # embeddings only now (chat goes through the ACP proxy) until the proxy serves /v1/embeddings (AAP-43)
+  - id: lmstudio                  # switched off (HUB-38): LM Studio is not installed; embeddings go through the ACP proxy (acp/llama/nomic-embed-text-v1.5, AAP-43). Kept as a way back
     kind: openai-compat
+    enabled: false
     local: true
     base_url: http://localhost:1234/v1
     concurrency: auto             # the sum of `parallel` over the loaded chat models (lms load --parallel <n>), 1 when none is loaded
-    discover: true
+    discover: false
     discover_skip: [dflash]       # LM Studio lists these, but they are not models it can load here
     load_models: true             # load a model that isn't loaded yet with lmstudio_parallel, lmstudio_context and lmstudio_ttl_minutes from settings.md
     models:
-      - id: ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
-        family: qwen
-        extra_body: { reasoning_effort: none }
-        load_context: 65536
-        load_parallel: 2
-      - id: nail-qwen3.6-35b-a3b-mtp
-        family: qwen
-        extra_body: { reasoning_effort: low }
-        load_context: 65536
-        load_parallel: 2
-      - id: poolside/laguna-s-2.1
-        family: poolside
-        extra_body: { reasoning_effort: none }
-      - id: tiel-coder-35b-a3b-mtp
-        family: qwen
-        extra_body: { reasoning_effort: none }
-      - id: gemma-4-e4b-it-ultra-uncensored-heretic
-        family: gemma
-        extra_body: { reasoning_effort: none }
       - id: text-embedding-nomic-embed-text-v1.5
         family: nomic
         embedding: true
@@ -172,6 +154,9 @@ providers:
         family: inkling
         context: 32768
         vision: true
+      - id: llama/nomic-embed-text-v1.5
+        family: nomic
+        embedding: true
   # Claude Code (or any MCP client) does the model work: a request waits in the engine until the client answers it (see docs/mcp.md).
   # Switched off here so a new install never routes to it: set `enabled: true`, then point one agent or role at client/claude-code.
   - id: client
@@ -253,7 +238,7 @@ Prices were checked 2026-10-08 from third-party listings; the DeepSeek ones were
 
 - `name`: optional label shown in the app (the Models panel, the fallback rows). Defaults to the id.
 - `custom`: `true` marks a provider added with **Add provider** in the Models panel. Only those can be edited and removed there (Remove also deletes the stored key and the provider's ticked models and fallback rows); a custom provider is always its own kind in the fallback list, named by its id, whether it is free (`local: true`) or paid. Its key is `CUSTOM_<ID>_API_KEY` in the Windows credential store. The seed providers have no `custom` flag: edit them here.
-- `id`: the name used in model references. A model is written `provider/model`, for example `lmstudio/nail-qwen3.6-35b-a3b-mtp`.
+- `id`: the name used in model references. A model is written `provider/model`, for example `acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`.
 - `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `client` (no model server: an MCP client such as Claude Code answers, see below), `mock` (scripted answers, only for the tests: the app's own config has none, so the model pickers never offer one) or `search` (web search for the researcher: `engine` names the service, see below).
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing and never count against the caps. Their tokens and time are still recorded.
@@ -274,7 +259,7 @@ Strata (`D:\Strata`) is a fast local server with an OpenAI-style API. Since HUB-
 - Under the proxy, an `acp/strata/*` request makes the proxy start `D:\Strata\terminal\run-unsloth-ud-iq4_xs-parallel.bat` (Qwen3.8-Flash-Next IQ4_XS, four requests at once). The other scripts are `D:\Strata\terminal\run-unsloth-ud-iq4_xs.bat` (one at a time), `run-deepseek-v4.1-flash-ist-das-2.00bpw.bat` and `run-deepseek-v4.1-flash-ista-das-coder.bat` (DeepSeek V4.1 Flash), all in `D:\Strata\terminal`. From the creative-hub folder, `scripts\hub.ps1 start strata <variant>` starts one by hand.
 - Only one local model is on the GPU at a time across Gufo, Strata and Llama.cpp: a request for another local model waits until the proxy has switched, which takes minutes (loading Strata takes 1 to 3 minutes, the DeepSeek config allows up to an hour).
 - Direct use (the way back): Scriptorium asks Strata which model it runs (`/v1/status`) and uses the matching entry of `profiles` for that model's settings (family, context, extra body). `strata/default` (no thinking) and `strata/default-low` (thinking on `low`) follow it, and the older ids `qwen3.8-flash-next` and `qwen3.8-flash-next-low` still work as aliases. A new model needs a profile (its `id` is matched as a prefix of the id Strata reports).
-- Strata takes most of the GPU memory with any of these models: keep only the nomic embedding model loaded in LM Studio, and no ComfyUI, while it runs.
+- Strata takes most of the GPU memory with any of these models: no ComfyUI while it runs. The proxy's small nomic embedding server (port 8083) runs beside it.
 - `json_schema: false` because Strata checks a structured answer after the fact and fails the request (502 `structured_output_failed`) when it is bad. The engine's own parse-and-repair step copes with a loose JSON answer. The proxy does not enforce `response_format` either.
 - No key is needed. `STRATA_API_KEY` is only sent if you set it.
 
@@ -327,6 +312,6 @@ Set a key with `npm run key:set TAVILY_API_KEY` (or the environment variable). N
 - `id`, `family` (used so reviewers can avoid the writer's family), `context`, `max_output`.
 - `price_in`, `price_out`, `price_cached_in`: USD per 1M tokens. Cached input falls back to `price_in` when missing.
 - `embedding: true` marks an embedding model.
-- LM Studio models load with a small context window (8192 tokens) unless you change it. Long books need more: the engine reads the loaded window from LM Studio and keeps its prompts within it, but a window of 8192 makes long-book prompts fail. Load the models you use with 32768 or more, for example `lms load nail-qwen3.6-35b-a3b-mtp -c 32768 --parallel 1 --ttl 28800 -y`, or set it in LM Studio's model settings. With `--parallel <n>` the requests running at once share that window, so give it more room when several long requests run together, for example `lms load gemma-4-e4b-it-ultra-uncensored-heretic -c 131072 --parallel 4 --ttl 28800 -y`.
-- `load_models: true` (LM Studio): before a request to a model that isn't loaded, the engine loads it with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes` from `config/settings.md`, using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is, so one you loaded yourself keeps your settings. A model entry can override the context and parallel count with `load_context` and `load_parallel` (the big Qwen models use 65536 and 2: their context cache takes far more memory than Gemma's). A model LM Studio doesn't have fails at once and the next model in the role's list is tried.
-- `extra_body`: optional JSON fields merged into the request body. The LM Studio chat models here send `reasoning_effort: none`, which turns thinking off (checked 2026-10-08 on the Qwen models: a 500-word story took 25 s instead of 3.5 minutes, because the model otherwise spends thousands of hidden tokens thinking). The Qwen 35B MoE (used for review) uses `low` so its verdicts are steadier. Remove it, or set `low` or `medium`, if you want thinking back for the other models. DeepSeek V4 has thinking on by default and bills it as output. `deepseek-flash` sends `thinking: { type: disabled }` (checked 2026-10-11: with thinking on, a 15k-token continuity check spent all 6000 answer tokens thinking and returned nothing). `deepseek-v4-pro` keeps thinking on. Empty means nothing extra is sent.
+- LM Studio is switched off in the seed (HUB-38); if you switch it back on, its models load with a small context window (8192 tokens) unless you change it. Long books need more: the engine reads the loaded window from LM Studio and keeps its prompts within it, but a window of 8192 makes long-book prompts fail. Load the models you use with 32768 or more, for example `lms load text-embedding-nomic-embed-text-v1.5 -c 32768 --parallel 1 --ttl 28800 -y`, or set it in LM Studio's model settings. With `--parallel <n>` the requests running at once share that window, so give it more room when several long requests run together, for example `lms load text-embedding-nomic-embed-text-v1.5 -c 32768 --parallel 4 --ttl 28800 -y`.
+- `load_models: true` (LM Studio): before a request to a model that isn't loaded, the engine loads it with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes` from `config/settings.md`, using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is, so one you loaded yourself keeps your settings. A model entry can override the context and parallel count with `load_context` and `load_parallel` (a large model whose context cache takes far more memory can use a smaller window and fewer parallel requests). A model LM Studio doesn't have fails at once and the next model in the role's list is tried.
+- `extra_body`: optional JSON fields merged into the request body. The local models here send `reasoning_effort: none`, which turns thinking off (checked 2026-10-08 on the Qwen models: a 500-word story took 25 s instead of 3.5 minutes, because the model otherwise spends thousands of hidden tokens thinking). Remove it, or set `low` or `medium`, if you want thinking back for the other models. DeepSeek V4 has thinking on by default and bills it as output. `deepseek-flash` sends `thinking: { type: disabled }` (checked 2026-10-11: with thinking on, a 15k-token continuity check spent all 6000 answer tokens thinking and returned nothing). `deepseek-v4-pro` keeps thinking on. Empty means nothing extra is sent.

@@ -40,8 +40,51 @@ async function registryWith(o: Parameters<typeof writeTestConfig>[1], mock = new
   return { registry, mock }
 }
 
+/** The old LM Studio block (before HUB-38 and SCP-66: on, discovery on, the five chat rows), put into the temp providers.md in place of the seed's switched-off one. Call `registry.load()` after it. */
+const OLD_LMSTUDIO = `  - id: lmstudio
+    kind: openai-compat
+    local: true
+    base_url: http://localhost:1234/v1
+    concurrency: auto             # the sum of \`parallel\` over the loaded chat models (lms load --parallel <n>), 1 when none is loaded
+    discover: true
+    discover_skip: [dflash]       # LM Studio lists these, but they are not models it can load here
+    load_models: true             # load a model that isn't loaded yet with lmstudio_parallel, lmstudio_context and lmstudio_ttl_minutes from settings.md
+    models:
+      - id: ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
+        family: qwen
+        extra_body: { reasoning_effort: none }
+        load_context: 65536
+        load_parallel: 2
+      - id: nail-qwen3.6-35b-a3b-mtp
+        family: qwen
+        extra_body: { reasoning_effort: low }
+        load_context: 65536
+        load_parallel: 2
+      - id: poolside/laguna-s-2.1
+        family: poolside
+        extra_body: { reasoning_effort: none }
+      - id: tiel-coder-35b-a3b-mtp
+        family: qwen
+        extra_body: { reasoning_effort: none }
+      - id: gemma-4-e4b-it-ultra-uncensored-heretic
+        family: gemma
+        extra_body: { reasoning_effort: none }
+      - id: text-embedding-nomic-embed-text-v1.5
+        family: nomic
+        embedding: true
+`
+
+async function lmStudioBack(): Promise<void> {
+  const pf = path.join(dir, 'config', 'providers.md')
+  const providers = (await readFile(pf, 'utf8')).replace(/\r\n/g, '\n')
+  const from = providers.indexOf('  - id: lmstudio')
+  const to = providers.indexOf('  - id: strata')
+  await writeFile(pf, providers.slice(0, from) + OLD_LMSTUDIO + providers.slice(to))
+}
+
 /** The way back (HUB-38): the direct `strata` provider on and the pre-proxy role chains, in the temp data folder. Returns the old three fallback rows. */
 async function directStrata(): Promise<string[]> {
+  await lmStudioBack()
   const pf = path.join(dir, 'config', 'providers.md')
   const providers = await readFile(pf, 'utf8')
   const at = providers.indexOf('  - id: strata')
@@ -65,7 +108,7 @@ describe('seed configs', () => {
     expect(on(seed)).toMatchObject({ lmstudio: true, strata: true, ollama: true, acp: false, client: false, deepseek: false })
     // SCP-65: through the proxy only the local models (gufo/, strata/, llama/) count as on this machine
     const m = (ref: string) => seed.getModel(ref)!.onDevice
-    expect([m(LOCAL), m('acp/gufo/Qwen3.8-27B'), m('acp/llama/inkling-2-mini'), m('lmstudio/nail-qwen3.6-35b-a3b-mtp'), m('deepseek/deepseek-flash')]).toEqual([true, true, true, true, false])
+    expect([m(LOCAL), m('acp/gufo/Qwen3.8-27B'), m('acp/llama/inkling-2-mini'), m('lmstudio/text-embedding-nomic-embed-text-v1.5'), m('deepseek/deepseek-flash')]).toEqual([true, true, true, true, false])
     // A1: a no_local_fallback book never gets LOCAL unless its own list names it, while a cloud model of the proxy stays allowed
     const pf = path.join(dir, 'config', 'providers.md')
     await writeFile(pf, (await readFile(pf, 'utf8')).replace(/( {6}- id: llama\/inkling-2-mini-dspark\r?\n)/, '      - id: codex/gpt-6-luna\n        family: gpt\n$1'))
@@ -84,11 +127,13 @@ describe('seed configs', () => {
     await registry.load()
     expect(registry.providers.get('deepseek')?.available).toBe(false)
     expect(registry.providers.get('deepseek')?.unavailableReason).toMatch(/no key/)
-    expect(registry.providers.get('lmstudio')?.available).toBe(true)
+    // SCP-66: LM Studio is off in the seed, with only its nomic row and no discovery (as the live data)
+    expect(registry.providers.get('lmstudio')).toMatchObject({ enabled: false, available: false })
+    expect([...registry.models.keys()].filter((r) => r.startsWith('lmstudio/'))).toEqual(['lmstudio/text-embedding-nomic-embed-text-v1.5'])
     expect(registry.providers.get('ollama')?.available).toBe(false)
-    // SCP-65 / HUB-38: the proxy is on with the six local rows, the direct Strata provider is off
+    // SCP-65 / HUB-38: the proxy is on with its seven rows (six local chat rows and the nomic embedding row), the direct Strata provider is off
     expect(registry.providers.get('acp')).toMatchObject({ enabled: true, available: true, local: true, baseUrl: 'http://127.0.0.1:8787/v1', jsonSchema: false })
-    expect([...registry.models.keys()].filter((r) => r.startsWith('acp/'))).toHaveLength(6)
+    expect([...registry.models.keys()].filter((r) => r.startsWith('acp/'))).toHaveLength(7) // six local chat rows and the nomic embedding row
     expect(registry.providers.get('strata')).toMatchObject({ enabled: false, available: false })
     expect(registry.getModel(LOCAL)).toMatchObject({ context: 131072, extraBody: { reasoning_effort: 'none' } })
     expect(isPaidModel(registry.getModel(LOCAL)!)).toBe(false)
@@ -96,7 +141,6 @@ describe('seed configs', () => {
     const flash = registry.getModel('deepseek/deepseek-flash')!
     expect(flash).toMatchObject({ priceIn: 0.3, priceOut: 1.2, priceCachedIn: 0.006, family: 'deepseek' })
     expect(isPaidModel(flash)).toBe(true)
-    expect(isPaidModel(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')!)).toBe(false)
     // the archivist's Antigravity model is not a seed row: the proxy lists it (Detect models)
     for (const role of Object.keys(registry.roles.roles)) for (const ref of registry.roleModelRefs(role)) if (!ref.startsWith('acp/antigravity/')) expect(registry.getModel(ref), ref).toBeTruthy()
     // the seed roles use the aliases, resolved to the settings defaults (the default fallbacks: DeepSeek Flash, then LOCAL)
@@ -104,6 +148,10 @@ describe('seed configs', () => {
     expect(registry.roleModelRefs('writer')).toEqual(['deepseek/deepseek-flash', LOCAL])
     expect(registry.roleModelRefs('continuity-checker')).toEqual([LOCAL, 'deepseek/deepseek-flash'])
     expect(registry.roleModelRefs('archivist')).toEqual(['acp/antigravity/gemini-4-hydrogen', LOCAL, 'deepseek/deepseek-flash'])
+    // the LM Studio way back: its old rows and load settings still work
+    await lmStudioBack()
+    await registry.load()
+    expect(isPaidModel(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')!)).toBe(false)
     expect(registry.providers.get('lmstudio')?.loadModels).toBe(true)
     expect(registry.getModel('lmstudio/gemma-4-e4b-it-ultra-uncensored-heretic')?.context).toBe(131072) // loaded with the settings' window
     // the big Qwen models have their own load settings in providers.md
@@ -117,7 +165,8 @@ describe('seed configs', () => {
     expect(registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')?.context).toBe(65536) // its own load_context wins
     expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
     expect(Object.keys(registry.roles.roles)).toHaveLength(17)
-    expect(registry.embeddingModel()?.embedding).toBe(true)
+    // the roles' embeddings model is the proxy's nomic row (the old seed named LM Studio's)
+    expect(registry.embeddingModel()).toMatchObject({ ref: 'acp/llama/nomic-embed-text-v1.5', embedding: true })
   })
 
   it('concurrency: auto follows the slots the Strata server reports, and a raise frees waiting requests', async () => {
@@ -212,6 +261,7 @@ describe('seed configs', () => {
   })
 
   it('discovery adds the models LM Studio lists, except the ones discover_skip names, also after a reload', async () => {
+    await lmStudioBack()
     const fetchImpl = (async (url: string) => {
       const u = String(url)
       if (!u.startsWith('http://localhost:1234')) throw new Error('not running')
@@ -267,6 +317,7 @@ describe('seed configs', () => {
   })
 
   it('concurrency: auto for LM Studio adds up `parallel` of the loaded chat models', async () => {
+    await lmStudioBack()
     let loaded: { type: string; loaded_instances: { config: { parallel?: number } }[] }[] = []
     const asked: string[] = []
     const fetchImpl = (async (url: string) => {
