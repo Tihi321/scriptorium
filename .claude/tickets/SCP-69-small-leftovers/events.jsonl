@@ -1,0 +1,8 @@
+{"ts":"2026-11-22T21:10:00Z","actor":"planner","type":"plan.created","request":"REQ-0031","ticket":"SCP-69-small-leftovers","detail":"planner wrote the plan (draft)"}
+{"ts":"2026-11-22T21:20:00Z","actor":"director","type":"plan.approved","request":"REQ-0031","ticket":"SCP-69-small-leftovers","detail":"user: 'Yes, approve all' to 'Do you approve the seven plans with these defaults'; written by the director because the scribe could not see the user's message"}
+{"ts":"2026-11-22T21:25:52Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0031","ticket":"SCP-69-small-leftovers","detail":"branch SCP-69_small-leftovers from master"}
+{"ts":"2026-11-22T21:25:52Z","actor":"implement","type":"slice.done","request":"creative-hub/REQ-0031","ticket":"SCP-69-small-leftovers","detail":"four files edited directly by implement"}
+{"ts":"2026-11-22T21:27:32Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0031","ticket":"SCP-69-small-leftovers","detail":"test 761+1, typecheck, lint green"}
+{"ts":"2026-11-22T21:27:32Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0031","ticket":"SCP-69-small-leftovers","detail":"changelog.md written"}
+{"ts":"2026-11-22T21:58:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0031","ticket":"SCP-69-small-leftovers","detail":"round 1 PASS","data":{"round":1,"verdict":"PASS"}}
+{"ts":"2026-11-22T21:58:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0031","ticket":"SCP-69-small-leftovers","detail":"done after round 1 PASS; branch not merged"}
