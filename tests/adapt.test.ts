@@ -95,6 +95,20 @@ const idea = (slug: string, data: Record<string, unknown> = {}): IdeaFile => ({
   data: { kind: 'idea', topic: null, status: 'open', source: 'user', format: null, book: null, ...data } as IdeaFile['data']
 })
 const ref = (slug: string, stage: string): BookRef => ({ slug, title: slug, stage, score: null })
+
+/** The adaptation's slug once its book.md can be read: BookStore.create makes the folder before it writes book.md (SCP-69, SCP-70). */
+async function scriptBookSlug(e: TestEnv): Promise<string> {
+  return waitFor(async () => {
+    const s = (await e.engine.books.slugs()).find((x) => x !== 'moon-lamp')
+    if (!s) return null
+    try {
+      await readFile(path.join(e.dir, 'books', s, 'book.md'), 'utf8')
+      return s
+    } catch {
+      return null
+    }
+  }, 30000, 'the script book to start')
+}
 const formats = [{ id: 'visual-novel', name: 'Visual novel', enabled: true, script: true, kinds: ['visual-novel'], words: [1, 2], chapters: [1, 2], guidance: '' }] as unknown as FormatEntry[]
 
 describe('the wait for the source', () => {
@@ -430,16 +444,7 @@ describe('an adaptation in the pipeline', () => {
       throw new ProviderError('HTTP 404: The `:free` variant has been retired', 404)
     })
     await e.engine.adaptBook({ book: 'moon-lamp', format: 'visual-novel' })
-    const slug = await waitFor(async () => {
-      const s = (await e.engine.books.slugs()).find((x) => x !== 'moon-lamp')
-      if (!s) return null
-      try {
-        await readFile(path.join(e.dir, 'books', s, 'book.md'), 'utf8')
-        return s
-      } catch {
-        return null
-      }
-    }, 30000, 'the script book to start')
+    const slug = await scriptBookSlug(e)
     const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
     expect(book).toMatchObject({ title: 'The Moon Lamp', format: 'visual-novel', source_book: 'moon-lamp', script: true })
     expect(Number(book.target_words)).toBe(1200) // the source has a few dozen words: its length times 1.7, held at the format's minimum (1200 to 4000)
@@ -463,7 +468,7 @@ describe('an adaptation in the pipeline', () => {
     })
     env = e
     await e.engine.adaptBook({ book: 'moon-lamp', format: 'visual-novel' })
-    const slug = await waitFor(async () => (await e.engine.books.slugs()).find((s) => s !== 'moon-lamp') ?? null, 30000, 'the script book to start')
+    const slug = await scriptBookSlug(e)
     const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
     expect(book.target_words).toBe(2397)
     expect(book.target_from_source_words).toBe(1410)
