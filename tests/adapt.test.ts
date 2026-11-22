@@ -430,7 +430,16 @@ describe('an adaptation in the pipeline', () => {
       throw new ProviderError('HTTP 404: The `:free` variant has been retired', 404)
     })
     await e.engine.adaptBook({ book: 'moon-lamp', format: 'visual-novel' })
-    const slug = await waitFor(async () => (await e.engine.books.slugs()).find((s) => s !== 'moon-lamp') ?? null, 30000, 'the script book to start')
+    const slug = await waitFor(async () => {
+      const s = (await e.engine.books.slugs()).find((x) => x !== 'moon-lamp')
+      if (!s) return null
+      try {
+        await readFile(path.join(e.dir, 'books', s, 'book.md'), 'utf8')
+        return s
+      } catch {
+        return null
+      }
+    }, 30000, 'the script book to start')
     const book = parseMd(await readFile(path.join(e.dir, 'books', slug, 'book.md'), 'utf8')).data
     expect(book).toMatchObject({ title: 'The Moon Lamp', format: 'visual-novel', source_book: 'moon-lamp', script: true })
     expect(Number(book.target_words)).toBe(1200) // the source has a few dozen words: its length times 1.7, held at the format's minimum (1200 to 4000)
