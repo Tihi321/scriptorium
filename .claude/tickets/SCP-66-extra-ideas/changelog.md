@@ -17,3 +17,11 @@ Verification: `yarn test` 760/761 (the one failure, `tests/adapt.test.ts` ENOENT
 Not run: embedding a real chunk through the proxy; re-index of the live library.
 
 Commit status: see git log of the branch.
+
+## Polish 1
+
+- `tests/models.test.ts`: on-device check uses `lmstudio/text-embedding-nomic-embed-text-v1.5` (a seed row) instead of the near-duplicate `acp/llama/nomic-embed-text-v1.5`; `embeddingModel()` assertion also checks `embedding: true`; stale "six local rows" comment fixed (7 acp rows).
+- `src/engine/memory/index.ts`: the hard cut in `splitLong` backs up one character when it would split a surrogate pair; one assertion added to cap case (a) in `tests/memory.test.ts`.
+- `seed/config/providers.md`: the LM Studio prose no longer names removed rows (LM Studio switched off, HUB-38; example is the nomic row).
+
+Deviations the first worker did not record: `directStrata()` calls `lmStudioBack()`; the on-device check was changed from `m(lmstudio/nail-qwen...)` to the acp nomic row (reverted here to the lmstudio nomic row).

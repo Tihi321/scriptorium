@@ -108,7 +108,7 @@ describe('seed configs', () => {
     expect(on(seed)).toMatchObject({ lmstudio: true, strata: true, ollama: true, acp: false, client: false, deepseek: false })
     // SCP-65: through the proxy only the local models (gufo/, strata/, llama/) count as on this machine
     const m = (ref: string) => seed.getModel(ref)!.onDevice
-    expect([m(LOCAL), m('acp/gufo/Qwen3.8-27B'), m('acp/llama/inkling-2-mini'), m('acp/llama/nomic-embed-text-v1.5'), m('deepseek/deepseek-flash')]).toEqual([true, true, true, true, false])
+    expect([m(LOCAL), m('acp/gufo/Qwen3.8-27B'), m('acp/llama/inkling-2-mini'), m('lmstudio/text-embedding-nomic-embed-text-v1.5'), m('deepseek/deepseek-flash')]).toEqual([true, true, true, true, false])
     // A1: a no_local_fallback book never gets LOCAL unless its own list names it, while a cloud model of the proxy stays allowed
     const pf = path.join(dir, 'config', 'providers.md')
     await writeFile(pf, (await readFile(pf, 'utf8')).replace(/( {6}- id: llama\/inkling-2-mini-dspark\r?\n)/, '      - id: codex/gpt-6-luna\n        family: gpt\n$1'))
@@ -131,7 +131,7 @@ describe('seed configs', () => {
     expect(registry.providers.get('lmstudio')).toMatchObject({ enabled: false, available: false })
     expect([...registry.models.keys()].filter((r) => r.startsWith('lmstudio/'))).toEqual(['lmstudio/text-embedding-nomic-embed-text-v1.5'])
     expect(registry.providers.get('ollama')?.available).toBe(false)
-    // SCP-65 / HUB-38: the proxy is on with the six local rows, the direct Strata provider is off
+    // SCP-65 / HUB-38: the proxy is on with its seven rows (six local chat rows and the nomic embedding row), the direct Strata provider is off
     expect(registry.providers.get('acp')).toMatchObject({ enabled: true, available: true, local: true, baseUrl: 'http://127.0.0.1:8787/v1', jsonSchema: false })
     expect([...registry.models.keys()].filter((r) => r.startsWith('acp/'))).toHaveLength(7) // six local chat rows and the nomic embedding row
     expect(registry.providers.get('strata')).toMatchObject({ enabled: false, available: false })
@@ -166,7 +166,7 @@ describe('seed configs', () => {
     expect(new ModelRouter(registry, undefined).candidates('line-editor', { agentModel: 'lmstudio' })[0]?.ref).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
     expect(Object.keys(registry.roles.roles)).toHaveLength(17)
     // the roles' embeddings model is the proxy's nomic row (the old seed named LM Studio's)
-    expect(registry.embeddingModel()?.ref).toBe('acp/llama/nomic-embed-text-v1.5')
+    expect(registry.embeddingModel()).toMatchObject({ ref: 'acp/llama/nomic-embed-text-v1.5', embedding: true })
   })
 
   it('concurrency: auto follows the slots the Strata server reports, and a raise frees waiting requests', async () => {

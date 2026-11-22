@@ -45,7 +45,11 @@ function splitLong(text: string, max: number): string[] {
         break
       }
     }
-    if (cut <= 0) cut = max
+    if (cut <= 0) {
+      cut = max
+      const last = rest.charCodeAt(cut - 1)
+      if (last >= 0xd800 && last <= 0xdbff) cut-- // never split a surrogate pair
+    }
     const piece = rest.slice(0, cut).trim()
     if (piece) out.push(piece)
     rest = rest.slice(cut).trim()

@@ -113,6 +113,9 @@ describe('memory index', () => {
     expect(capped.every((c) => c.length <= 1800)).toBe(true)
     const words = (t: string) => t.replace(/\s+/g, '')
     expect(words(capped.join(' '))).toBe(words(long))
+    // a hard cut never leaves half of a surrogate pair
+    const emoji = chunkText('a'.repeat(1799) + '😀'.repeat(10))
+    expect(emoji.every((c) => c.length <= 1800 && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(c))).toBe(true)
   })
 
   it('does not index separator-only paragraphs', () => {
