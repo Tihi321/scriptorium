@@ -30,9 +30,40 @@ export interface Hit {
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex')
 
-/** Splits text into chunks of about `size` characters at paragraph borders. */
+/** nomic-embed-text-v1.5 takes 2048 tokens per input; 1800 characters stay under it even for text with few letters per token. */
+const MAX_CHUNK_CHARS = 1800
+
+/** Cuts a text into pieces of at most `max` characters, each at the last whitespace before the limit (hard at the limit when there is none). */
+function splitLong(text: string, max: number): string[] {
+  const out: string[] = []
+  let rest = text
+  while (rest.length > max) {
+    let cut = -1
+    for (let i = max; i > 0; i--) {
+      if (/\s/.test(rest.charAt(i))) {
+        cut = i
+        break
+      }
+    }
+    if (cut <= 0) cut = max
+    const piece = rest.slice(0, cut).trim()
+    if (piece) out.push(piece)
+    rest = rest.slice(cut).trim()
+  }
+  if (rest) out.push(rest)
+  return out
+}
+
+/**
+ * Splits text into chunks of about `size` characters at paragraph borders. A chunk is never longer than 1800
+ * characters (a long one is cut at whitespace), and paragraphs with no letter or digit (`---`, `* * *`) are dropped.
+ */
 export function chunkText(text: string, size = 1200): string[] {
-  const paras = text.replace(/\r\n/g, '\n').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+  const paras = text
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter((p) => p && /[\p{L}\p{N}]/u.test(p))
   const chunks: string[] = []
   let cur = ''
   for (const p of paras) {
@@ -52,7 +83,7 @@ export function chunkText(text: string, size = 1200): string[] {
     } else cur += (cur ? '\n\n' : '') + p
   }
   if (cur.trim()) chunks.push(cur.trim())
-  return chunks
+  return chunks.flatMap((c) => (c.length > MAX_CHUNK_CHARS ? splitLong(c, MAX_CHUNK_CHARS) : [c])).filter((c) => /[\p{L}\p{N}]/u.test(c))
 }
 
 function ftsQuery(q: string): string {

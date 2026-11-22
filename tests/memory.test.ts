@@ -106,6 +106,21 @@ describe('memory index', () => {
     const chunks = chunkText(text, 700)
     expect(chunks.length).toBeGreaterThan(2)
     expect(chunks.join('\n\n').replace(/\s+/g, ' ').trim()).toBe(text.replace(/\s+/g, ' ').trim())
+
+    // SCP-66: no chunk is longer than 1800 characters, whatever the punctuation
+    const long = ['First short.', 'word '.repeat(1000), 'x'.repeat(5000), 'No full stop here ' + 'abc '.repeat(700), 'Last short.'].join('\n\n')
+    const capped = chunkText(long)
+    expect(capped.every((c) => c.length <= 1800)).toBe(true)
+    const words = (t: string) => t.replace(/\s+/g, '')
+    expect(words(capped.join(' '))).toBe(words(long))
+  })
+
+  it('does not index separator-only paragraphs', () => {
+    const sep = chunkText(['Intro line.', '---', 'More text.', '* * *', '***'].join('\n\n'))
+    expect(sep).toEqual(['Intro line.\n\nMore text.'])
+    const after = chunkText(['Intro line.', '---', 'word '.repeat(600)].join('\n\n'))
+    expect(after.length).toBeGreaterThan(1)
+    expect(after.every((c) => /[\p{L}\p{N}]/u.test(c) && c.length <= 1800)).toBe(true)
   })
 })
 
