@@ -9,7 +9,7 @@ Status: MVP built on branch `SCP-02_mvp-text-only` (not committed yet). Phases 0
 
 ## In short
 
-- **Models:** cloud APIs (DeepSeek, OpenAI, Anthropic, Gemini, Mistral, Kimi, Qwen, GLM, OpenRouter) and local ones (Gufo, Strata and Llama.cpp models through the ACP proxy; LM Studio only for embeddings, Ollama). A default model per agent type, an override per agent.
+- **Models:** cloud APIs (DeepSeek, OpenAI, Anthropic, Gemini, Mistral, Kimi, Qwen, GLM, OpenRouter) and local ones (Gufo, Strata and Llama.cpp models through the ACP proxy, the nomic embeddings too: `acp/llama/nomic-embed-text-v1.5`; Ollama). A default model per agent type, an override per agent.
 - **Agents:** editor-in-chief, idea generator, architect, writers, an on-demand researcher, continuity checker, fact-checker, editors, child-safety and read-aloud reviewers, publisher. Many work in parallel.
 - **Shared state:** plain markdown files on disk. Agents, jobs, bibles, research, reviews and logs are all files.
 - **Books:** up to 150k words, written scene by scene from a book memory (outline, story bible, summaries, RAG, research notes). Output is EPUB with a template cover.

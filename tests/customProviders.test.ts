@@ -61,7 +61,7 @@ async function start(): Promise<TestEnv> {
 }
 
 const lastOf = <T extends EngineEvent['type']>(e: TestEnv, type: T) => [...e.events].reverse().find((x) => x.type === type) as Extract<EngineEvent, { type: T }> | undefined
-const form = { baseUrl: 'http://127.0.0.1:7461/v1', free: true, jsonSchema: false, concurrency: 2, enabled: true } as const
+const form = { baseUrl: 'http://127.0.0.1:8787/v1', free: true, jsonSchema: false, concurrency: 2, enabled: true } as const
 
 describe('custom providers: names and registry', () => {
   it('a slug comes from the name; the key name from the id', () => {
@@ -117,7 +117,7 @@ describe('saveCustomProvider and removeCustomProvider', () => {
     expect(text).toContain('# my order note')
     expect(text).toContain('hand written body')
     const entry = providersSchema.parse(parseMd(text).data).providers.find((p) => p.id === 'acp-home')!
-    expect(entry).toMatchObject({ name: 'ACP Home', custom: true, kind: 'openai-compat', enabled: true, local: true, base_url: 'http://127.0.0.1:7461/v1', json_schema: false, concurrency: 2, discover: true, models: [] })
+    expect(entry).toMatchObject({ name: 'ACP Home', custom: true, kind: 'openai-compat', enabled: true, local: true, base_url: 'http://127.0.0.1:8787/v1', json_schema: false, concurrency: 2, discover: true, models: [] })
     expect(entry.api_key_env).toBeUndefined()
     expect(engine.registry.kindOf('acp-home/m')).toBe('acp-home')
 

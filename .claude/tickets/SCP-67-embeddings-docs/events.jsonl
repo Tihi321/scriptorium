@@ -1,0 +1,5 @@
+{"ts":"2026-11-22T13:30:00Z","actor":"planner","type":"plan.created","request":"creative-hub/REQ-0030","ticket":"SCP-67-embeddings-docs","detail":"planner wrote the plan (draft)"}
+{"ts":"2026-11-22T13:30:00Z","actor":"director-scribe","type":"plan.approved","request":"creative-hub/REQ-0030","ticket":"SCP-67-embeddings-docs","detail":"user approved the plan as written","data":{"note":"user: 'Approve with both'"}}
+{"ts":"2026-11-22T13:30:54Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0030","ticket":"SCP-67-embeddings-docs","detail":"branch SCP-67_embeddings-docs from master"}
+{"ts":"2026-11-22T13:34:29Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0030","ticket":"SCP-67-embeddings-docs","detail":"S1-S4 pass: test, typecheck, lint, build:engine exit 0"}
+{"ts":"2026-11-22T13:34:29Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0030","ticket":"SCP-67-embeddings-docs","detail":"changelog.md written"}
