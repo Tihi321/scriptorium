@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: done
 request: creative-hub/REQ-0031
 repos: [scriptorium]
 branch: SCP-70_adapt-test-race
-updated: 2026-11-22
+updated: 2026-11-23
 ---
 
 # SCP-70 The second adaptation test waits for book.md too (the race SCP-69 fixed at :433)
