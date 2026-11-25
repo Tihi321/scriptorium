@@ -74,6 +74,14 @@ describe('the length gate of a short book', () => {
     expect(under.jobs[0]!.body).toContain('It is too short')
   })
 
+  it('an idea fable has no 15% slack: 2,100 story words go to the gate, and a plain format with the same range lets them pass', () => {
+    const range = { id: 'f', name: 'F', enabled: true, words: [1500, 2000], chapters: [1, 1] }
+    const fable = formatEntrySchema.parse({ ...range, fable: true })
+    const plain = formatEntrySchema.parse(range)
+    expect(advance(base(fable, { totalWords: 2100 })).patch).toMatchObject({ stage: 'length-fix', length_gate: { status: 'rewriting', words: 2100 } })
+    expect(advance(base(plain, { totalWords: 2100 })).patch).toMatchObject({ length_gate: { status: 'ok' } })
+  })
+
   it('a per-chapter share stays inside the format range (a target outside it is clamped)', () => {
     // a target of 40,000 over four chapters is 10,000 each, but the format allows 25,000 in all: 6,250 each at most
     const plan = advance(base(short, { totalWords: 8500, targetWords: 40000 }))

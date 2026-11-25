@@ -18,6 +18,7 @@ import { buildArticleHtml, buildArticleMarkdown } from '../publish/article'
 import { parseLightBible } from '../publish/script'
 import { endLine, isBranching, renderOutlineBody } from './branches'
 import { puzzlesOf, puzzleViews } from './puzzles'
+import { FABLE_DISCLAIMER, storyPart } from './fable'
 import { slugify as slugOf } from '../../shared/slug'
 import type { Choice } from './branches'
 
@@ -359,7 +360,7 @@ export class BookStore {
     }
     await writeMd(
       file,
-      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined, humanizer_round: ch.humanizer?.round, humanizer_result: ch.humanizer?.result },
+      { kind: 'chapter', n: ch.n, title: ch.title, round: ch.round, words: countWords(ch.body.includes(FABLE_DISCLAIMER) ? storyPart(ch.body) : ch.body), agent: ch.agent, model: ch.model, fixes: ch.fixes?.length ? ch.fixes : undefined, humanizer_round: ch.humanizer?.round, humanizer_result: ch.humanizer?.result },
       '\n' + ch.body.trim() + '\n'
     )
   }

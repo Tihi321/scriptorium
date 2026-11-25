@@ -25,6 +25,8 @@ export async function loadPrompt(dataDir: string, role: string, task: string): P
   try {
     raw = await fs.readFile(file, 'utf8')
   } catch {
+    // an idea-fable variant (`<task>_fable`, six characters) that a role does not have uses the plain template
+    if (task.endsWith('_fable')) return loadPrompt(dataDir, role, task.slice(0, -6))
     // a non-fiction, visual novel, screenplay or picture-book variant (`<task>_nf`, `<task>_vn`, `<task>_sp`, `<task>_pb`) that a role does not
     // have uses the plain template (an `_sp` or `_pb` never the `_vn` one)
     if (/_(nf|vn|sp|pb)$/.test(task)) return loadPrompt(dataDir, role, task.slice(0, -3))
