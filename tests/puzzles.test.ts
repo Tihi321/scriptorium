@@ -286,7 +286,7 @@ describe('the mystery-with-puzzles format', () => {
     const text = await readFile(file, 'utf8')
     const cut = text.indexOf('  - id: mystery-puzzle-visual-novel\n')
     await writeFile(file, text.slice(0, cut) + text.slice(text.indexOf('---\n# Formats')))
-    expect((await initDataFolder(dir, seedDir)).migrated).toEqual([expect.stringMatching(/added the puzzle format \(mystery-puzzle-visual-novel\)/)])
+    expect((await initDataFolder(dir, seedDir)).migrated).toEqual([expect.stringMatching(/added the puzzle format \(mystery-puzzle-visual-novel\)/), expect.stringMatching(/added the idea-fable format/)])
     expect(await readFile(file, 'utf8')).toBe(text)
     expect((await initDataFolder(dir, seedDir)).migrated).toEqual([])
     expect(PUZZLE_FORMAT_IDS).toEqual(['mystery-puzzle-visual-novel'])

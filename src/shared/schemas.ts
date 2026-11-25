@@ -242,6 +242,13 @@ export const formatEntrySchema = z.looseObject({
    * (a page is a scene). Never picked by a topic: only a story that fixes the format gets it (docs/visual-novel.md "Picture books").
    */
   picture_book: z.boolean().default(false),
+  /**
+   * An idea fable (prose fiction, not a script): one chapter that holds a story in which a character lives through one idea from the
+   * owner's Concept card, then back matter from the line `## What just happened` on (debrief, quiz). The engine counts only the story's
+   * words, humanizes only the story, writes the sources, the Go deeper list and the closing line from the brief, and checks the quiz.
+   * Writer prompts `_fable`. Never picked by a topic: only a story that fixes the format gets it (src/engine/pipeline/fable.ts).
+   */
+  fable: z.boolean().default(false),
   /** [min, max] seconds of film the whole screenplay should run (screenplay formats). */
   runtime: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
   /**

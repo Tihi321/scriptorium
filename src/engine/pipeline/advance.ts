@@ -395,8 +395,10 @@ export function advance(s: BookState): Plan {
     const [min, max] = s.format.words
     const gate = s.lengthGate
     if (!gate) {
+      // an idea fable has no slack: its story must be inside the range
+      const slack = s.format.fable ? 0 : 0.15
       // outside the format's range (by 15%), or far from the length the book was meant to have (by 20% of its target)
-      const out = s.totalWords < min * 0.85 || s.totalWords > max * 1.15 || (!!s.targetWords && (s.totalWords < s.targetWords * (1 - TARGET_BAND) || s.totalWords > s.targetWords * (1 + TARGET_BAND)))
+      const out = s.totalWords < min * (1 - slack) || s.totalWords > max * (1 + slack) || (!!s.targetWords && (s.totalWords < s.targetWords * (1 - TARGET_BAND) || s.totalWords > s.targetWords * (1 + TARGET_BAND)))
       if (!out) return { patch: { length_gate: { status: 'ok', words: s.totalWords } }, jobs: [] }
       return {
         patch: { stage: 'length-fix', length_gate: { status: 'rewriting', words: s.totalWords, min, max } },

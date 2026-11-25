@@ -30,6 +30,7 @@ const FORMATS: Record<string, { group: TypeGroup; choices?: boolean }> = {
   'bedtime-toddler': { group: 'picture' },
   'bedtime-story': { group: 'picture' },
   'kids-picture-book': { group: 'picture' },
+  'idea-fable': { group: 'stories' },
   'visual-novel': { group: 'vn' },
   'choice-visual-novel': { group: 'vn', choices: true },
   'kids-visual-story': { group: 'vn' },

@@ -188,6 +188,16 @@ export async function migratePictureBooks(dataDir: string, seedDir: string | und
   return { changes: added.length ? [`config/formats.md: added the picture-book format (${added.join(', ')})`] : [] }
 }
 
+/** The format of the idea fable. */
+export const IDEA_FABLE_FORMAT_IDS = ['idea-fable']
+
+/** The idea-fable format arrived after data folders existed: it is appended to config/formats.md when its id is missing, like the picture book. Running it again changes nothing. */
+export async function migrateIdeaFables(dataDir: string, seedDir: string | undefined): Promise<MigrationResult> {
+  if (!seedDir) return { changes: [] }
+  const added = await appendSeedFormats(dataDir, seedDir, IDEA_FABLE_FORMAT_IDS)
+  return { changes: added.length ? [`config/formats.md: added the idea-fable format (${added.join(', ')})`] : [] }
+}
+
 /** The screenplay formats of the seed, in this order. */
 export const SCREENPLAY_FORMAT_IDS = ['short-film', 'cartoon', 'kids-cartoon']
 

@@ -50,6 +50,7 @@ import { ARTICLE_IDEAS_RULE, newsHeadlines } from './newspaper'
 import { ancestors, chapterPlace, CHOICES_RULE, checkBranches, endLine, renderOutlineBody, splitChoicesBlock } from './branches'
 import type { BranchChapter } from './branches'
 import { decide, dimensionsFor } from './scoring'
+import { assembleFableBack, fableBackProblems, fableCard, FABLE_REVIEW_NOTE, joinFable, splitFable, startsWithFableBack } from './fable'
 import type { ReviewResult } from './scoring'
 
 const KEYWORDS_MIN = 4
@@ -152,11 +153,12 @@ export const isArticleFormat = (f: Pick<FormatEntry, 'article'> | undefined | nu
  * Formats for a topic kind. With no kind, every enabled format except the article formats (those are for the newspaper's own topics) and the
  * screenplay formats (a screenplay is only written when a story fixes the format, or a topic of kind `video` or `juvenile-video` has it), and
  * the mystery-with-puzzles format (its puzzles come with the story, so only a story that fixes the format gets it) and the picture-book format
- * (a picture book is only written when a story fixes the format). A picture book is never picked at random, whatever the kind.
+ * (a picture book is only written when a story fixes the format) and the idea-fable format (the same). A picture book or a fable is never picked at
+ * random, whatever the kind.
  */
 export function formatsForKind(formats: FormatEntry[], kind: string | null): FormatEntry[] {
   const on = enabledFormats(formats)
-  return kind ? on.filter((f) => f.kinds.includes(kind) && !f.picture_book) : on.filter((f) => !f.article && !f.screenplay && !f.puzzles && !f.picture_book)
+  return kind ? on.filter((f) => f.kinds.includes(kind) && !f.picture_book && !f.fable) : on.filter((f) => !f.article && !f.screenplay && !f.puzzles && !f.picture_book && !f.fable)
 }
 
 /** Open slots: a book can start while fewer than `max_books_in_progress` books are open, an article while fewer than `max_articles_in_progress` articles are. */
@@ -366,8 +368,10 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
 
   // ---- idea generator ----
   /** The writer's answer as chapter text: no reasoning, no heading, and the task instructions a model repeated at the end cut off. A leak in the middle fails the job (it is asked again). */
-  const chapterAnswer = (ctx: JobContext, forbid: string[], text: string): string => {
-    const body = stripLeadingHeading(cleanProse(text))
+  const chapterAnswer = (ctx: JobContext, forbid: string[], text: string, fable = false): string => {
+    const cleaned = cleanProse(text)
+    // a fable's back matter starts with a heading that must stay (an answer, a repair or a rewrite may hold only the back matter)
+    const body = fable && startsWithFableBack(cleaned) ? cleaned : stripLeadingHeading(cleaned)
     const leak = stripTrailingLeak(body, forbid)
     if (!leak) throw new Error('the answer repeats the task instructions')
     if (leak.cut) ctx.log('the answer ended with the task instructions: cut off')
@@ -537,6 +541,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
     if (idea?.data.format && formats.some((f) => f.enabled && f.puzzles && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
     // and for a picture book: it is never picked at random, so only a story that fixes the format gets it (with a topic too)
     if (idea?.data.format && formats.some((f) => f.enabled && f.picture_book && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
+    // and for an idea fable: the same (its idea card comes with the story)
+    if (idea?.data.format && formats.some((f) => f.enabled && f.fable && f.id === idea.data.format)) allowed = formats.filter((f) => f.id === idea.data.format)
     const articleStory = allowed.length > 0 && allowed.every((f) => f.article)
     // the owner's story: its title and format are theirs to fix, and the whole brief goes to the editor
     const fromOwner = idea?.data.source === 'user'
@@ -930,8 +936,42 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const forbid = instructionLines(template, appended)
     const maxTokens = Math.max(4000, perChapter * 6)
     let r = await run.chat({ messages, maxTokens, forbid })
-    let body = chapterAnswer(ctx, forbid, r.text)
-    if (countWords(body) < 20) throw new Error(`chapter ${n} came back too short (${countWords(body)} words, ${r.usage.outputTokens} tokens used: a thinking model may have run out of tokens)`)
+    let body = chapterAnswer(ctx, forbid, r.text, !!fmt.fable)
+    const tooShort = () => new Error(`chapter ${n} came back too short (${countWords(body)} words, ${r.usage.outputTokens} tokens used: a thinking model may have run out of tokens)`)
+    if (!fmt.fable && countWords(body) < 20) throw tooShort()
+    // an idea fable: the back matter is checked (one repair request), then the story alone is measured, tightened and cleaned of markers
+    let fableBack = ''
+    let fableCardOf: ReturnType<typeof fableCard> | null = null
+    if (fmt.fable) {
+      fableCardOf = fableCard(await d.books.brief(slug))
+      const split = splitFable(body)
+      body = split.story
+      if (countWords(body) < 20) throw tooShort()
+      fableBack = split.back
+      const problems = fableBackProblems(fableBack, fableCardOf)
+      if (problems.length) {
+        ctx.log(`fable back matter has problems: ${problems.join('; ')}: asking once for it again`)
+        try {
+          const retry = await run.chat({
+            messages: [
+              ...messages,
+              { role: 'assistant', content: joinFable(body, fableBack) },
+              { role: 'user', content: `The back matter after the story has these problems: ${problems.join('; ')}. Write only the back matter again, from the line ## What just happened to the last quiz answer, in the layout of the task. Do not write the story again.` }
+            ],
+            maxTokens,
+            forbid
+          })
+          const again = chapterAnswer(ctx, forbid, retry.text, true)
+          const next = startsWithFableBack(again) ? again.trim() : splitFable(again).back
+          if (next && fableBackProblems(next, fableCardOf).length < problems.length) fableBack = next
+        } catch (err) {
+          if (['AbortError', 'BudgetError'].includes((err as Error)?.name)) throw err
+          ctx.log(`the back matter retry failed (${(err as Error).message}): keeping the first back matter`)
+        }
+        const left = fableBackProblems(fableBack, fableCardOf)
+        if (left.length) ctx.log(`fable back matter: ${left.join('; ')}`)
+      }
+    }
     // long books: models write 10-50% less than asked. A chapter under 80% of its target gets one expand retry before the checks.
     let expandedFrom: number | null = null
     if (fmt.long && countWords(body) < perChapter * EXPAND_BELOW) {
@@ -965,15 +1005,20 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       const out = await tighten(ctx, run, messages, body, perChapter, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles, chapterRuntime(fmt, outline.chapters.length))
       if (out.reply) {
         r = out.reply
-        body = out.body
+        body = fmt.fable ? splitFable(out.body).story : out.body
         trimmedFrom = before
       }
     }
     // a script: the SCENE places are the bible's names, and a new place is added to the bible
     if (fmt.script) body = await settlePlaces(ctx, slug, n, body, !fmt.screenplay)
     // [RESEARCH: question] markers (any model can write them): each becomes a research job. A fix-up job replaces the sentences when the notes are in.
+    // An idea fable asks no research: its markers are only stripped.
     const asked: string[] = []
-    for (const m of findMarkers(body).slice(0, MAX_MARKERS_PER_CHAPTER)) {
+    if (fmt.fable) {
+      body = stripMarkers(body)
+      fableBack = stripMarkers(fableBack)
+    }
+    for (const m of fmt.fable ? [] : findMarkers(body).slice(0, MAX_MARKERS_PER_CHAPTER)) {
       const a = await d.research.ask({ question: m.question, book: slug, askedBy: ctx.agent.id, purpose: `chapter ${n} of "${book.title}": the writer marked a sentence it was unsure about` })
       asked.push(`${m.question} (${a.status})`)
     }
@@ -982,9 +1027,11 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     if (!book.author) {
       await d.books.update(slug, () => ({ author: ctx.agent.name, writer_agent: ctx.agent.id, writer_family: r.model.family }))
     }
+    const storyWords = countWords(body)
+    if (fableCardOf) body = joinFable(body, assembleFableBack(fableBack, fableCardOf))
     await d.books.writeChapter(slug, { n, title: entry.title, round: 0, body, agent: ctx.agent.id, model: r.model.ref })
     await made(slug, run)
-    return { result: `chapter ${n}: ${countWords(body)} words${expandedFrom !== null ? ` (expanded from ${expandedFrom})` : ''}${trimmedFrom !== null ? ` (trimmed from ${trimmedFrom})` : ''}`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
+    return { result: `chapter ${n}: ${storyWords} words${expandedFrom !== null ? ` (expanded from ${expandedFrom})` : ''}${trimmedFrom !== null ? ` (trimmed from ${trimmedFrom})` : ''}`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
   })
 
   // ---- reviewers ----
@@ -1043,6 +1090,10 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       appendToPrompt(messages, await adaptSection(d, slug, 'review', { formatName: fmt.name }))
       if (fmt.script) appendToPrompt(messages, fmt.screenplay ? SCREENPLAY_CUES_NOTE : fmt.picture_book ? PICTURE_BOOK_NOTE : SCRIPT_CUES_NOTE)
       if (fmt.puzzles) appendToPrompt(messages, PUZZLE_REVIEW_NOTE)
+      if (fmt.fable) {
+        appendToPrompt(messages, FABLE_REVIEW_NOTE)
+        appendToPrompt(messages, await storyBriefSection(d, slug))
+      }
       await ensureProblemsRule(d.dataDir, messages, role, variant(fmt, 'review'))
       appendToPrompt(messages, await calendarFor(d, slug, bookText))
       ctx.context([{ name: actN ? `act ${actN} in full, summaries of the other acts` : 'whole book text', tokens: Math.round(messages[1]!.content.length / 4) }])
@@ -1232,7 +1283,25 @@ Build the outline on these facts: the period, places, jobs, distances and durati
     const forbid = instructionLines(template, appended)
     const maxTokens = Math.max(4000, current.words * 6)
     let r = await run.chat({ messages, maxTokens, forbid })
-    let body = stripMarkers(chapterAnswer(ctx, forbid, r.text))
+    let body = stripMarkers(chapterAnswer(ctx, forbid, r.text, !!fmt.fable))
+    // an idea fable: the story alone is measured and tightened; the back matter is kept from the chapter unless the new one is at least as good
+    let fableCardOf: ReturnType<typeof fableCard> | null = null
+    let fableBack = ''
+    if (fmt.fable) {
+      fableCardOf = fableCard(await d.books.brief(slug))
+      const split = splitFable(body)
+      const kept = splitFable(current.body)
+      // a reply that holds only back matter has no story part: the story of the chapter stays
+      if (!split.story && split.back) ctx.log('the rewrite sent only a back matter: keeping the story of the chapter')
+      body = split.story || (split.back ? kept.story : '')
+      const before = kept.back
+      const now = fableBackProblems(split.back, fableCardOf).length
+      if (split.back && now <= fableBackProblems(before, fableCardOf).length) fableBack = split.back
+      else {
+        fableBack = before
+        ctx.log(`the rewrite sent ${split.back ? `a back matter with ${now} problem(s)` : 'no back matter'}: keeping the back matter of the chapter`)
+      }
+    }
     // a story with choices: the rewrite may end with reworded choices (`CHOICES:`). They are used when they keep the count and where each one leads.
     if (branches) {
       const split = splitChoicesBlock(body)
@@ -1253,13 +1322,15 @@ Build the outline on these facts: the period, places, jobs, distances and durati
       const out = await tighten(ctx, run, messages, body, target, !!fmt.script, forbid, maxTokens, !!fmt.screenplay, !!fmt.puzzles, chapterRuntime(fmt, outline?.chapters.length ?? chapters.length))
       if (out.reply) {
         r = out.reply
-        body = stripMarkers(out.body)
+        body = stripMarkers(fmt.fable ? splitFable(out.body).story : out.body)
       }
     }
     if (fmt.script) body = await settlePlaces(ctx, slug, n, body, !fmt.screenplay)
+    const storyWords = countWords(body)
+    if (fableCardOf) body = joinFable(body, assembleFableBack(fableBack, fableCardOf))
     await d.books.writeChapter(slug, { n, title: current.title, round, body, agent: ctx.agent.id, model: r.model.ref, fixes: isLength ? [...current.fixes, 'len'] : isCheck ? [...current.fixes, 'chk'] : current.fixes })
     await made(slug, run)
-    return { result: `chapter ${n} rewritten (round ${round}): ${countWords(body)} words`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
+    return { result: `chapter ${n} rewritten (round ${round}): ${storyWords} words`, resultPath: `books/${slug}/chapters/ch-${String(n).padStart(2, '0')}.md` }
   })
 
   // ---- publisher ----
@@ -1414,9 +1485,9 @@ export function noteWantsLength(note: string): boolean {
   return /\b(longer|expand|lengthen|more (detail|words|scenes?)|add (a|an|another|more)\b|flesh out)/i.test(note)
 }
 
-/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_sp` for a screenplay, `<task>_pb` for a picture book, `<task>_vn` for a visual novel script, else `<task>`. */
-export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean; screenplay?: boolean; picture_book?: boolean }, task: string): string {
-  return fmt.article ? `${task}_article` : fmt.nonfiction ? `${task}_nf` : fmt.screenplay ? `${task}_sp` : fmt.picture_book ? `${task}_pb` : fmt.script ? `${task}_vn` : task
+/** The prompt task for a format: `<task>_nf` for non-fiction, `<task>_sp` for a screenplay, `<task>_pb` for a picture book, `<task>_fable` for an idea fable, `<task>_vn` for a visual novel script, else `<task>`. */
+export function variant(fmt: Pick<FormatEntry, 'nonfiction' | 'script'> & { article?: boolean; screenplay?: boolean; picture_book?: boolean; fable?: boolean }, task: string): string {
+  return fmt.article ? `${task}_article` : fmt.fable ? `${task}_fable` : fmt.nonfiction ? `${task}_nf` : fmt.screenplay ? `${task}_sp` : fmt.picture_book ? `${task}_pb` : fmt.script ? `${task}_vn` : task
 }
 
 /** Added to an outline prompt from an older data folder that does not ask for `story_year` (the seed prompts do). */

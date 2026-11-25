@@ -9,6 +9,7 @@ import { buildMessages } from './prompts'
 import { bibleFor } from './nfcontext'
 import { settleScenePlaces } from './scriptPlaces'
 import { PUZZLE_HUMANIZER_NOTE } from './puzzles'
+import { joinFable, splitFable } from './fable'
 import { formatVars, recordMade, Run, stripLeadingHeading, storyBriefSection, unitNumber, variant } from './handlers'
 import type { PipelineDeps } from './handlers'
 
@@ -360,14 +361,16 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     if (fmt.nonfiction) bible = await bibleFor(d, slug, true)
     else if (fmt.long) bible = [await d.bible.style(slug), await d.bible.digest(slug)].filter(Boolean).join('\n\n')
     else bible = await d.books.bible(slug)
+    // an idea fable: only the story goes to the model; the back matter is put back unchanged
+    const { story, back } = fmt.fable ? splitFable(current.body) : { story: current.body, back: '' }
     const prev = chapters.find((c) => c.n === n - 1)
     const previousEnding = prev ? prev.body.slice(-1500) : ''
     const vars = {
       title: book.title,
       chapter_n: n,
       chapter_title: current.title,
-      chapter_text: current.body,
-      chapter_words: current.words,
+      chapter_text: story,
+      chapter_words: countWords(story),
       bible: bible || '(no bible: keep the voice the chapter already has)',
       tics: ticReport(chapters.map((c) => ({ n: c.n, text: c.body })), n),
       previous_ending: previousEnding ? `How the previous chapter ended (for the voice only, do not write it again):\n${previousEnding}` : '',
@@ -379,7 +382,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     if (owner) messages[messages.length - 1]!.content += `\n\n${owner}`
     // a mystery with puzzles: the puzzle lines are made by code and must come back unchanged
     if (fmt.puzzles) messages[messages.length - 1]!.content += `\n\n${PUZZLE_HUMANIZER_NOTE}`
-    const r = await run.chat({ messages, maxTokens: Math.max(4000, current.words * 6), temperature: 0.8 })
+    const r = await run.chat({ messages, maxTokens: Math.max(4000, countWords(story) * 6), temperature: 0.8 })
     let revised = stripLeadingHeading(cleanProse(r.text))
     // a model that ends with the instructions it was given: the tail is cut, a leak in the middle refuses the version
     const forbid = instructionLines(template)
@@ -390,13 +393,13 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
       ctx.log(`humanizer: the answer ended with the task instructions: cut off`)
       revised = leak.text
     }
-    const problem = leakProblem ?? humanizeProblem(current.body, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
+    const problem = leakProblem ?? humanizeProblem(story, revised, { script: !!fmt.script, nonfiction: !!fmt.nonfiction, bible })
     if (problem) {
       ctx.log(`humanizer: chapter ${n} kept as it was: ${problem}`)
       d.log(`humanizer: ${slug} chapter ${n} kept as it was: ${problem}`)
     }
-    else ctx.log(`humanizer: chapter ${n} humanized: ${countWords(current.body)} to ${countWords(revised)} words`)
-    let body = problem ? current.body : revised
+    else ctx.log(`humanizer: chapter ${n} humanized: ${countWords(story)} to ${countWords(revised)} words`)
+    let body = problem ? current.body : fmt.fable ? joinFable(revised, back) : revised
     // a script keeps the bible's names for its SCENE places (the humanizer may have worded one differently), and a place the bible lacks is added to it
     if (!problem && fmt.script) body = await settleScenePlaces(d, slug, n, body, (m) => ctx.log(`humanizer: ${m}`), { cues: !fmt.screenplay })
     // the round is the chapter's own (it stays); `humanizer_round` says in which book round the pass ran and `humanizer_result` whether it rewrote the chapter
@@ -413,7 +416,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
     })
     await recordMade(d, slug, run)
     return {
-      result: problem ? `chapter ${n} kept as it was (${problem})` : `chapter ${n} humanized: ${countWords(current.body)} to ${countWords(body)} words`,
+      result: problem ? `chapter ${n} kept as it was (${problem})` : `chapter ${n} humanized: ${countWords(story)} to ${countWords(fmt.fable ? revised : body)} words`,
       resultPath: `books/${slug}/chapters/ch-${pad2(n)}.md`
     }
   })

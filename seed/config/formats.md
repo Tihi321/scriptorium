@@ -438,6 +438,29 @@ formats:
       in the story before its puzzle, as one CLUE line that says exactly what the clue says, in the story's own words. Evidence that a testimony
       needs is planted with an EVIDENCE line before it. Keep a fair mystery: a clever reader could solve it from what the story has shown, and
       every suspect has a reason. Short present-tense narration, distinct voices, and each chapter ends on a moment that pulls the reader on.
+  - id: idea-fable
+    name: Idea fable (one idea, lived)
+    enabled: true
+    fable: true
+    kinds: [idea-fable]
+    juvenile: false
+    age_band: null
+    words: [1500, 2000]
+    chapters: [1, 1]
+    read_aloud: false
+    research: false
+    humanize: true
+    max_rounds: 1
+    reviewers: [developmental-editor, line-editor, copy-editor, beta-reader, originality-checker]
+    guidance: |
+      An original short story for adult readers in which one invented character lives through one idea from non-fiction, the idea of
+      the owner's Concept card. The story is 1,500 to 2,000 words in plain, warm, concrete English, in one scene or a few. The character
+      meets the idea as a problem in an ordinary life, first acts on the common misconception, and changes when the idea starts to work
+      for them, so the reader feels the idea before anyone names it. Inside the story never name the idea, a researcher, a study or a
+      book, and never lecture. Invent every person, place and example: no real person, no real company and no scene, anecdote or example
+      from the books of the brief. Every real-world fact the story leans on is one of the card's key facts. After the story comes the back
+      matter (What just happened, then the quiz) as the writer prompt lays it out; the engine adds the sources, the Go deeper list and
+      the closing line. Write no [RESEARCH: ...] markers.
 ---
 # Formats
 
@@ -458,6 +481,7 @@ The kinds of book the factory can make. The editor-in-chief picks one for each b
 - `screenplay`: a screenplay for a short film or cartoon (with `script: true`, so it keeps the SCENE places of the bible, the tighten text, adaptation through `adapt_book` and the script layout of the EPUB and the reader). Chapters are sequences of the film, written as shots (`SHOT (framing, move, 6s): what we see`, `ON SCREEN:`, `MUSIC:`, `SFX:`, `TITLE:`, `NARRATOR:` and `NAME (V.O.):` voice-over, `NAME (delivery):` dialogue). The architect, writer and line editor use the `_sp` prompts (`outline_sp.md`, `draft_chapter_sp.md`, `rewrite_chapter_sp.md`, `review_sp.md`; a role without one uses its plain prompt, never the `_vn` one), and `get_screenplay` returns the parsed film. The screenplay formats are for topics of kind `video` and `juvenile-video` (all switched off in `topics.md`) and for a story that fixes the format (`add_story` with `format`, `adapt_book`): they are never picked for a story with no topic. Leave `humanize: false`. See `docs/screenplay.md`.
 - `puzzles`: a mystery with logic puzzles (with `script: true`). The puzzles are made by code (VN Studio's `vno_puzzle_generate`) and handed over in the story brief (`add_story {puzzles}`); the architect places each in a chapter (`bible/puzzles.md`), the writers plant its clues as `CLUE:` lines and write the `PUZZLE:` line, `EVIDENCE:` and `TESTIMONY:` lines, and the continuity review checks that every clue is planted before its puzzle. Scriptorium has no solver. Never picked by a topic: only a story that fixes the format gets it. Leave `humanize: false`. See `docs/visual-novel.md` "Puzzles".
 - `picture_book`: a children's picture book (with `script: true`): one page per scene, one picture per page and one to three short narration sentences under it, with no speaker lines and no `CG:`/`INSERT:`/`SFX:`/`AMBIENCE:` cues. The architect, writer, line editor and humanizer use the `_pb` prompts (`outline_pb.md`, `draft_chapter_pb.md`, `rewrite_chapter_pb.md`, `review_pb.md`, `humanize_chapter_pb.md`), and the publisher writes the v2 VN pack like for any script: a page is a scene, the picture description stays in the SCENE line and the words under the picture are the scene's narration. Never picked by a topic: only a story that fixes the format gets it (`add_story` with `format`); `adapt_book` refuses a picture-book format. See `docs/visual-novel.md` "Picture books".
+- `fable`: an idea fable (prose, not a script): one chapter with a story of 1,500 to 2,000 words, then back matter (a debrief, a three-question quiz) from the line `## What just happened` on. Only the story counts toward the length gate and goes to the humanizer; the engine checks the quiz and writes the sources, the Go deeper list and the closing line from the owner's brief. Writer prompts `_fable`. Never picked by a topic: only a story that fixes the format gets it (`add_story` with `format`). See `docs/mcp.md` "Idea fables".
 - `runtime`: `[min, max]` seconds of film a screenplay format should run. The writers are told the runtime and the chapter's share of it; `get_screenplay` reports the real one.
 - `choices`: a story with choices (a choose-your-path book or a visual novel with choices). The architect plans a map of chapters: some end with two or three choices, each leading to a later chapter, and the story has at least two endings. The writer sees only the chapters that can lead to the one it writes, the reviewers read every path, and the EPUB and the reader end those chapters with links to the chapters the choices lead to ("The End" on an ending). The extra instructions are in `prompts/_choices.md`. The choice formats are for topics of kind `interactive-fiction`, `juvenile-interactive-fiction`, `visual-novel` and `juvenile-visual-novel`. Short formats only (not `long`).
 - `reviewers`: optional list of reviewer roles to override the default set. The default set is continuity, developmental, line, copy, beta reader and originality, plus child safety for juvenile formats and read-aloud for read-aloud formats.
