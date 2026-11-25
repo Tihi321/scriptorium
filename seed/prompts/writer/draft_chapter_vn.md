@@ -28,6 +28,7 @@ Rules:
 - Write ON SCREEN again whenever someone enters or leaves, or their look clearly changes.
 - Most of the chapter is dialogue. Keep each spoken line short enough to fit a text box: one to three sentences.
 - Narration is short and in the present tense.
+- Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.
 - Use a line with only --- between scenes if you need a scene break. Start the next scene with SCENE:.
 - Write only the script. Do not write a title, chapter heading, notes or a summary, and no markdown other than the lines above.
 - ON SCREEN is only for characters. Never put a thing, a page or a crowd in it.

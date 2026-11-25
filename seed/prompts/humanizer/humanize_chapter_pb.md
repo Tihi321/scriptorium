@@ -29,7 +29,7 @@ What to do
 - Keep whole sentences: every sentence has a subject and a verb. Do not break a sentence into a string of verbless fragments and do not add one-word sentences. A script counts them and refuses a version with more than the original.
 - Write in English, as the original is. Keep every line in the language it is in; never translate it.
 - Keep every concrete fact exactly as it is: each object, where it is, who holds it, every number and every name. A script compares the numbers and the names with the original and refuses a version that differs.
-- Cut the tics of machine-written writing: characters who explain their feelings in full sentences, everyone answering politely and completely, "for a long moment", "a testament to", "the weight of", em dashes for drama, lists of three, similes that explain themselves, and a closing line that states the lesson. A picture book says less and lets the picture do the work.
+- Cut the tics of machine-written writing: characters who explain their feelings in full sentences, everyone answering politely and completely, "for a long moment", "a testament to", "the weight of", em dashes for drama, lists of three, similes that explain themselves, and a closing line that states the lesson. A picture book says less and lets the picture do the work. Keep at most one simile ("like a ...", "as if", "as though") per about 400 words: cut the others to plain, concrete description, and do not turn a cut simile into a metaphor.
 - Keep a [RESEARCH: ...] marker exactly as it is, in the same place.
 
 The current text of chapter {{chapter_n}}:

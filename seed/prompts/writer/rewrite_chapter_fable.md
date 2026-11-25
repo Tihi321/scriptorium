@@ -25,4 +25,6 @@ The current text, "{{chapter_title}}": a story, then the back matter from the li
 
 Write the improved chapter: the story, then the back matter in the same layout (## What just happened with its three bold lead-ins, ## Quiz with three questions of four options A to D, ### Answers with one paragraph per answer). Fix what the notes point out in either part and keep what already works. Keep the key-fact numbers in square brackets, and use no fact that the Key facts of the owner's brief do not give. The idea stays unnamed inside the story. Write no [RESEARCH: ...] markers.
 
+Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.
+
 Do not write sources, a book list, a reading list or a closing line: the engine adds them. Do not write a title or notes.

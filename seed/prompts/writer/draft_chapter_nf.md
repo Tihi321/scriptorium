@@ -20,4 +20,5 @@ Rules for a non-fiction chapter:
 - Put the facts in your own words. Never copy sentences from the notes.
 - Explain clearly: define a term when it first appears, one idea at a time, with concrete examples. Keep the argument of the book moving, and keep the terms used the same way as in the earlier text.
 - Write in plain prose in paragraphs. You may use a line with only --- between larger parts. Do not write a title, chapter heading, bullet lists, notes or a summary of what you did. Answer with the chapter text only, never as JSON or with field names.
+- Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.
 - Do not invent people, quotes, studies or anecdotes.

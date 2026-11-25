@@ -19,6 +19,7 @@ The story:
 - Put --- on its own line between scenes, only if you need it.
 - The idea of the owner's Concept card is lived, never named. No lecture, no researcher, no study, no book.
 - Write no [RESEARCH: ...] markers.
+- Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.
 
 After the story, write exactly this layout. Angle brackets mark what you fill in.
 

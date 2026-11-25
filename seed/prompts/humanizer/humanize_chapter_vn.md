@@ -30,7 +30,7 @@ What to do
 - Keep each speaker's register. A formal speaker stays formal: no contractions, no slang, no softening added. A rough speaker stays rough. Change the rhythm and the words around the speech, not who talks how.
 - Keep the story, the facts, what each character knows, and every name.
 - Give each speaker their own voice from the bible: vocabulary, sentence length, what they never say. Cover the name and you should still know who is talking. People interrupt, trail off, dodge, and say less than they mean. Spoken lines are short enough for a text box.
-- Cut the tics of machine-written writing: characters who explain their feelings in full sentences, everyone answering politely and completely, "for a long moment", "it was" narration, "did not look / say" beats, "a testament to", "the weight of", "something shifted", em dashes for drama, lists of three, similes that explain themselves, and a closing line that states the lesson.
+- Cut the tics of machine-written writing: characters who explain their feelings in full sentences, everyone answering politely and completely, "for a long moment", "it was" narration, "did not look / say" beats, "a testament to", "the weight of", "something shifted", em dashes for drama, lists of three, similes that explain themselves, and a closing line that states the lesson. Keep at most one simile ("like a ...", "as if", "as though") per about 400 words: cut the others to plain, concrete description, and do not turn a cut simile into a metaphor.
 - Narration sets a scene in a few concrete words: the exact sound, light, object or smell. Sharpen the verbs. Show a feeling through what the character does or gets wrong.
 - Keep a [RESEARCH: ...] marker exactly as it is, in the same place.
 
