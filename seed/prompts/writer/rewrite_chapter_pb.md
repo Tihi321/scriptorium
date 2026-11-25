@@ -31,3 +31,5 @@ Keep it a picture book, page by page: one SCENE: line per page whose second sent
 The pages are read aloud to a child of {{age_band}}: simple words, short sentences, a steady rhythm, a kind and warm tone.
 
 In every SCENE: line name the place exactly as one of the places of the story bible (see "Places" in the bible). A new place is allowed only when the story moves somewhere the bible does not have: then name it plainly, and the engine adds it to the bible.
+
+Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.

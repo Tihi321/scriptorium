@@ -192,6 +192,16 @@ describe('the seed history', () => {
     }
     expect(missing, 'run `yarn seed:hashes`').toEqual([])
   })
+
+  // SCP-72: the simile limit reaches the prose prompts, and an older (unedited) copy of each is known to the history, so it is upgraded
+  it('has the simile limit in every prose writer prompt and in the humanizers, each with an older version to upgrade from', async () => {
+    const files = ['', '_article', '_nf', '_pb', '_vn', '_fable'].flatMap((v) => [`writer/draft_chapter${v}`, `writer/rewrite_chapter${v}`]).concat(['', '_article', '_pb', '_vn'].map((v) => `humanizer/humanize_chapter${v}`))
+    for (const f of files) {
+      const rel = `prompts/${f}.md`
+      expect(await readFile(path.join(seedDir, rel), 'utf8'), rel).toContain('at most one simile')
+      expect(SEED_HISTORY[rel]?.length ?? 0, rel).toBeGreaterThan(1)
+    }
+  })
 })
 
 describe('migrateFallbacks (SCP-19)', () => {

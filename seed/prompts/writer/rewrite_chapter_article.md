@@ -21,3 +21,5 @@ The current text of the article:
 {{chapter_text}}
 
 Write the improved article. Use only the facts above, keep the number of the source in square brackets after every sentence that states a fact (for example [2]), attribute claims to who said them, and keep it in plain prose in your own words, with short paragraphs and a lively voice. Keep what already works. Write only the text of the article: no headline, standfirst, byline or notes (a feature may keep its "## " subheads). Answer with the article text only, never as JSON or with field names.
+
+Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.

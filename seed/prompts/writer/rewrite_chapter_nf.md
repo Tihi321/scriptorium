@@ -21,3 +21,5 @@ The current text of chapter {{chapter_n}}, "{{chapter_title}}":
 {{chapter_text}}
 
 Write the improved chapter. Use only the facts above, keep the number of the source in square brackets after every sentence that states a fact (for example [2]), and keep it in plain prose in your own words. Keep what already works, and stay consistent with the other chapters. Write only the text of the chapter. Do not write a title, heading or notes. Answer with the chapter text only, never as JSON or with field names.
+
+Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.

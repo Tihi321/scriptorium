@@ -23,4 +23,5 @@ Rules for a newspaper article:
 - Be fair: when views differ, give each side its due and say who holds it. Say plainly what is not yet known.
 - End on the next step, the open question or a telling detail, not on a moral or a summary.
 - Write plain prose in paragraphs. A longer feature may have a few short subheads, each on its own line starting with "## ". Do not write the headline or the standfirst, a byline, bullet lists, notes or a summary of what you did. Answer with the article text only, never as JSON or with field names.
+- Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.
 - Do not invent people, quotes, studies or anecdotes.

@@ -25,3 +25,5 @@ The current text of chapter {{chapter_n}}, "{{chapter_title}}":
 {{chapter_text}}
 
 Write the improved chapter. Fix what the notes point out, keep what already works, and keep the story, names and facts consistent with the other chapters. Write only the text of the chapter, as plain prose. Do not write a title, heading or notes.
+
+Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.

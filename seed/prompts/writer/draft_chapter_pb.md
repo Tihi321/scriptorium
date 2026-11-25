@@ -29,6 +29,7 @@ Rules:
 - The words under the picture are narration only: no dialogue in quotation marks longer than a phrase, no stage directions, no camera talk, no page numbers.
 - The pages tell the whole story in order: a beginning, a small problem, a kind solution and a warm ending. Plant one small thing a child can look for in the pictures.
 - Keep names, places and facts the same as in the earlier text and as in the story bible.
+- Use at most one simile ("like a ...", "as if", "as though") per about 400 words. Prefer plain, concrete description, and do not swap a cut simile for a metaphor.
 - In every SCENE: line name the place exactly as one of the places of the story bible (see "Places" in the bible). A new place is allowed only when the story moves somewhere the bible does not have: then name it plainly, and the engine adds it to the bible.
 - Write only the pages. Do not write a title, chapter heading, notes or a summary, and no markdown other than the lines above.
 
