@@ -8,3 +8,5 @@
 {"ts":"2026-11-24T00:00:00Z","actor":"director-scribe","type":"attention.opened","request":"REQ-0033","ticket":"SCP-71-idea-fable","detail":"A-001 second re-check FAIL: user decides the next step","data":{"item":"A-001"}}
 {"ts":"2026-11-24T00:00:00Z","actor":"director-scribe","type":"attention.answered","request":"REQ-0033","ticket":"SCP-71-idea-fable","detail":"user answered A-001: one more round (one-line fix, Sources-line cleanup)","data":{"item":"A-001"}}
 {"ts":"2026-11-24T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0033","ticket":"SCP-71-idea-fable","detail":"PASS round 3 (narrow re-check A-E); ticket stays in-progress","data":{"verdict":"PASS","round":3}}
+{"ts":"2026-11-24T00:00:00Z","actor":"director-scribe","type":"plan.approved","request":"REQ-0033","ticket":"SCP-71-idea-fable","detail":"user approved the plan (2026-11-24; time not recorded)"}
+{"ts":"2026-11-25T00:00:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0033","ticket":"SCP-71-idea-fable","detail":"checker PASS round 3; three pilot books published with the format; committed d93a33e; merge to master on the user's word"}

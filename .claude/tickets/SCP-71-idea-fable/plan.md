@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: done
 request: REQ-0033
 repos: [C:/projects/Personal/scriptorium]
 branch: SCP-71_idea-fable
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # SCP-71: the `idea-fable` format (Scriptorium half of hub HUB-45)
