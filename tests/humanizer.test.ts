@@ -232,6 +232,20 @@ describe('humanizer: the guards and the report', () => {
   })
 })
 
+describe('humanizer: the simile counter (SCP-73)', () => {
+  it('reports similes over one per 400 words, not "would like" or "like to", and not when switched off', () => {
+    const filler = 'The tide came in and the boats rocked at their ropes. '.repeat(40)
+    const over = `${filler} Her hands shook like a leaf. The room went quiet as if it held its breath. He grinned like the fox he was. ${filler}`
+    const labels = aiTells(over).map((t) => t.label)
+    expect(labels.some((l) => l.startsWith('similes'))).toBe(true)
+    expect(ticReport([{ n: 1, text: over }], 1)).toMatch(/similes .*per 400 words/)
+    expect(aiTells(over, { similes: false })).toEqual([])
+    // one simile in a long chapter is within the rule; "would like a", "I like the", "like to", "likely" are no similes
+    const ok = `${filler} Her hands shook like a leaf. I would like a cup of tea. I like the sea and I like to swim. It is likely. ${filler}`
+    expect(aiTells(ok).some((t) => t.label.startsWith('similes'))).toBe(false)
+  })
+})
+
 describe('humanizer: the chapter front matter (SCP-61)', () => {
   it('writes humanizer_round and humanizer_result, reads the old humanized key, and saves a refused pass\'s predecessor without -humanized', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'scrip-hum-'))
