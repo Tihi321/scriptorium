@@ -36,6 +36,12 @@ const TELLS: { label: string; re: RegExp; min: number }[] = [
   { label: 'a moral or a neat lesson to end on', re: /\b(?:and )?(?:she|he|they|we|i) (?:knew|understood|realized|realised|learned) (?:that )?(?:[^.!?]{0,40})?(?:would never be the same|was (?:enough|home)|(?:had|have) always been)\b|\bthat (?:was|is) what (?:really )?mattered\b/gi, min: 1 }
 ]
 
+/** A simile: "like a/an/the/some ...", "as if", "as though". "would like a", "I like the", "like to" and "likely" are left out. */
+const SIMILE = /(?<!\b(?:would|do|does|did|don't|don’t|didn't|didn’t|might|should|could|will|not|never|I|we|you|they|to) )(?<!['’](?:d|ll) )\blike (?:a|an|the|some)\b|\bas (?:if|though)\b/gi
+
+/** The most similes per 400 words a chapter may have before the script reports it (SCP-72's prompt rule: at most one per about 400 words, and a short chapter may have one). */
+export const SIMILE_WORDS = 400
+
 export interface TellCount {
   label: string
   count: number
@@ -44,8 +50,20 @@ export interface TellCount {
 }
 
 /** The machine-prose habits found in one chapter (only the ones that occur often enough to matter). */
-export function aiTells(text: string): TellCount[] {
+export function aiTells(text: string, opts: { similes?: boolean } = {}): TellCount[] {
   const out: TellCount[] = []
+  if (opts.similes ?? true) {
+    const found = [...text.matchAll(SIMILE)]
+    const words = countWords(text)
+    if (found.length > Math.max(1, words / SIMILE_WORDS)) {
+      const rate = ((found.length * SIMILE_WORDS) / words).toFixed(1)
+      const examples = found.slice(0, 3).map((m) => {
+        const at = m.index ?? 0
+        return text.slice(Math.max(0, at - 30), at + m[0].length + 40).replace(/\s+/g, ' ').trim()
+      })
+      out.push({ label: `similes ("like a ...", "as if", "as though"; ${rate} per ${SIMILE_WORDS} words, keep to 1 or fewer: cut the weakest, say it plainly)`, count: found.length, examples })
+    }
+  }
   for (const t of TELLS) {
     const found = [...text.matchAll(t.re)]
     if (found.length < t.min) continue
@@ -62,7 +80,7 @@ export function aiTells(text: string): TellCount[] {
  * What the script found in chapter `n`: repeated phrases, openers and gesture tics (the repetition counter, over the chapters
  * up to this one, keeping what touches this chapter) and the machine-prose habits of this chapter. Says so when it found nothing.
  */
-export function ticReport(chapters: { n: number; text: string }[], n: number): string {
+export function ticReport(chapters: { n: number; text: string }[], n: number, opts: { similes?: boolean } = {}): string {
   const so = chapters.filter((c) => c.n <= n)
   const rep = analyzeRepetition(so.length ? so : chapters)
   const touches = (c: { chapters: number[] }) => c.chapters.includes(n)
@@ -71,7 +89,7 @@ export function ticReport(chapters: { n: number; text: string }[], n: number): s
     ...rep.phrases.filter(touches).map((c) => line('repeated phrase', c)),
     ...rep.openers.filter(touches).map((c) => line('repeated sentence opening', c)),
     ...rep.gestures.filter(touches).map((c) => line('gesture tic', c)),
-    ...aiTells(so.find((c) => c.n === n)?.text ?? '').map((t) => `- ${t.label}: ${t.count} time(s), for example: ${t.examples.map((e) => `"${e}"`).join(' / ')}`)
+    ...aiTells(so.find((c) => c.n === n)?.text ?? '', opts).map((t) => `- ${t.label}: ${t.count} time(s), for example: ${t.examples.map((e) => `"${e}"`).join(' / ')}`)
   ]
   return lines.length ? lines.join('\n') : '(the script found nothing that stands out. Look for the habits in the list above yourself.)'
 }
@@ -372,7 +390,7 @@ export function registerHumanizerHandlers(sched: Scheduler, d: PipelineDeps): vo
       chapter_text: story,
       chapter_words: countWords(story),
       bible: bible || '(no bible: keep the voice the chapter already has)',
-      tics: ticReport(chapters.map((c) => ({ n: c.n, text: c.body })), n),
+      tics: ticReport(chapters.map((c) => ({ n: c.n, text: c.body })), n, { similes: !fmt.screenplay }),
       previous_ending: previousEnding ? `How the previous chapter ended (for the voice only, do not write it again):\n${previousEnding}` : '',
       ...formatVars(fmt, book.target_words)
     }
