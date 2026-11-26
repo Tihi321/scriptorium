@@ -20,6 +20,7 @@ import { puzzlesOf } from '../pipeline/puzzles'
 import { agentSummary, bookSummary, ideaSummary, modelSummaries, roleDefaults, seriesSummary, serverStatuses, topicSummary } from '../summary'
 import { bookRefs, seriesMembers } from '../store/series'
 import { TOPIC_KINDS } from '../store/topics'
+import { ideaBlock, ideaBlocks } from '../pipeline/ideaBlock'
 
 /** A mistake in what the agent sent: shown to it as a tool error. */
 class ToolError extends Error {}
@@ -144,7 +145,7 @@ export function registerTools(server: McpServer, engine: Engine): void {
   server.registerTool(
     'factory_status',
     {
-      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `quotaWarnings` ({kind: usage-limit | day-full | day-nearly-full, ref, until, detail, books}: a model set aside for a usage limit, a provider whose daily requests are used up or at 80% of its rpd, each with the in-progress books whose jobs it serves; subscription providers (the ACP proxy, client) report no remaining quota, so there is no early warning for them: a usage-limit entry appears when the limit is reached, or when the proxy reports the provider exhausted), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
+      description: 'Overview of the factory: dataDir (the absolute path of the data folder), paused or not, spend against the caps, local model servers, running jobs, `limitedModels` (models set aside until their usage limit resets: {model, until, message}), `quotaWarnings` ({kind: usage-limit | day-full | day-nearly-full, ref, until, detail, books}: a model set aside for a usage limit, a provider whose daily requests are used up or at 80% of its rpd, each with the in-progress books whose jobs it serves; subscription providers (the ACP proxy, client) report no remaining quota, so there is no early warning for them: a usage-limit entry appears when the limit is reached, or when the proxy reports the provider exhausted), `blocked` (queued jobs no model can take now, each with the reason: a server down, a day used up, a rate limit, every slot busy), `lastResort` (the model of `last_resort_model` that takes a job when every model of its role is down or used up for the day, or null), `blockedIdeas` ({slug, reason, fix}: open generated ideas that cannot start because their topic is off, full or missing; "mark it as yours" or fix the topic), `providers` (`dayFull`, `resetsAt`, `down` per provider), `embeddings` (the embedding model and whether its server is down, null when none), books per stage, agents busy and idle, and clientTasks (model requests waiting for you, or leased to you, on a `client` model).',
       annotations: READ
     },
     run(async () => {
@@ -167,6 +168,8 @@ export function registerTools(server: McpServer, engine: Engine): void {
         maxBooksInProgress: engine.factory.max_books_in_progress,
         maxArticlesInProgress: engine.factory.max_articles_in_progress,
         openStories: (await engine.ideas.open()).filter((i) => i.data.source === 'user').length,
+        // open generated ideas that cannot start (their topic is off, full or missing): the reason and the fix
+        blockedIdeas: [...ideaBlocks(await engine.ideas.open(), await topics())].map(([slug, b]) => ({ slug, ...b })),
         clientTasks: engine.clientQueue.counts(),
         // queued jobs that no model can take now (a server down, a day used up, a rate limit, every slot busy), and the providers behind it
         blocked: engine.scheduler.blockedJobs(),
@@ -530,11 +533,14 @@ export function registerTools(server: McpServer, engine: Engine): void {
       annotations: READ
     },
     run(async ({ status, source }: { status?: 'open' | 'used' | 'all'; source?: 'user' | 'generated' | 'all' }) =>
-      (await engine.ideas.list())
-        .filter((i) => (status ?? 'open') === 'all' || i.data.status === (status ?? 'open'))
-        .filter((i) => !source || source === 'all' || i.data.source === source)
-        .map(ideaSummary)
-        .map(({ brief: _b, ...row }) => row)
+      (async () => {
+        const [all, tp] = [await engine.ideas.list(), await topics()]
+        return all
+          .filter((i) => (status ?? 'open') === 'all' || i.data.status === (status ?? 'open'))
+          .filter((i) => !source || source === 'all' || i.data.source === source)
+          .map((i) => ideaSummary(i, ideaBlock(i, tp)))
+          .map(({ brief: _b, ...row }) => row)
+      })()
     )
   )
 

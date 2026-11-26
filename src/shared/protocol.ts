@@ -246,6 +246,8 @@ export interface IdeaSummary {
   /** The owner gave the title (the book keeps it). */
   titleFixed: boolean
   characters: number
+  /** An open generated idea that cannot start, and the fix (its topic is off, full or missing). Read-only warning. */
+  blocked?: { reason: string; fix: string }
   /** The published book the story adapts into a visual novel script (slug), when it adapts one. */
   sourceBook?: string
   /** The series the story belongs to (slug) and its position, when it has one. */

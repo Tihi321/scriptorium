@@ -20,6 +20,7 @@ import type { IdeaFile, IdeaStore } from '../store/ideas'
 import { bookRefs, waitingStories } from '../store/series'
 import type { BookRef, SeriesStore } from '../store/series'
 import { ARTICLE_KIND } from '../store/topics'
+import { hasRoom, ideaBlocks } from './ideaBlock'
 import type { TopicRow, TopicsFile } from '../store/topics'
 import { ideaSummaries, seriesSummaries } from '../summary'
 import { countInProgress, countWords } from './books'
@@ -215,7 +216,7 @@ export function pickNext(ideas: IdeaFile[], topics: TopicRow[], formats: FormatE
   return candidates[0] ? { topic: candidates[0] } : null
 }
 
-export const hasRoom = (t: TopicRow) => t.target === 0 || t.done + t.inProgress < t.target
+export { hasRoom }
 
 /** Active topics that some enabled format can be written for. */
 export function eligibleTopics(topics: TopicRow[], formats: FormatEntry[]): TopicRow[] {
@@ -635,7 +636,8 @@ export function registerHandlers(sched: Scheduler, d: PipelineDeps): void {
       const { status: _status, book: _book, ...kept } = idea.data
       await writeMd(d.books.file(slug, 'brief.md'), { ...kept, kind: 'brief', idea: idea.slug }, '\n' + idea.body + '\n')
       await d.ideas.markUsed(idea, slug)
-      d.emit({ type: 'ideas.updated', ideas: ideaSummaries(await d.ideas.list()) })
+      const [all, topics] = [await d.ideas.list(), await d.topics.read()]
+      d.emit({ type: 'ideas.updated', ideas: ideaSummaries(all, 10, ideaBlocks(all, topics)) })
       if (idea.data.series) {
         // the series lists its books in the order they were started
         await d.series.addBook(idea.data.series, slug)

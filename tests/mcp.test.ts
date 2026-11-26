@@ -188,6 +188,15 @@ describe('MCP server', () => {
     expect((await call(c, 'list_stories', { status: 'used' })).data.map((s: { slug: string }) => s.slug)).toEqual(['used-one'])
   })
 
+  it('warns in factory_status and list_stories about a generated idea that cannot start (SCP-74)', async () => {
+    const h = await start()
+    const c = await connect(h.url)
+    await env!.engine.ideas.create({ title: 'Stuck Idea', pitch: 'A pitch.', topic: 'no-such-topic', source: 'generated' })
+    const st = await call(c, 'factory_status')
+    expect(st.data.blockedIdeas).toEqual([{ slug: 'stuck-idea', reason: expect.stringContaining('not in topics.md'), fix: expect.stringContaining('mark it as yours') }])
+    expect((await call(c, 'list_stories', { source: 'generated' })).data[0].blocked.reason).toMatch(/not in topics\.md/)
+  })
+
   it('reports the factory status and the books', async () => {
     const h = await start()
     const c = await connect(h.url)

@@ -37,6 +37,7 @@ import { readMd, writeMd } from './store/atomic'
 import { sendEpub, smtpTransport } from './publish/kindle'
 import type { TransportFactory } from './publish/kindle'
 import { agentSummary, bookSummary, formatSummaries, ideaSummaries, modelSummaries, providerSummaries, roleDefaults, seriesSummaries, serverStatuses, topicSummary } from './summary'
+import { ideaBlocks } from './pipeline/ideaBlock'
 import type { WatchEvent } from './store/watcher'
 
 export interface EngineOptions {
@@ -1118,11 +1119,14 @@ export class Engine {
 
   async emitTopics(): Promise<void> {
     this.emit({ type: 'topics.updated', topics: (await this.topics.read()).map(topicSummary) })
+    // a topic switched on or off, or a new target, changes which generated ideas are blocked
+    await this.emitIdeas()
   }
 
   /** The owner's open stories and the last used ones, as the UI and MCP list them. */
   async listIdeaSummaries(): Promise<IdeaSummary[]> {
-    return ideaSummaries(await this.ideas.list())
+    const [ideas, topics] = [await this.ideas.list(), await this.topics.read()]
+    return ideaSummaries(ideas, 10, ideaBlocks(ideas, topics))
   }
 
   async emitIdeas(): Promise<void> {
