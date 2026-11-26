@@ -38,6 +38,7 @@ export function StoryForm() {
   // the slug of the waiting story being edited, or null for a new one
   const [editing, setEditing] = useState<string | null>(null)
   const waiting = useMemo(() => ideas.filter((i) => i.status === 'open' && i.source === 'user'), [ideas])
+  const blockedIdeas = useMemo(() => ideas.filter((i) => i.status === 'open' && i.source === 'generated' && i.blocked), [ideas])
   const sections = useMemo(() => [...new Set(topics.map((t) => t.section))], [topics])
 
   // "Next book" in the series panel: a new story form with that series selected
@@ -211,6 +212,16 @@ export function StoryForm() {
               {i.title}
               {i.characters > 0 && <span className="dim"> ({i.characters} character{i.characters === 1 ? '' : 's'})</span>}
             </button>
+          ))}
+        </div>
+      )}
+      {blockedIdeas.length > 0 && (
+        <div className="stack" style={{ marginTop: 8 }} data-testid="blocked-ideas">
+          <span className="dim">Generated ideas that cannot start</span>
+          {blockedIdeas.map((i) => (
+            <span key={i.slug} className="dim" data-testid="blocked-idea">
+              {i.title}: {i.blocked!.reason}. Fix: {i.blocked!.fix}.
+            </span>
           ))}
         </div>
       )}

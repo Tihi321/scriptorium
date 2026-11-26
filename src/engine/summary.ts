@@ -14,6 +14,7 @@ import type { IdeaFile } from './store/ideas'
 import { bookRefs, seriesMembers } from './store/series'
 import type { SeriesFile, SeriesStore } from './store/series'
 import type { TopicRow } from './store/topics'
+import type { IdeaBlock } from './pipeline/ideaBlock'
 
 const exists = (file: string) => fs.access(file).then(() => true, () => false)
 
@@ -28,7 +29,7 @@ export const topicSummary = (t: TopicRow): TopicSummary => ({
   inProgress: t.inProgress
 })
 
-export const ideaSummary = (i: IdeaFile): IdeaSummary => {
+export const ideaSummary = (i: IdeaFile, blocked?: IdeaBlock | null): IdeaSummary => {
   const brief = briefOf(i.data, i.body)
   return {
     slug: i.slug,
@@ -40,6 +41,7 @@ export const ideaSummary = (i: IdeaFile): IdeaSummary => {
     book: i.data.book,
     titleFixed: i.data.title_fixed === true,
     characters: brief.characters.length,
+    ...(blocked ? { blocked } : {}),
     ...(i.data.source_book ? { sourceBook: i.data.source_book } : {}),
     ...(i.data.series ? { series: i.data.series, seriesIndex: i.data.series_index ?? null } : {}),
     brief
@@ -62,11 +64,11 @@ export async function seriesSummaries(d: { series: SeriesStore; books: BookStore
   return all.map((s) => seriesSummary(s, seriesMembers(s.slug, refs, ideas)))
 }
 
-/** The owner's open stories (oldest first, the order they are picked) and the last `used` ones that books were made from (newest first). */
-export function ideaSummaries(ideas: IdeaFile[], used = 10): IdeaSummary[] {
-  const open = ideas.filter((i) => i.data.status === 'open' && i.data.source === 'user')
+/** The owner's open stories (oldest first, the order they are picked), the open generated ideas that cannot start (`blocks`, SCP-74) and the last `used` ones that books were made from (newest first). */
+export function ideaSummaries(ideas: IdeaFile[], used = 10, blocks: Map<string, IdeaBlock> = new Map()): IdeaSummary[] {
+  const open = ideas.filter((i) => i.data.status === 'open' && (i.data.source === 'user' || blocks.has(i.slug)))
   const done = ideas.filter((i) => i.data.status === 'used').sort((a, b) => b.createdMs - a.createdMs).slice(0, used)
-  return [...open, ...done].map(ideaSummary)
+  return [...open, ...done].map((i) => ideaSummary(i, blocks.get(i.slug)))
 }
 
 export const formatSummaries = (formats: FormatEntry[]): FormatSummary[] => formats.filter((f) => f.enabled).map((f) => ({ id: f.id, name: f.name, kinds: f.kinds }))
